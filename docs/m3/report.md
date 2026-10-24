@@ -114,7 +114,7 @@ The per-run score tables (O1, O1-R, O2, O3, wall time and tokens per arm, one pe
 
 ## 3. Deviations
 
-These are the departures from the plan as frozen. None changes the analysis script, and each is in `docs/plan-m3.md`.
+These are the departures from the plan as frozen. None changes the analysis script, and each is in `docs/history/plan-m3.md`.
 
 ### 3.1 The runner's cleanup, from block 40
 
@@ -195,7 +195,7 @@ The escaped-defect differences come from one task (T3) for arm 3 and from two (T
 
 ## 5. Observations already recorded
 
-These were recorded in `docs/plan-m3.md` as the runs were scored. They are reported here as observed and are not part of any rule.
+These were recorded in `docs/history/plan-m3.md` as the runs were scored. They are reported here as observed and are not part of any rule.
 
 ### 5.1 T3: range refusals
 

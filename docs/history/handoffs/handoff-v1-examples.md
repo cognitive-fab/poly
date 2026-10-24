@@ -5,12 +5,12 @@ You are the builder of poly's v1 examples: the concierge (the release example) a
 ## Start
 
 1. Create the worktree: `git worktree add ../poly-ex -b ex m4` from the main repository, and work only there.
-2. Read, in this order: `docs/plan-v1.md` (steps E1 to E3), `docs/proposals/example-inbox.md` (Part A and Part B, Q-I1 to Q-I5 ruled), `docs/proposals/v1-functional-spec.md` (the concierge, AC15 to AC30), `docs/decisions-v1.md` (S402, which E1 waits for), and the M8 to M11 decisions files for channels, credentials, memory and routing.
-3. Record every step, result and decision in `docs/decisions-ex.md`.
+2. Read, in this order: `docs/history/plan-v1.md` (steps E1 to E3), `docs/proposals/example-inbox.md` (Part A and Part B, Q-I1 to Q-I5 ruled), `docs/proposals/v1-functional-spec.md` (the concierge, AC15 to AC30), `docs/history/decisions-v1.md` (S402, which E1 waits for), and the M8 to M11 decisions files for channels, credentials, memory and routing.
+3. Record every step, result and decision in `docs/history/decisions-ex.md`.
 
 ## How to work
 
-- **Plan first.** Write `docs/plan-ex.md`: the machines, policies, adapters and fixtures of each example, its acceptance criteria, and its measured risks. Report it for the reviewer's ruling before you build.
+- **Plan first.** Write `docs/history/plan-ex.md`: the machines, policies, adapters and fixtures of each example, its acceptance criteria, and its measured risks. Report it for the reviewer's ruling before you build.
 - **Tests first.** Each acceptance criterion gets a test that fails before the code that meets it. Recorded traffic only: no test calls a live Gmail account, AWS or a model.
 - **The inbox assistant as ruled:** Gmail through the history API by polling, with M9's Google provider profile and the read and draft scopes only (no send scope); SES through SQS and S3; each inbox its own audience; drafts only; the digest on the local page.
 - **Adapters are host code** in this branch. If an example needs a change in the core (grammar, checker, runtime, std), stop and bring it with a proposal; never change the core yourself.

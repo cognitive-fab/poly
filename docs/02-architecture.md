@@ -125,7 +125,7 @@ Every row is checked, per program, by translation validation against 04-semantic
 - `openshell.policies.yaml`, one OpenShell sandbox policy per effect kind, written only when `poly.json` sets `isolation: "openshell"` (`lower.ts:268`);
 - per module, the channel (`../channels/`), credential (`../credentials/`), source (`../sources/`), flow (`../flow/`), route (`../routes/`) and budget (`../budgets/`) files, and per workflow `../workflows/<name>/polyflow.workflow.json`.
 
-Every artefact the runtime reads is compared with the source, either by translation validation or by a round-trip read-back (`packages/poly-ref/src/artefacts.ts`). `migrate.cjs` is named in the certified list and nothing produces it (S570, `docs/decisions-v1.md`).
+Every artefact the runtime reads is compared with the source, either by translation validation or by a round-trip read-back (`packages/poly-ref/src/artefacts.ts`). `migrate.cjs` is named in the certified list and nothing produces it (S570, `docs/history/decisions-v1.md`).
 
 Two constructs have no artefact of their own:
 
@@ -351,7 +351,7 @@ Each item below is named by the earlier design and is not built. Each is kept as
 - **Version gate (stage 7) and `replay --against` (stage 8).** `poly check` has no `--since` or `--against` option; polyvers and polynv are imported nowhere. A ledger replay exists as `poly journal replay`, which is not a pipeline stage (`packages/poly-check/src/replay.ts`).
 - **`poly grade` (polynv adequacy).** Listed in `NOT_BUILT`: "not scheduled: polynv adequacy (PF7.7)" (`packages/poly-check/src/commands.ts:605`). No grade is recorded in the certificate. `poly.json` accepts a `require.grade` key (`packages/poly-core/src/manifest.ts:115`) and nothing acts on it.
 - **`poly test`.** There is no such command in `COMMANDS`. Witnesses are exported with `poly witness`.
-- **Migration (`version N from M { migrate … }`, `migrate.cjs`).** The machine header parses `version N` and nothing lowers a migration; `CERTIFIED_ARTEFACTS` names `migrate.cjs` and nothing produces it (S570, `docs/decisions-v1.md`).
+- **Migration (`version N from M { migrate … }`, `migrate.cjs`).** The machine header parses `version N` and nothing lowers a migration; `CERTIFIED_ARTEFACTS` names `migrate.cjs` and nothing produces it (S570, `docs/history/decisions-v1.md`).
 - **The Polyx advisor in the runtime.** `PolyRuntime.advise` appends an `advice` event to a run (`packages/poly-runtime/src/runtime.ts:1842`) and the trace export counts such events, but no package calls it outside tests, and no advisor is consulted at work-order issue or at the gate.
 - **The `/poly:*` slash commands of the Claude Code plugin.** The plugin is built as a skill, an MCP server and a language server (section 10); it has no `/poly:new`, `/poly:check`, `/poly:explain` or `/poly:admit`.
 - **`poly explain`, `poly deploy`, `poly dispatch`.** Listed in `NOT_BUILT` (`commands.ts:603-608`), "not scheduled".

@@ -4,11 +4,11 @@
 
 ---
 
-Continue milestone M1 from where you stopped: step 7 is under way, with records, child families and bounded loops built. `docs/handoff-m1.md` and `CLAUDE.md` still govern everything. This prompt only adds the new rulings and the path to M1's close.
+Continue milestone M1 from where you stopped: step 7 is under way, with records, child families and bounded loops built. `docs/history/handoffs/handoff-m1.md` and `CLAUDE.md` still govern everything. This prompt only adds the new rulings and the path to M1's close.
 
 ## Rulings to apply first
 
-Read `docs/decisions-m1.md`, section "Rulings on S54 and S55, and when the model-decisions proposal enters".
+Read `docs/history/decisions-m1.md`, section "Rulings on S54 and S55, and when the model-decisions proposal enters".
 
 - **S54: accepted as you proposed.** Write the two copies of the `charging` entry (`chargeCard` and `chargeTimeout`) in `FRAUD_PASSED` and `AMEND`, with `totalCents` as `AMEND`'s payload. Add no construct. Record "entry effects" in `plan-m1.md` as a candidate to decide from the M3 data.
 - **S55: accepted, with a static rule.** Entry writes to one map on one path combine only when their keys are distinct constants after unrolling (literals, constructors, or the index of different loop copies). Two entry writes with the same constant key, a whole write together with an entry write, or an entry write whose key is a field or parameter sharing a path with another entry write to that map: all `PL2102`. Check what you built against that rule. If it accepts a non-constant key, fix it, with a regression test that fails first. Put the spec text in PS2.2 and PS2.4 in one commit that cites S55.

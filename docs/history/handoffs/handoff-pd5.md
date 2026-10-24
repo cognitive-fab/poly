@@ -1,6 +1,6 @@
 # Handoff: the toolchain freeze (S100) and the PD5 review
 
-Read `CLAUDE.md`, `docs/decisions-m3.md` (S100 at the end) and `docs/proposals/pd5-identity-lineage.md`.
+Read `CLAUDE.md`, `docs/history/decisions-m3.md` (S100 at the end) and `docs/proposals/pd5-identity-lineage.md`.
 
 M3 is waiting on JJ's steps (O1, pilots, budget, FROZEN). Do not run any of them. This handoff has two tasks that touch nothing the experiment runs.
 

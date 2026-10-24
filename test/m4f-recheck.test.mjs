@@ -1,7 +1,7 @@
 // M4f's re-check (PT18, S136): every conformance and example source is checked again under PL1207 and the vacuity
 // rule, and the result must equal this table. A source not listed has no vacuous property and no PL1207. Each
 // listed property restates terminality as a step property: no step is ever accepted from a terminal state
-// (PS3.2 row 1), so its antecedent is never true on an accepted step. The record in docs/plan-m4.md explains them.
+// (PS3.2 row 1), so its antecedent is never true on an accepted step. The record in docs/history/plan-m4.md explains them.
 //
 // The other half, M3's references at the commit FROZEN records, waits until FROZEN exists, and says so.
 import { test } from 'node:test';

@@ -14,7 +14,7 @@ Clean build (every `packages/*/dist`, every `.tsbuildinfo` and every `.poly/test
 | 4 | Every example meets its first line, and the concierge and the inbox are `CLEAN` with their policies | **Met** (`test/examples-expected.test.mjs`, the serial group, in the suite; and the measure above, where both are `CLEAN`). |
 | 5 | Per-file times against the V10 gate and `docs/m11/gate2-file-times.json` | **Passes by the spot checks below.** |
 | 6 | The release notes | **Complete**: `docs/release-notes-v1.1.md` (the commands, the inbox defect and its fix, S526 and S527, `--refine`, the channel sends, the evidence and what it did not show, the limits). |
-| 7 | A record | This file, and the section of `docs/decisions-m7.md`. |
+| 7 | A record | This file, and the section of `docs/history/decisions-m7.md`. |
 | E3 | `test:e3`, as a compatibility check, **not a gate item** | **171 of 171 passed**, in 2,794 s (see below). |
 
 ## Per-file times

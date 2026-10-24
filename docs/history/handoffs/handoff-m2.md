@@ -9,7 +9,7 @@ M1 is closed: its gate passes, its code review is fixed, and every spec issue th
 ## Read first, in this order
 
 1. `CLAUDE.md`: the standing rules. Add the new rule from `decisions-m1.md` ("Every artefact the runtime reads is checked") to its table, with the test that enforces it, in your first commit.
-2. `docs/decisions-m1.md`, the last two sections: the rulings at M1's close (S56 to S65) and after the review (S66, S67, the standing rule).
+2. `docs/history/decisions-m1.md`, the last two sections: the rulings at M1's close (S56 to S65) and after the review (S66, S67, the standing rule).
 3. `docs/proposals/pd-model-decisions.md` (v0.2, ruled), with its review and response in `docs/reviews/`. PD1 is in M2. PD2 to PD4 are not; do not build toward them.
 4. `docs/04-semantics.md`: PS6 (liveness, fairness, `A(*)`, the lasso check of PS6.4), PS13.2b and PS14.2 (fairness in configurations), PS1.6 and PS13.3 (addresses and spawning, with S57 and S60).
 5. `docs/03-technical-spec.md`:
@@ -17,10 +17,10 @@ M1 is closed: its gate passes, its code review is fixed, and every spec issue th
    - PT12.1 to PT12.4 (diagnostics, fixes with preconditions, verdicts, witness export);
    - PT14 (the command surface);
    - PT18, M2's row as amended.
-6. `docs/plan-m1.md` §12 or its closing summary: what M2 needs, including the PD1 toolchain list, which is your plan input for typed decisions.
+6. `docs/history/plan-m1.md` §12 or its closing summary: what M2 needs, including the PD1 toolchain list, which is your plan input for typed decisions.
 7. `docs/reviews/evidence/`: `delivery_check.py`, `outbox_check.py` and `outbox_sum_check.py` print the liveness results M2 must reproduce.
 
-Then write `docs/plan-m2.md` (packages touched, order of work, how each gate item is tested, and the spec issues you find, continuing at S68). Stop and show me the plan.
+Then write `docs/history/plan-m2.md` (packages touched, order of work, how each gate item is tested, and the spec issues you find, continuing at S68). Stop and show me the plan.
 
 ## M2 scope
 
@@ -63,7 +63,7 @@ Then write `docs/plan-m2.md` (packages touched, order of work, how each gate ite
 ## Done means
 
 - `npm test` passes the whole M2 gate in one command.
-- `docs/plan-m2.md` records what was built, every spec issue and its resolution, and the measured numbers for each gate item.
+- `docs/history/plan-m2.md` records what was built, every spec issue and its resolution, and the measured numbers for each gate item.
 - **Stop for the code review.** Tell me the commit range.
 - A short summary: what passed, what surprised you, and what the M3 experiment needs that M2 does not provide.
 
