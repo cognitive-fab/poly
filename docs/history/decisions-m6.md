@@ -70,7 +70,7 @@ The code review's 26 findings are fixed, each with a test that failed first (7ad
 **Ruled: closed, on the Claude Code half.** The closing gate is green on an idle machine, the 26 findings are fixed with tests that failed first, and the comparison file by file shows that the earlier rise came from the machine's load. The DeepSeek Harness half stays waiting (S170).
 
 - **The gate:** at 9561785, from a clean build: 1,464 tests (1,463 in the suite, 1 in `test/after/`), 1,459 passed, 0 failed, 1 skipped (S152's OpenShell enforcement, with no gateway configured), 4 waiting, in 16 min 5 s; the account check's child runs took 206 s each.
-- **Docs only after the gate.** `git diff --stat 9561785..HEAD`, taken before the merge, lists `docs/decisions-m6.md` and `docs/plan-m6.md` and nothing else, so the gate at 9561785 covers every change of code and test merged.
+- **Docs only after the gate.** `git diff --stat 9561785..HEAD`, taken before the merge, lists `docs/history/decisions-m6.md` and `docs/history/plan-m6.md` and nothing else, so the gate at 9561785 covers every change of code and test merged.
 - **The limits, as stated:**
   - Workflows run on polyflow, outside poly's gate, until they move to `poly-runtime` before v1, at the latest with M8 (S164, PT18).
   - The DeepSeek Harness half is waiting until the owner declares its plugin API stable (S170).

@@ -159,7 +159,7 @@ V1 to V9 are done. The merge into m4 and the v1 gate (V10) wait for the reviewer
 
 **Order from here, on v1:**
 1. Fast-forward m4 to v1 now (`--ff-only`), record it, fast-forward again. This is not the V10 gate; it gives the examples branch a stable base.
-2. Build, each with PS/PT text first and tests written from the text alone: S450, S451, S454, the core half of S455 (ruled in poly-ex's `docs/decisions-ex.md`, "plan-ex ruled"; copy them here), then F4, F3 and the work-order key.
+2. Build, each with PS/PT text first and tests written from the text alone: S450, S451, S454, the core half of S455 (ruled in poly-ex's `docs/history/decisions-ex.md`, "plan-ex ruled"; copy them here), then F4, F3 and the work-order key.
 3. Report each commit that changes PS or PT text, for the examples session to rebase.
 4. V10 waits for E1 and E2.
 
@@ -169,7 +169,7 @@ As ordered, m4 was fast-forwarded with `--ff-only` from fec4337f to 16b2cde7 (V1
 
 ## S450 to S455, as ruled on plan-ex (owner's reviewer, 2026-10-08)
 
-Copied from `docs/decisions-ex.md` on `ex` ("plan-ex ruled"), as the reviewer ordered: the release session builds S450, S451, S454 and the core half of S455 on `v1`, then F4, F3 and the work-order key.
+Copied from `docs/history/decisions-ex.md` on `ex` ("plan-ex ruled"), as the reviewer ordered: the release session builds S450, S451, S454 and the core half of S455 on `v1`, then F4, F3 and the work-order key.
 
 
 **Where the core changes are built.** S450, S451, S454 and S455's core half change semantics or security, so they are built by the release session on `v1`, after S402 and in this order, with PS and PT text first and tests written from the text alone. `ex` rebases on each as it lands. Nothing on `ex` changes the core.

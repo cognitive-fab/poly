@@ -1,7 +1,7 @@
 // M7.2 (PT30.2): what poly gives polyx. A recording stand-in for polyx copies the configuration, the corpus and the
 // alphabet it is handed, answers with an empty report, and the tests read the copies. Written by the implementer after the
 // independent writer's mine tests proved to check only the shape of the candidates file; the mutation checks in
-// docs/decisions-m7.md show that each of these fails when the port changes.
+// docs/history/decisions-m7.md show that each of these fails when the port changes.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

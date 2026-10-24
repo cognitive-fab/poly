@@ -2,7 +2,7 @@
 //
 // Written by the implementer after the independent writers' tests proved vacuous for these properties (they asserted
 // that a key exists, or that the command fails). Each test states its precondition, so an empty export cannot pass,
-// and the mutation checks in docs/decisions-m7.md show that each one fails when the property is broken in the export.
+// and the mutation checks in docs/history/decisions-m7.md show that each one fails when the property is broken in the export.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

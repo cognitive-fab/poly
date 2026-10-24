@@ -1,6 +1,6 @@
 # poly · Identity and lineage: verified claims, chain of custody and revocation
 
-*Cognitive Fab · September 2026 · proposal v0.2, reviewed (`docs/reviews/review-pd5.md`), rulings S101 to S113 in `docs/decisions-pd5.md` · ids `PD5` · follows [`pd-model-decisions.md`](pd-model-decisions.md)*
+*Cognitive Fab · September 2026 · proposal v0.2, reviewed (`docs/reviews/review-pd5.md`), rulings S101 to S113 in `docs/history/decisions-pd5.md` · ids `PD5` · follows [`pd-model-decisions.md`](pd-model-decisions.md)*
 
 ## 0. Scope and status
 

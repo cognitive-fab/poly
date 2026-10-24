@@ -1,6 +1,6 @@
 # Decisions: M5
 
-*Cognitive Fab · October 2026 · rulings on the M5 plan (`docs/plan-m5.md` on `m4`, 4569a06)*
+*Cognitive Fab · October 2026 · rulings on the M5 plan (`docs/history/plan-m5.md` on `m4`, 4569a06)*
 
 ## Rulings on the M5 plan (S144 to S157)
 

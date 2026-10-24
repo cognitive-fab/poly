@@ -4,12 +4,12 @@
 
 ---
 
-M0 is closed (see `docs/plan-m0.md`). Your job in this session is **milestone M1** of PT18: effects, composition and configurations. Nothing beyond it.
+M0 is closed (see `docs/history/plan-m0.md`). Your job in this session is **milestone M1** of PT18: effects, composition and configurations. Nothing beyond it.
 
 ## Read first, in this order
 
 1. `CLAUDE.md`: the standing rules. They have not changed.
-2. `docs/decisions-m1.md`: the six rulings made before M1. They settle S7, the liveness question and the manifest.
+2. `docs/history/decisions-m1.md`: the six rulings made before M1. They settle S7, the liveness question and the manifest.
 3. `docs/04-semantics.md`, especially:
    - PS9.2 (translation validation compares the effect sequence);
    - PS13 and PS14 (configurations, message identities, oldest-copy delivery, the delivery guarantee);
@@ -21,11 +21,11 @@ M0 is closed (see `docs/plan-m0.md`). Your job in this session is **milestone M1
    - PT9.8 (the `Delivery` machine) and PT9.9;
    - PT12.2 (the `PL5xxx` codes);
    - PT18 (M1's gate, as amended).
-5. `docs/plan-m0.md` §3.4 and §12: how the explorer was designed for configurations, and what M0 left for M1.
+5. `docs/history/plan-m0.md` §3.4 and §12: how the explorer was designed for configurations, and what M0 left for M1.
 6. `docs/reviews/evidence/config_check.py` and `delivery_check.py`: their outputs are acceptance tests.
 7. `polygraph/polyrun/src/kernel.mjs`, `check-effects.mjs` and `check-product.mjs`: how the runtime and its checks consume a step's classification and effects.
 
-Then add an M1 plan to a new `docs/plan-m1.md`: packages touched, the order of work, and how each gate item is tested. Stop and show me the plan.
+Then add an M1 plan to a new `docs/history/plan-m1.md`: packages touched, the order of work, and how each gate item is tested. Stop and show me the plan.
 
 ## The engine change comes first (decision M1-1)
 
@@ -88,7 +88,7 @@ Everything in the M0 handoff still holds, in particular:
 - **Stack:** the same.
 - **Import boundary:** poly-ref imports nothing from `poly-lang` or `poly-lower`. The configuration explorer is written from 04-semantics.
 - **Engines are dependencies.** The sam-pattern change above is the only one approved. Any other engine change: stop and tell me.
-- **Spec issues.** Continue the series at S23 in `docs/plan-m1.md`. Ask before changing a spec file.
+- **Spec issues.** Continue the series at S23 in `docs/history/plan-m1.md`. Ask before changing a spec file.
 - **Disagreements.** If poly-ref disagrees with an evidence script, investigate until one side is shown wrong, then tell me which side and why before changing either.
 - **Regression tests.** Every defect found gets a regression test that fails first, as in the M0 review.
 - **Commits.** One per coherent step, house style, as `kizo-core`. Do not push.
@@ -96,7 +96,7 @@ Everything in the M0 handoff still holds, in particular:
 ## Done means
 
 - The M1 gate passes in one command: `npm test` at the root.
-- `docs/plan-m1.md` records:
+- `docs/history/plan-m1.md` records:
   - what was built;
   - every spec issue and its resolution;
   - the measured numbers (states, transitions, times) for each gate item.
