@@ -13,14 +13,14 @@ PT18 places M4 after the M3 experiment, and PT13's rules decide what follows it.
 
 1. M4 and M5 are built in a separate git worktree, `C:\Users\jjdub\code\poly-m4`, on branch `m4`, created from `main` at the current commit. Claude Code works there for M4 and M5. The experiment's tree, `C:\Users\jjdub\code\poly` on `main`, is used only for M3.
 2. `m4` is merged into `main` only after M3's runs are finished and their results are recorded. Until then, `main` takes only M3 work and documentation.
-3. Changes to the spec made during M4 are made on `m4`. Rulings stay in `docs/decisions-m4.md` on `main` as well, so both trees read the same rulings. A ruling written on `main` is brought into `m4` by merging `main` into `m4`, never the reverse.
+3. Changes to the spec made during M4 are made on `m4`. Rulings stay in `docs/history/decisions-m4.md` on `main` as well, so both trees read the same rulings. A ruling written on `main` is brought into `m4` by merging `main` into `m4`, never the reverse.
 4. Engines are vendored and never forked, on `m4` as everywhere. An engine change M4 needs goes on the owner's list and is re-vendored on `m4` only.
 5. `freeze.mjs --check`, run in the experiment's tree, must keep reporting no change throughout. A change it reports is a defect of this ruling.
 6. One milestone at a time: M4 is planned, built, reviewed and closed before M5 is planned.
 
 Spec issues found during M4 continue at **S118**.
 
-## Rulings on `docs/plan-m4.md` (S118 to S136)
+## Rulings on `docs/history/plan-m4.md` (S118 to S136)
 
 The plan is accepted with the rulings below. Its reading of the engines is the basis of these rulings: K4 not met after an archive, three worker transitions outside `OutboxIntent`, the effect result dropped, the ledger writable inside the step's transaction, the polyflow ledger's fixed kinds.
 
@@ -123,7 +123,7 @@ The build is accepted as reported: M4a to M4f pass, with three tests waiting on 
 
 Accepted as built: `PL1208` renamed `RESERVED_NAME`, reserving `runtime<m>` as well as `runtime`; the `module intents` renames with every evidence number unchanged; `PL6402` to `PL6404`; a certificate made before S142 refused at load.
 
-`m4` still never goes into `main` before M3's runs are recorded. M5 is planned next, on `m4`, from `docs/handoff-m5.md`.
+`m4` still never goes into `main` before M3's runs are recorded. M5 is planned next, on `m4`, from `docs/history/handoffs/handoff-m5.md`.
 
 **PT18's M5 row is amended** to carry what M4 and PD5 placed there: PD5 (S112), session replay in `sseq` order (S118), PD3-A2 (S131), bound capabilities (S134), starting an instance from a configuration's initial values (S141), hashing the installed dependencies of handlers (S142), and the opt-in OpenShell sandbox (PT6.5).
 

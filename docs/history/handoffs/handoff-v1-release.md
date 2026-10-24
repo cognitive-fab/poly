@@ -5,8 +5,8 @@ You are the builder of poly's v1 release. The owner's reviewer (a Cowork session
 ## Start
 
 1. Create the worktree: `git worktree add ../poly-v1 -b v1 m4` from the main repository, and work only there.
-2. Read, in this order: `docs/plan-v1.md` (your plan, steps V1 to V10), `docs/decisions-v1.md` (S400, S401, S402 and the gate list), `docs/proposals/experiment-strict-rerun.md` (S400 and the SR experiment), `docs/04-semantics.md` and `docs/03-technical-spec.md` (the PS and PT you will amend), `docs/release-notes.md`.
-3. Record every step, result and decision in `docs/decisions-v1.md`.
+2. Read, in this order: `docs/history/plan-v1.md` (your plan, steps V1 to V10), `docs/history/decisions-v1.md` (S400, S401, S402 and the gate list), `docs/proposals/experiment-strict-rerun.md` (S400 and the SR experiment), `docs/04-semantics.md` and `docs/03-technical-spec.md` (the PS and PT you will amend), `docs/release-notes.md`.
+3. Record every step, result and decision in `docs/history/decisions-v1.md`.
 
 ## How to work
 

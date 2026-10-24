@@ -1,6 +1,6 @@
 # M9 planning brief
 
-M8 is closed (c539838 on m4, not pushed). This brief starts M9. The first deliverable is `docs/plan-m9.md`, for the owner's ruling. No code is written before the plan is ruled.
+M8 is closed (c539838 on m4, not pushed). This brief starts M9. The first deliverable is `docs/history/plan-m9.md`, for the owner's ruling. No code is written before the plan is ruled.
 
 ## 1. Scope
 
@@ -32,7 +32,7 @@ M9 is **Credentials**, as `docs/proposals/v1-technical-spec.md` sets it: PD6 rul
 
 ## 5. How M9 runs
 
-As M8 did: the plan with its S-issues (from S194), each ruled before its code; PS text before code; tests that fail first; the 147 measured files compared at every step; a review with every finding fixed or answered; a closing gate from a clean build on a quiet machine, compared file by file with M8b's. Rulings are recorded in `docs/decisions-m9.md`. Commits on m4 as `kizo-core`, never pushed.
+As M8 did: the plan with its S-issues (from S194), each ruled before its code; PS text before code; tests that fail first; the 147 measured files compared at every step; a review with every finding fixed or answered; a closing gate from a clean build on a quiet machine, compared file by file with M8b's. Rulings are recorded in `docs/history/decisions-m9.md`. Commits on m4 as `kizo-core`, never pushed.
 
 ## Conclusion
 

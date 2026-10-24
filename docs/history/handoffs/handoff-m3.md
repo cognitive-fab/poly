@@ -9,12 +9,12 @@ M2 is closed. Milestone M3 is the experiment of PT13, and everything after M3 de
 ## Read first, in this order
 
 1. `CLAUDE.md`.
-2. `docs/decisions-m3.md`: five rulings (M3-1 to M3-5) that amend PT13.
+2. `docs/history/decisions-m3.md`: five rulings (M3-1 to M3-5) that amend PT13.
 3. `docs/03-technical-spec.md`, PT13 in full, and PT18's M3 row.
-4. `docs/plan-m2.md`, the closing summary: what M3 needs that M2 does not provide.
+4. `docs/history/plan-m2.md`, the closing summary: what M3 needs that M2 does not provide.
 5. The three field studies in `conformance/field-studies/` and the OMS order: the task families are modelled on them.
 
-Then write `docs/plan-m3.md` (the order of work, how each control is run, and the spec issues you find, continuing at S87). Stop and show me the plan.
+Then write `docs/history/plan-m3.md` (the order of work, how each control is run, and the spec issues you find, continuing at S87). Stop and show me the plan.
 
 ## Scope, in this order
 
@@ -51,7 +51,7 @@ Then write `docs/plan-m3.md` (the order of work, how each control is run, and th
 6. **The analysis script.**
    - It computes PT13's measures and the fixed tests (Wilcoxon signed-rank, Holm-corrected, the win, surface and stop rules) from run records.
    - Test it on synthetic records whose answer is known.
-7. **The freeze (M3-5).** Commit everything and record in `docs/plan-m3.md` the digest of each part:
+7. **The freeze (M3-5).** Commit everything and record in `docs/history/plan-m3.md` the digest of each part:
    - briefs, host interfaces, reference machines, O2, O3 and the O1 prompt;
    - controls, runner, prompts and analysis;
    - a proposed per-run token budget and wall-time limit, with the estimated total cost of 200 runs plus the evolution changes.
@@ -71,7 +71,7 @@ Then write `docs/plan-m3.md` (the order of work, how each control is run, and th
 - The ten tasks (or fewer, if controls removed some, each with its reason) are frozen with their digests.
 - The O1 prompt is ready for me to run.
 - The runner and the analysis pass their dry-run and synthetic tests.
-- `docs/plan-m3.md` has the proposed budget and total cost.
+- `docs/history/plan-m3.md` has the proposed budget and total cost.
 - You have stopped for my approval.
 
 ## Conclusion

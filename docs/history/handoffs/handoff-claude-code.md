@@ -19,7 +19,7 @@ You are building **poly**, a programming language and runtime for the stateful c
 5. `docs/research/primitive-inventory.md`: the exact SAM v2 strict-profile and polygraph formats you will lower to.
 6. `docs/reviews/evidence/`: five Python scripts whose outputs are acceptance tests.
 
-Then write a short plan in `docs/plan-m0.md` before writing code: packages, files, the order of work, and how each part of the gate will be tested. Stop and show me the plan.
+Then write a short plan in `docs/history/plan-m0.md` before writing code: packages, files, the order of work, and how each part of the gate will be tested. Stop and show me the plan.
 
 ## M0 scope (PT18)
 
@@ -67,13 +67,13 @@ Then write a short plan in `docs/plan-m0.md` before writing code: packages, file
 - **Stack.** TypeScript on Node 22 or later, ESM, and npm workspaces under `packages/`. Tests use `node --test` or vitest; choose one and keep it.
 - **Engines are dependencies.** Use `@cognitive-fab/polygraph` and `@cognitive-fab/sam-pattern` from npm, or `npm link` to the local sources listed in `CLAUDE.md`. Never copy engine code into this repository. If an engine needs a change, stop and tell me what and why.
 - **Import boundary.** poly-ref must not import from `poly-lang` or `poly-lower`. Add the check to CI at the start, not at the end.
-- **Mismatches.** When the spec is ambiguous or wrong, do not guess silently. Write the question and your proposed resolution in `docs/plan-m0.md` under "Spec issues", and ask me before changing a spec file.
+- **Mismatches.** When the spec is ambiguous or wrong, do not guess silently. Write the question and your proposed resolution in `docs/history/plan-m0.md` under "Spec issues", and ask me before changing a spec file.
 - **Commits.** One per coherent step, in the house style, committed as `kizo-core`. Do not push.
 
 ## Done means
 
 - The M0 gate passes, in one command: `npm test` at the root.
-- `docs/plan-m0.md` records what was built, every spec issue found and how it was resolved, and the measured numbers (states, times) for each gate item.
+- `docs/history/plan-m0.md` records what was built, every spec issue found and how it was resolved, and the measured numbers (states, times) for each gate item.
 - A short summary for me: what passed, what surprised you, and what M1 will need that M0 does not yet provide.
 
 ## Conclusion

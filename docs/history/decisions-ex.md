@@ -5,7 +5,7 @@ Steps, results and rulings of the examples branch `ex` (E1 the concierge, E2 the
 ## Set-up (2026-10-08)
 
 - **Worktree.** `poly-ex` on branch `ex`, cut from m4 at fec4337f with `git worktree add ../poly-ex -b ex m4` from the main repository. The handoff (`handoff-v1-examples.md`) is on m4 only, not on main. Branch `v1` has no commit beyond m4 yet, so there is nothing to rebase on.
-- **Plan.** `docs/plan-ex.md`, written before any code, reported for the reviewer's ruling. It brings S450 (the thread's principal), S451 to S454 (four core changes the inbox needs), S455 (a Gmail draft token can send) and Q-EX1 to Q-EX5. No example code is written until it is ruled, apart from E2.0, which depends on none of them.
+- **Plan.** `docs/history/plan-ex.md`, written before any code, reported for the reviewer's ruling. It brings S450 (the thread's principal), S451 to S454 (four core changes the inbox needs), S455 (a Gmail draft token can send) and Q-EX1 to Q-EX5. No example code is written until it is ruled, apart from E2.0, which depends on none of them.
 
 ## plan-ex ruled (owner's reviewer, 2026-10-08)
 

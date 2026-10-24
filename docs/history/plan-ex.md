@@ -24,7 +24,7 @@ Reading the specs against the code found that neither example can be built as sp
 - **Suites.** One suite at a time on the machine: before a full suite I check that no `node --test` runs from `poly-v1`. Targeted tests while building; the full suite with `scripts/suite-summary.mjs` before each commit; the log cited by path.
 - **Rebase.** After every commit the release session reports that changes PS or PT text, `ex` rebases on `v1`, and the example tests run again.
 - **Spec issues.** The examples take spec issue ids from S450 to S499, after the release's S400 range. They add no diagnostic code: a code is the core's.
-- **Records.** `docs/decisions-ex.md`, one entry per step, with polywatch findings marked real or false and why.
+- **Records.** `docs/history/decisions-ex.md`, one entry per step, with polywatch findings marked real or false and why.
 
 ## 3. E1: the concierge
 

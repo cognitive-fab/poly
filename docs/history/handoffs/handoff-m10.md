@@ -1,6 +1,6 @@
 # M10 planning brief: Memory
 
-M10 is planned while M9 is built, and built in parallel with M11 once M9 closes (`decisions-m9.md`, "how M9 to M11 run"). The first deliverable is `docs/plan-m10.md`, for the owner's ruling. No code before the plan is ruled.
+M10 is planned while M9 is built, and built in parallel with M11 once M9 closes (`decisions-m9.md`, "how M9 to M11 run"). The first deliverable is `docs/history/plan-m10.md`, for the owner's ruling. No code before the plan is ruled.
 
 ## 1. Scope
 
@@ -21,7 +21,7 @@ Spec issues S300 to S349. New codes from PL6833 to PL6839, beside the ones PT27.
 
 ## 4. How it runs
 
-As `decisions-m9.md` sets: a ruled plan runs to its end, stopping only for semantics, security, verdict or engine changes. Rulings in `docs/decisions-m10.md`. Commits as `kizo-core`, never pushed.
+As `decisions-m9.md` sets: a ruled plan runs to its end, stopping only for semantics, security, verdict or engine changes. Rulings in `docs/history/decisions-m10.md`. Commits as `kizo-core`, never pushed.
 
 ## Conclusion
 

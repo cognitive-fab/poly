@@ -16,7 +16,7 @@ M0 to M2 are closed. M3 is prepared and frozen; its runs happen in the other tre
 ## Read first, in this order
 
 1. `CLAUDE.md`: the standing rules.
-2. `docs/decisions-m4.md` (M4-0), then `docs/decisions-m3.md` from S100 on, and `docs/decisions-pd5.md` (S101 and S113 are part of M4).
+2. `docs/history/decisions-m4.md` (M4-0), then `docs/history/decisions-m3.md` from S100 on, and `docs/history/decisions-pd5.md` (S101 and S113 are part of M4).
 3. `docs/proposals/pd-model-decisions.md`: PD2 (decision provenance, the `decision` event, K10) and PD3 (model independence, calibration maps). Both are in M4. PD4 is M5; do not build toward it.
 4. `docs/04-semantics.md`: PS3.2 (with the reserved reasons), PS9 and PS9.1a, PS10 (kernel assumptions K1 to K9; K10 enters with PD2), PS14 (delivery).
 5. `docs/03-technical-spec.md`:
@@ -25,9 +25,9 @@ M0 to M2 are closed. M3 is prepared and frozen; its runs happen in the other tre
    - PT14 and PT15 (command surface, host runtime API, certificate verification at load);
    - PT16 (the ledger: chain per run, signed heads, anchors, replay);
    - PT18, M4's row.
-6. `docs/plan-m2.md` and `docs/plan-m3.md`, their closing sections: what was left for M4.
+6. `docs/history/plan-m2.md` and `docs/history/plan-m3.md`, their closing sections: what was left for M4.
 
-Then write `docs/plan-m4.md`:
+Then write `docs/history/plan-m4.md`:
 
 - packages touched, and any new package (`poly-runtime`);
 - the order of work;

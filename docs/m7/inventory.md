@@ -1,6 +1,6 @@
 # M7.0 · Inventory
 
-Status: step M7.0 of `docs/plan-m7.md`. Read at 02c33db1 (main v1.0.1 plus the plan). Nothing is built. The reviewer rules on section 8 before M7.1 starts.
+Status: step M7.0 of `docs/history/plan-m7.md`. Read at 02c33db1 (main v1.0.1 plus the plan). Nothing is built. The reviewer rules on section 8 before M7.1 starts.
 
 Sources read: the poly code and specs in this worktree; `polyx` (`@cognitive-fab/polyx` 0.1.1) and its lens package `@cognitive-fab/polyx-lens` 0.3.0; `polyness` 0.0.1. No suite and no mining ran, and no real corpus or transcript was opened.
 

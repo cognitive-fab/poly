@@ -1,6 +1,6 @@
 # M11 planning brief: Routing and budgets
 
-M11 is planned while M9 is built, and built in parallel with M10 once M9 closes (`decisions-m9.md`, "how M9 to M11 run"). The first deliverable is `docs/plan-m11.md`, for the owner's ruling. No code before the plan is ruled.
+M11 is planned while M9 is built, and built in parallel with M10 once M9 closes (`decisions-m9.md`, "how M9 to M11 run"). The first deliverable is `docs/history/plan-m11.md`, for the owner's ruling. No code before the plan is ruled.
 
 ## 1. Scope
 
@@ -21,7 +21,7 @@ Spec issues S350 to S399. New codes from PL6843 to PL6849, beside PL6841 and PL6
 
 ## 4. How it runs
 
-As `decisions-m9.md` sets: a ruled plan runs to its end, stopping only for semantics, security, verdict or engine changes. Rulings in `docs/decisions-m11.md`. Commits as `kizo-core`, never pushed.
+As `decisions-m9.md` sets: a ruled plan runs to its end, stopping only for semantics, security, verdict or engine changes. Rulings in `docs/history/decisions-m11.md`. Commits as `kizo-core`, never pushed.
 
 ## Conclusion
 
