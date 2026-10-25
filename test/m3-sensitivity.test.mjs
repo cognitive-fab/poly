@@ -35,7 +35,7 @@ test('S115: every worked example is listed with the arms that receive it, and th
   assert.deepEqual(modelledTasks(), ['T1', 'T2', 'T3', 'T4', 'T6']);
   assert.deepEqual(MODELLED.filter((e) => e.arms.includes(2)).flatMap((e) => e.tasks), []);
   // plan-m3.md records the same list.
-  const plan = readFileSync(join(M3, '..', '..', 'docs', 'plan-m3.md'), 'utf8');
+  const plan = readFileSync(join(M3, '..', '..', 'docs', 'history', 'plan-m3.md'), 'utf8');
   for (const e of MODELLED) assert.ok(plan.includes(e.example), `plan-m3.md does not list ${e.example}`);
 });
 
