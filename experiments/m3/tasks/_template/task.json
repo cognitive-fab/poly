@@ -1,7 +1,0 @@
-{
-  "id": "<id>",
-  "family": "order-payment | workflow-status | leader-election",
-  "title": "<title>",
-  "multiMachine": false,
-  "digests": {}
-}
