@@ -35,6 +35,11 @@ function withCheckout(f) {
   const dir = join(mkdtempSync(join(tmpdir(), 'poly-eol-')), 'tree');
   execFileSync('git', ['-C', ROOT, '-c', 'core.autocrlf=true', 'worktree', 'add', '--detach', dir, 'HEAD'], { stdio: 'ignore' });
   try {
+    // experiments/ is the submodule cognitive-fab/poly-experiments: its files are checked out by the submodule's own
+    // clone, under the same core.autocrlf, and take their eol pin from the submodule's .gitattributes.
+    // --reference borrows this checkout's objects, so the clone fetches nothing the pinned commit already has here.
+    const objects = execFileSync('git', ['-C', join(ROOT, 'experiments'), 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
+    git(dir, 'submodule', 'update', '--init', '--reference', objects, 'experiments');
     symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'junction');
     return f(dir);
   } finally {
@@ -49,13 +54,13 @@ function withCheckout(f) {
 
 test('freeze after close, seeded control: without the eol pin, a Windows checkout changes the evidence parts', { timeout: 1_200_000 }, () => {
   withCheckout((dir) => {
-    const attrs = join(dir, '.gitattributes');
+    const attrs = join(dir, 'experiments', '.gitattributes');
     const pinned = readFileSync(attrs, 'utf8');
     assert.match(pinned, /^\* text=auto eol=lf$/m);
     writeFileSync(attrs, pinned.replace(/^\* text=auto eol=lf$/m, '* text=auto'));
     // Check the experiment out again under the unpinned attributes, which git reads from the working tree.
     rmSync(join(dir, 'experiments', 'm3'), { recursive: true, force: true });
-    git(dir, 'checkout', '-q', '--', 'experiments/m3');
+    git(join(dir, 'experiments'), 'checkout', '-q', '--', 'm3');
     const changed = changedEvidence(dir);
     assert.ok(changed.length > 0, 'the unpinned checkout must change an evidence part');
   });
