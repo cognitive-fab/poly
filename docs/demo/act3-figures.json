@@ -6,7 +6,7 @@
       "text": "25 episodes",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "it has 25 episodes and 126 steps"
         }
       ],
@@ -17,7 +17,7 @@
       "text": "one draft instance",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "one consequential effect instance, the draft"
         }
       ],
@@ -28,7 +28,7 @@
       "text": "proposes nothing",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "with `--all` it returns no candidate"
         }
       ],
@@ -39,7 +39,7 @@
       "text": "twelve times",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "copied twelve times under fresh episode tokens"
         },
         {
@@ -54,7 +54,7 @@
       "text": "37 episodes",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "(37 episodes, labelled `synthetic` in the candidates and the certificate)"
         }
       ],
@@ -65,7 +65,7 @@
       "text": "13 of 13 runs",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "(mined, 13 of 13 runs)"
         },
         {
@@ -80,7 +80,7 @@
       "text": "reaches 2",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "reaches 2, above 1 on this path"
         }
       ],
@@ -91,7 +91,7 @@
       "text": "ten steps",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "The witness, ten steps on one Todo"
         }
       ],
@@ -102,7 +102,7 @@
       "text": "IT4.4",
       "sources": [
         {
-          "file": "docs/decisions-m7.md",
+          "file": "docs/history/decisions-m7.md",
           "quote": "itself (IT4.4)"
         }
       ],

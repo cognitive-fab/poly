@@ -24,7 +24,7 @@ Reading the code and records for the spec found four things that shape the plan:
 - **One heavy job at a time.** A full suite, the concierge check (91 to 176 s, up to 2.3 GB), the inbox check (up to 8 GB) and anything over 4 GB run alone. Before each, I check that no `node --test` runs from another worktree. The concierge and inbox end-to-end tests are in the serial group and run one file at a time.
 - **Style.** No em dashes, none of the banned words, short declarative sentences, no statement of how long work took. Documents end with a conclusion.
 - **Commits.** One change, one commit, with a message that says why, as `kizo-core`. Nothing is pushed.
-- **Records.** `docs/decisions-demo.md`, one entry per step, with the figures measured and the label of each (synthetic, recorded, live).
+- **Records.** `docs/history/decisions-demo.md`, one entry per step, with the figures measured and the label of each (synthetic, recorded, live).
 
 ## 3. Steps, in order
 
@@ -43,7 +43,7 @@ Reading the code and records for the spec found four things that shape the plan:
 | **10 Baseline production** | The owner's terminal. (a) The pre-registration commit: `demo/baseline/PROMPT.md` and its hash, the pilot count (Q8), the model and agent version. (b) The pilots, if any, in both arms, saved. (c) The kept TypeScript run and the kept poly run, each committed verbatim before anything is run against it. (d) The driver's report on each, with controls. I draft the launch scripts and the commit procedure; I do not run the agents. | DAC8; the outcomes O1 to O4 and P1 to P4 recorded as they fall | **yes** |
 | **11 Act 3 assets** | `demo/act3/`: the inbox figures with the record each comes from; the pre-fix draft; the recorded `PL4001` witness of the count rule. If the witness is not in a committed record, regenerating it is the 22-minute `test/after/ex-inbox-loop.test.mjs`, which is heavy and waits for the owner's slot. | DAC12 | no (the loop test calls polyx on recorded and synthetic data, no model; confirmed from its record before it runs) |
 | **12 Rehearsal** | Dry runs on recorded providers (free), then one live rehearsal of Act 2 with a few volunteers or the owner alone, on the stand-in; timing of every live command, including the check of the agent-built draft, against the limits of the script (a command that exceeds its limit becomes a recorded segment, labelled). The presenter's runbook. | A rehearsal record; the script's times are measured, not assumed | **yes** |
-| **13 Gate and record** | The full suite (one heavy job), `test/after` one file at a time, `npm run test:e3` one file at a time (the harness changed by one line), `scripts/measure-verdicts.mjs` against the new baseline; `docs/decisions-demo.md`; the release note draft. | All of the DAC met or listed as not met with the reason; no verdict changes unlisted | no |
+| **13 Gate and record** | The full suite (one heavy job), `test/after` one file at a time, `npm run test:e3` one file at a time (the harness changed by one line), `scripts/measure-verdicts.mjs` against the new baseline; `docs/history/decisions-demo.md`; the release note draft. | All of the DAC met or listed as not met with the reason; no verdict changes unlisted | no |
 
 Steps 8 and 9 do not depend on the core and can run in parallel with 4 to 7 on different tests, never in parallel with a heavy job.
 

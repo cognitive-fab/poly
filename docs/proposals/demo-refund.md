@@ -2,7 +2,7 @@
 
 *Cognitive Fab · October 2026 · on branch `demo`, cut from main at v1.2.0 (4303fe33) · from `decisions-m7.md` (S525, S526, S527 and the inbox defect), `examples/concierge`, `examples/inbox`, PS2, PS13, PS14, PS10 (K4), PT6, PT9, PT19 and `plan-e3.md` (the method)*
 
-Status: a specification for the reviewer's ruling. Nothing is built, no test is written and nothing was run. The plan is `docs/plan-demo.md`. The text of sections 2 and 3 is written so that it can be copied into `04-semantics.md` (as PS23 and K17) and `03-technical-spec.md` (as PT33) when the reviewer rules; until then it lives here, and a number that is a proposal is marked so.
+Status: a specification for the reviewer's ruling. Nothing is built, no test is written and nothing was run. The plan is `docs/history/plan-demo.md`. The text of sections 2 and 3 is written so that it can be copied into `04-semantics.md` (as PS23 and K17) and `03-technical-spec.md` (as PT33) when the reviewer rules; until then it lives here, and a number that is a proposal is marked so.
 
 ## 0. What this covers and the ids it uses
 
@@ -545,15 +545,15 @@ DS3 says what is shown. This says what is committed, so that DAC12 can be tested
 
 | id | text | where it is cited | quote |
 |---|---|---|---|
-| R1 | 25 episodes | `docs/decisions-m7.md` | `it has 25 episodes and 126 steps` |
-| R2 | one draft instance | `docs/decisions-m7.md` | `one consequential effect instance, the draft` |
-| R3 | proposes nothing | `docs/decisions-m7.md` | ``with `--all` it returns no candidate`` |
-| R4 | twelve times | `docs/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `copied twelve times under fresh episode tokens`; `Array.from({ length: 12 }` |
-| R5 | 37 episodes | `docs/decisions-m7.md` | ``(37 episodes, labelled `synthetic` in the candidates and the certificate)`` |
-| R6 | 13 of 13 runs | `docs/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `(mined, 13 of 13 runs)`; `{ holds: 13, of: 13 }` |
-| R7 | reaches 2 | `docs/decisions-m7.md` | `reaches 2, above 1 on this path` |
-| R8 | ten steps | `docs/decisions-m7.md` | `The witness, ten steps on one Todo` |
-| R9 | IT4.4 | `docs/decisions-m7.md` | `itself (IT4.4)` |
+| R1 | 25 episodes | `docs/history/decisions-m7.md` | `it has 25 episodes and 126 steps` |
+| R2 | one draft instance | `docs/history/decisions-m7.md` | `one consequential effect instance, the draft` |
+| R3 | proposes nothing | `docs/history/decisions-m7.md` | ``with `--all` it returns no candidate`` |
+| R4 | twelve times | `docs/history/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `copied twelve times under fresh episode tokens`; `Array.from({ length: 12 }` |
+| R5 | 37 episodes | `docs/history/decisions-m7.md` | ``(37 episodes, labelled `synthetic` in the candidates and the certificate)`` |
+| R6 | 13 of 13 runs | `docs/history/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `(mined, 13 of 13 runs)`; `{ holds: 13, of: 13 }` |
+| R7 | reaches 2 | `docs/history/decisions-m7.md` | `reaches 2, above 1 on this path` |
+| R8 | ten steps | `docs/history/decisions-m7.md` | `The witness, ten steps on one Todo` |
+| R9 | IT4.4 | `docs/history/decisions-m7.md` | `itself (IT4.4)` |
 | R10 | attempts 1 | `examples/inbox/inbox.poly` | `retry { attempts 1, base 200ms, timeout 45s }` |
 | R11 | exhausted -> DraftUncertain() | `examples/inbox/inbox.poly` | `exhausted -> DraftUncertain()` |
 | R12 | draft-created-once | `test/after/ex-inbox-loop.test.mjs` | `invariant draft-created-once: made implies` |

@@ -19,17 +19,17 @@ The mining corpus was a synthetic amplification. The screen says so.
 
 The recorded inbox run, the mining, the promotions and the `PL4001` witness are not run on stage. `test/after/ex-inbox-loop.test.mjs` reproduces them, and the full suite runs it. The only live figures are R14 to R17, from the one command at 0:55, which takes about a second.
 
-- R1, R2, R3: `docs/decisions-m7.md`, the inbox leg of M7: the recorded run proposes nothing.
-- R4, R5: `docs/decisions-m7.md` and the copies in `test/after/ex-inbox-loop.test.mjs` (`Array.from({ length: 12 }`).
-- R6: `docs/decisions-m7.md` and the support asserted in `test/after/ex-inbox-loop.test.mjs` (`{ holds: 13, of: 13 }`).
-- R7, R8, R9: `docs/decisions-m7.md`, the inbox witness and the defect that it showed.
+- R1, R2, R3: `docs/history/decisions-m7.md`, the inbox leg of M7: the recorded run proposes nothing.
+- R4, R5: `docs/history/decisions-m7.md` and the copies in `test/after/ex-inbox-loop.test.mjs` (`Array.from({ length: 12 }`).
+- R6: `docs/history/decisions-m7.md` and the support asserted in `test/after/ex-inbox-loop.test.mjs` (`{ holds: 13, of: 13 }`).
+- R7, R8, R9: `docs/history/decisions-m7.md`, the inbox witness and the defect that it showed.
 - R10, R11: `examples/inbox/inbox.poly`, the fix in the shipped example.
 - R12, R13: `test/after/ex-inbox-loop.test.mjs`, the refinement that a person promotes.
 - R14 to R17: the live output of the check of `examples/retry/draft-unguarded.poly`.
 
 ## What Act 3 proves, and what it does not
 
-The loop exists and found a real defect, as `docs/decisions-m7.md` records. It does not prove that mining works on a recorded run: on the recorded run it proposed nothing. It does not prove that mining works on anything but this synthetic amplification.
+The loop exists and found a real defect, as `docs/history/decisions-m7.md` records. It does not prove that mining works on a recorded run: on the recorded run it proposed nothing. It does not prove that mining works on anything but this synthetic amplification.
 
 What a mined rule can still find is what a person did not think to state. The check now finds this class of defect with no corpus.
 

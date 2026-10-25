@@ -1,4 +1,4 @@
-// v1.3 Step 2 (docs/plan-demo.md): the read-only scan behind docs/demo/impact-s526.md. It reads every poly source, the
+// v1.3 Step 2 (docs/history/plan-demo.md): the read-only scan behind docs/demo/impact-s526.md. It reads every poly source, the
 // embedded TypeScript sources and the inline sources of the tests, and lists what PS23 and PT33 would change:
 //   - each effect of class irreversible, its retry bound (the written-out default 5, lower.ts DEFAULT_RETRY, when none),
 //     its completions and the guarantee it has today (PS23.4);
