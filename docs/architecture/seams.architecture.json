@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Where poly starts a process or opens a socket",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "Where poly starts a process or opens a socket",
+        "focus": [
+          "mine",
+          "new",
+          "io"
+        ],
+        "note": "Only poly-mine and poly-new start processes, and only poly-io opens sockets; the check path imports neither, and the scripts that enforce i…"
+      },
+      {
+        "id": "spawn-seam",
+        "label": "Process seam (packages)",
+        "focus": [
+          "mine",
+          "new"
+        ],
+        "note": "Only these two packages may start a child process"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "mine",
+      "type": "security",
+      "label": "poly-mine",
+      "pos": [
+        380,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "runs polyx and polyness",
+      "sources": [
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 15,
+          "end_line": 15
+        },
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 63,
+          "end_line": 69,
+          "label": "polyx run"
+        },
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 119,
+          "end_line": 132,
+          "label": "polyness run"
+        }
+      ]
+    },
+    {
+      "id": "new",
+      "type": "backend",
+      "label": "poly-new",
+      "pos": [
+        380,
+        398
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "drafts source with a model",
+      "sources": [
+        {
+          "path": "packages/poly-new/src/new.ts",
+          "line": 1,
+          "end_line": 4
+        },
+        {
+          "path": "packages/poly-new/src/providers.ts",
+          "line": 84,
+          "end_line": 86
+        }
+      ]
+    },
+    {
+      "id": "polyx",
+      "type": "external",
+      "label": "polyx",
+      "pos": [
+        700,
+        149
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "rule miner, pinned",
+      "sources": [
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 36,
+          "end_line": 69
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude Code (headless)",
+      "pos": [
+        1020,
+        98
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "drafts poly source",
+      "sources": [
+        {
+          "path": "packages/poly-new/src/providers.ts",
+          "line": 84,
+          "end_line": 86
+        }
+      ]
+    },
+    {
+      "id": "io",
+      "type": "security",
+      "label": "poly-io",
+      "pos": [
+        60,
+        98
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "the only network code",
+      "sources": [
+        {
+          "path": "packages/poly-io/src/net.ts",
+          "line": 1,
+          "end_line": 8
+        },
+        {
+          "path": "packages/poly-io/src/vault.ts"
+        },
+        {
+          "path": "packages/poly-io/src/ingress.ts"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "Channel providers",
+      "pos": [
+        700,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "mail, chat, SMS",
+      "sources": [
+        {
+          "path": "packages/poly-io/src/adapters/email.ts"
+        },
+        {
+          "path": "packages/poly-io/src/adapters/slack.ts"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Process seam (packages): Only these two packages may start a child process",
+      "wraps": [
+        "mine",
+        "new"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "mine--polyx",
+      "from": "mine",
+      "to": "polyx",
+      "label": "mine rules · spawn",
+      "labelAt": [
+        455,
+        248
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "new--claude",
+      "from": "new",
+      "to": "claude",
+      "label": "draft in print mode · spawn",
+      "labelAt": [
+        455,
+        275
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "io--providers",
+      "from": "io",
+      "to": "providers",
+      "label": "send and receive messages · HTTPS",
+      "labelAt": [
+        295,
+        60
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Only poly-mine and poly-new start processes, and only poly-io opens sockets",
+        "the check path imports neither, and the scripts that enforce it run in CI"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The runtime's own internals, which perform no network or process work",
+        "Connected but out of scope: MCP server, poly CLI, Feedback commands, polyness, Check pipeline, Handler capabilities"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "In packages/, only poly-new and poly-mine may start a process: every child process of the product is then one of three named tools, started with a fixed argument vector, a fresh environment, a pin check, a timeout and an output cap. The demo is outside packages/ and starts a process in three places only (the replay driver, its scripts and the stand-in's key tool), which rule 7 names",
+        "No check package imports poly-io: network code lives in poly-io alone, so nothing on a check path can open a socket",
+        "No language-model call decides a verdict or a gate decision: a verdict must be a function of the program and the semantics. The one way to a model is poly new, which the CLI and the MCP server load by name; its drafts go back through the pipeline and are never admitted by it."
+      ]
+    }
+  ]
+}

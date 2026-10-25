@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What can refuse an effect before the policy",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "What can refuse an effect before the policy",
+        "focus": [
+          "worker",
+          "memory"
+        ],
+        "note": "The worker applies origin, memory, budget, grant and mandate checks first, each from the runtime, and each final whatever a policy says."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "poly-runtime",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "load and dispatch",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 178,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 2081,
+          "end_line": 2082,
+          "label": "load"
+        },
+        {
+          "path": "packages/poly-runtime/src/load.ts",
+          "line": 105,
+          "end_line": 106,
+          "label": "verifyBuild"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Effect worker",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "outbox to gate to handler",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 199,
+          "end_line": 201
+        },
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 459,
+          "end_line": 485,
+          "label": "order of checks"
+        },
+        {
+          "path": "packages/poly-runtime/model/outbox-intent.poly",
+          "label": "OutboxIntent model"
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "backend",
+      "label": "Memory and flow",
+      "pos": [
+        380,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "taint and freshness",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/memory.ts",
+          "line": 1,
+          "end_line": 8
+        }
+      ]
+    },
+    {
+      "id": "decisions",
+      "type": "backend",
+      "label": "Decisions and routing",
+      "pos": [
+        380,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "providers and budgets",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/provider.ts",
+          "line": 54,
+          "end_line": 95
+        },
+        {
+          "path": "packages/poly-runtime/src/routing.ts",
+          "line": 1,
+          "end_line": 6
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "runtime--worker",
+      "from": "runtime",
+      "to": "worker",
+      "label": "host the effect worker",
+      "labelAt": [
+        135,
+        142
+      ]
+    },
+    {
+      "id": "runtime--memory",
+      "from": "runtime",
+      "to": "memory",
+      "label": "memory check callback",
+      "labelAt": [
+        202,
+        124
+      ]
+    },
+    {
+      "id": "runtime--decisions",
+      "from": "runtime",
+      "to": "decisions",
+      "label": "decision callback",
+      "labelAt": [
+        193,
+        250
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The worker applies origin, memory, budget, grant and mandate checks first, each from the runtime, and each final whatever a policy says"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The engine itself and the ledger",
+        "Connected but out of scope: Workflow server, Certified build, Certificate format, Signed records, sam-pattern 2.3.0, polygraph 8.4.0"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "An effect meets five refusals before the policy engine decides: origin, memory, budget, grant and mandate each refuse or escalate finally whatever a policy says; only then does the Polyaxion gate propose"
+      ]
+    }
+  ]
+}

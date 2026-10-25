@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How an agent reaches poly",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "cli",
+          "mcp",
+          "lsp"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "adapters",
+      "type": "database",
+      "label": "Host adapters",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "JSON and markdown only",
+      "sources": [
+        {
+          "path": "adapters/claude-code/install.json"
+        },
+        {
+          "path": "adapters/dsh/install.json"
+        },
+        {
+          "path": "scripts/check-boundaries.mjs",
+          "line": 65,
+          "end_line": 70,
+          "label": "adapter launch rule"
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "backend",
+      "label": "MCP server",
+      "pos": [
+        380,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "poly mcp, over stdio",
+      "sources": [
+        {
+          "path": "packages/poly-agent/src/mcp.ts",
+          "line": 57,
+          "end_line": 66
+        }
+      ]
+    },
+    {
+      "id": "lsp",
+      "type": "backend",
+      "label": "Language server",
+      "pos": [
+        700,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "poly lsp, over stdio",
+      "sources": [
+        {
+          "path": "packages/poly-agent/src/lsp.ts",
+          "line": 116,
+          "end_line": 152
+        }
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "poly CLI",
+      "pos": [
+        1020,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "one command registry",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/cli.ts",
+          "line": 1,
+          "end_line": 30
+        },
+        {
+          "path": "packages/poly-check/src/commands.ts",
+          "line": 99,
+          "end_line": 100,
+          "label": "check command"
+        },
+        {
+          "path": "packages/poly-check/src/commands.ts",
+          "line": 603,
+          "end_line": 608,
+          "label": "commands not built"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Check path: No model decides a verdict; never imports poly-io",
+      "wraps": [
+        "cli",
+        "mcp",
+        "lsp"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "mcp--cli",
+      "from": "mcp",
+      "to": "cli",
+      "label": "same command registry",
+      "labelAt": [
+        775,
+        340
+      ],
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          455,
+          340
+        ],
+        [
+          1095,
+          340
+        ]
+      ]
+    },
+    {
+      "id": "lsp--cli",
+      "from": "lsp",
+      "to": "cli",
+      "label": "same command registry",
+      "labelAt": [
+        522,
+        310
+      ]
+    },
+    {
+      "id": "adapters--mcp",
+      "from": "adapters",
+      "to": "mcp",
+      "label": "host launches poly mcp · spawn",
+      "labelAt": [
+        135,
+        172
+      ]
+    },
+    {
+      "id": "adapters--lsp",
+      "from": "adapters",
+      "to": "lsp",
+      "label": "host launches poly lsp · spawn",
+      "labelAt": [
+        135,
+        206
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Through one command registry served three ways: the command line, an MCP server and a language server, plus a workflow server for work orders",
+        "A host adapter is a JSON file that launches one of them"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The stages of the check and the internals of the runtime",
+        "Connected but out of scope: poly-new, Workflow server, Check pipeline, Admission, Feedback commands, Signed records"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "The core is host-neutral and a host adapter is configuration only: no package names a host or imports a host SDK; an adapter is JSON and markdown that launches poly mcp, poly lsp or poly run --mcp, so a new host adds no code"
+      ]
+    }
+  ]
+}

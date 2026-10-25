@@ -1,0 +1,340 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How the parts fit together",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How the parts fit together",
+        "focus": [
+          "admit",
+          "build"
+        ],
+        "note": "Source is checked and lowered by the pipeline, admitted into a signed certificate, loaded only by the runtime, and every step it takes is c…"
+      },
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "pipeline",
+          "admit",
+          "cli"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "poly CLI",
+      "pos": [
+        60,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "one command registry",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/cli.ts",
+          "line": 1,
+          "end_line": 30
+        },
+        {
+          "path": "packages/poly-check/src/commands.ts",
+          "line": 99,
+          "end_line": 100,
+          "label": "check command"
+        },
+        {
+          "path": "packages/poly-check/src/commands.ts",
+          "line": 603,
+          "end_line": 608,
+          "label": "commands not built"
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        380,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    },
+    {
+      "id": "admit",
+      "type": "backend",
+      "label": "Admission",
+      "pos": [
+        380,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate issuer",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 255,
+          "end_line": 265,
+          "label": "refuses unrun checks"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "database",
+      "label": "Certified build",
+      "pos": [
+        380,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": ".poly/build and certificate",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 176,
+          "label": "artefactsOnDisk"
+        },
+        {
+          "path": "packages/poly-lower/src/layout.ts"
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "poly-runtime",
+      "pos": [
+        700,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "load and dispatch",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 178,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 2081,
+          "end_line": 2082,
+          "label": "load"
+        },
+        {
+          "path": "packages/poly-runtime/src/load.ts",
+          "line": 105,
+          "end_line": 106,
+          "label": "verifyBuild"
+        }
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Ledger",
+      "pos": [
+        1020,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "per-run chain, signed heads",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 149,
+          "end_line": 150
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger.ts",
+          "line": 12,
+          "end_line": 13
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Check path: No model decides a verdict; never imports poly-io",
+      "wraps": [
+        "pipeline",
+        "admit",
+        "cli"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "cli--pipeline",
+      "from": "cli",
+      "to": "pipeline",
+      "label": "check a file or project",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "cli--admit",
+      "from": "cli",
+      "to": "admit",
+      "label": "admit a clean build",
+      "labelAt": [
+        358,
+        126
+      ]
+    },
+    {
+      "id": "pipeline--build",
+      "from": "pipeline",
+      "to": "build",
+      "label": "write lowered artefacts · file",
+      "labelAt": [
+        590,
+        250
+      ],
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          590,
+          79
+        ],
+        [
+          590,
+          391
+        ]
+      ]
+    },
+    {
+      "id": "admit--pipeline",
+      "from": "admit",
+      "to": "pipeline",
+      "label": "needs every stage clean",
+      "labelAt": [
+        437,
+        142
+      ]
+    },
+    {
+      "id": "admit--build",
+      "from": "admit",
+      "to": "build",
+      "label": "read artefacts, write certificate",
+      "labelAt": [
+        437,
+        298
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "runtime--build",
+      "from": "runtime",
+      "to": "build",
+      "label": "read certified artefacts · file",
+      "labelAt": [
+        706,
+        436
+      ]
+    },
+    {
+      "id": "runtime--ledger",
+      "from": "runtime",
+      "to": "ledger",
+      "label": "open the ledger store · SQL",
+      "labelAt": [
+        935,
+        375
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Source is checked and lowered by the pipeline, admitted into a signed certificate, loaded only by the runtime, and every step it takes is chained in the ledger, which feeds the next check"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The language packages, the vendored engines, the network package and the tools poly starts",
+        "later questions cover them",
+        "Connected but out of scope: MCP server, Language server, Workflow server, poly-new, Feedback commands, Signed records"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "The semantics is the definition, and every check compares the lowering with it: 04-semantics defines what a program means; translation validation runs the lowered module and poly-ref on every reachable state and refuses any disagreement"
+      ]
+    }
+  ]
+}

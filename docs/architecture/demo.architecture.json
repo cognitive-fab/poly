@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How the demo uses poly",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    }
+  },
+  "components": [
+    {
+      "id": "demo",
+      "type": "backend",
+      "label": "Refund demo",
+      "pos": [
+        700,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "room, stand-in, replay",
+      "sources": [
+        {
+          "path": "demo/launch.mjs",
+          "line": 1,
+          "end_line": 12
+        },
+        {
+          "path": "demo/README.md"
+        },
+        {
+          "path": "demo/stand-in/stripe/server.mjs"
+        }
+      ]
+    },
+    {
+      "id": "admit",
+      "type": "backend",
+      "label": "Admission",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate issuer",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 255,
+          "end_line": 265,
+          "label": "refuses unrun checks"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "database",
+      "label": "Certified build",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": ".poly/build and certificate",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 176,
+          "label": "artefactsOnDisk"
+        },
+        {
+          "path": "packages/poly-lower/src/layout.ts"
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "poly-runtime",
+      "pos": [
+        380,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "load and dispatch",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 178,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 2081,
+          "end_line": 2082,
+          "label": "load"
+        },
+        {
+          "path": "packages/poly-runtime/src/load.ts",
+          "line": 105,
+          "end_line": 106,
+          "label": "verifyBuild"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "admit--build",
+      "from": "admit",
+      "to": "build",
+      "label": "read artefacts, write certificate",
+      "labelAt": [
+        135,
+        142
+      ]
+    },
+    {
+      "id": "runtime--build",
+      "from": "runtime",
+      "to": "build",
+      "label": "read certified artefacts · file",
+      "labelAt": [
+        295,
+        126
+      ]
+    },
+    {
+      "id": "demo--admit",
+      "from": "demo",
+      "to": "admit",
+      "label": "admit the demo copy",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          775,
+          16
+        ],
+        [
+          135,
+          16
+        ]
+      ],
+      "labelAt": [
+        455,
+        16
+      ]
+    },
+    {
+      "id": "demo--runtime",
+      "from": "demo",
+      "to": "runtime",
+      "label": "load and run the build",
+      "labelAt": [
+        615,
+        126
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "It admits a demo copy of the concierge through the ordinary admission, loads it on the ordinary runtime, and only supplies the room, the stand-in and the providers around it"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The checker, which has already decided before the demo starts",
+        "Connected but out of scope: Workflow server, poly CLI, Check pipeline, Certificate format, Signed records, Feedback commands"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "An irreversible effect that may be attempted twice is not admitted unless it names how its target is kept from running it twice: poly-ref reports PL4003 with a witness (a delivery in which the target may execute twice) unless the effect is keyed (an idempotency header and a window that holds the retry horizon) or idempotent by nature in the pinned standard library. The runtime sets the key on every write in a capability the handler cannot bypass. What poly does not verify are the assumptions K17 (the target honours the key) and K18 (an effect declared idempotent by nature is), which a certificate names when an effect declares them"
+      ]
+    }
+  ]
+}

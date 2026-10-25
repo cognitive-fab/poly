@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Why a retried refund runs once",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "Why a retried refund runs once",
+        "focus": [
+          "retrysafe",
+          "capabilities"
+        ],
+        "note": "The check refuses an irreversible effect with two or more attempts that names no guarantee, and the runtime puts the same key on every atte…"
+      },
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "ref",
+          "pipeline",
+          "admit"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    },
+    {
+      "id": "ref",
+      "type": "backend",
+      "label": "poly-ref",
+      "pos": [
+        60,
+        129
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "reference interpreter",
+      "sources": [
+        {
+          "path": "packages/poly-ref/src/tv.ts",
+          "line": 1,
+          "end_line": 8
+        },
+        {
+          "path": "packages/poly-ref/src/explore.ts",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "path": "packages/poly-ref/src/liveness.ts",
+          "line": 1,
+          "end_line": 6
+        }
+      ]
+    },
+    {
+      "id": "retrysafe",
+      "type": "backend",
+      "label": "Retry safety",
+      "pos": [
+        325,
+        288
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "PL4003 to PL4005, PL6304",
+      "sources": [
+        {
+          "path": "packages/poly-ref/src/retrysafe.ts",
+          "line": 1,
+          "end_line": 11
+        },
+        {
+          "path": "packages/poly-ref/src/check.ts",
+          "line": 289,
+          "end_line": 297,
+          "label": "called with the explored graph"
+        }
+      ]
+    },
+    {
+      "id": "stdpins",
+      "type": "database",
+      "label": "Standard library pins",
+      "pos": [
+        590,
+        288
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "std/PINS.json",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/std-pins.ts",
+          "line": 1,
+          "end_line": 22
+        },
+        {
+          "path": "std/PINS.json"
+        },
+        {
+          "path": "scripts/pin-std-digests.mjs"
+        }
+      ]
+    },
+    {
+      "id": "admit",
+      "type": "backend",
+      "label": "Admission",
+      "pos": [
+        325,
+        88
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate issuer",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 255,
+          "end_line": 265,
+          "label": "refuses unrun checks"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Effect worker",
+      "pos": [
+        855,
+        248
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "outbox to gate to handler",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 199,
+          "end_line": 201
+        },
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 459,
+          "end_line": 485,
+          "label": "order of checks"
+        },
+        {
+          "path": "packages/poly-runtime/model/outbox-intent.poly",
+          "label": "OutboxIntent model"
+        }
+      ]
+    },
+    {
+      "id": "capabilities",
+      "type": "backend",
+      "label": "Handler capabilities",
+      "pos": [
+        855,
+        328
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "bounded wrappers",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/capabilities.ts",
+          "line": 1,
+          "end_line": 5
+        },
+        {
+          "path": "packages/poly-runtime/src/capabilities.ts",
+          "line": 137,
+          "end_line": 157,
+          "label": "the key and the class none rule"
+        }
+      ]
+    },
+    {
+      "id": "handlers",
+      "type": "backend",
+      "label": "Host handlers",
+      "pos": [
+        1120,
+        288
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "application effect code",
+      "sources": [
+        {
+          "path": "examples/inbox/host/run.mjs"
+        },
+        {
+          "path": "examples/inbox/host/drafts.mjs"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Check path: No model decides a verdict; never imports poly-io",
+      "wraps": [
+        "ref",
+        "pipeline",
+        "admit"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "pipeline--ref",
+      "from": "pipeline",
+      "to": "ref",
+      "label": "validate, deadlock, liveness",
+      "labelAt": [
+        135,
+        124
+      ]
+    },
+    {
+      "id": "admit--pipeline",
+      "from": "admit",
+      "to": "pipeline",
+      "label": "needs every stage clean",
+      "labelAt": [
+        400,
+        164
+      ]
+    },
+    {
+      "id": "worker--handlers",
+      "from": "worker",
+      "to": "handlers",
+      "label": "call the handler",
+      "labelAt": [
+        930,
+        324
+      ]
+    },
+    {
+      "id": "ref--retrysafe",
+      "from": "ref",
+      "to": "retrysafe",
+      "label": "check retry safety",
+      "labelAt": [
+        135,
+        229
+      ]
+    },
+    {
+      "id": "pipeline--stdpins",
+      "from": "pipeline",
+      "to": "stdpins",
+      "label": "is this file pinned? · file",
+      "labelAt": [
+        135,
+        205
+      ]
+    },
+    {
+      "id": "capabilities--handlers",
+      "from": "capabilities",
+      "to": "handlers",
+      "label": "give the handler its wrappers",
+      "labelAt": [
+        930,
+        404
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The check refuses an irreversible effect with two or more attempts that names no guarantee, and the runtime puts the same key on every attempt"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The certificate and the vendored engines, which carry the finding and the outbox but do not decide it",
+        "Connected but out of scope: poly CLI, poly-lang, poly-embed, poly-core, poly-lower, Certified build"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "An irreversible effect that may be attempted twice is not admitted unless it names how its target is kept from running it twice: poly-ref reports PL4003 with a witness (a delivery in which the target may execute twice) unless the effect is keyed (an idempotency header and a window that holds the retry horizon) or idempotent by nature in the pinned standard library. The runtime sets the key on every write in a capability the handler cannot bypass. What poly does not verify are the assumptions K17 (the target honours the key) and K18 (an effect declared idempotent by nature is), which a certificate names when an effect declares them",
+        "A check that did not run or hit a bound is never CLEAN: the verdict fold ranks INCONCLUSIVE and UNDERPOWERED apart from CLEAN, vacuous properties are INCONCLUSIVE, and admission refuses a build with any check not run"
+      ]
+    }
+  ]
+}

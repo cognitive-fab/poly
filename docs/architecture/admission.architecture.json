@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "From a clean check to a loadable program",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    }
+  },
+  "components": [
+    {
+      "id": "admit",
+      "type": "backend",
+      "label": "Admission",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate issuer",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 255,
+          "end_line": 265,
+          "label": "refuses unrun checks"
+        }
+      ]
+    },
+    {
+      "id": "certificate",
+      "type": "backend",
+      "label": "Certificate format",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "digest, sign, verify",
+      "sources": [
+        {
+          "path": "packages/poly-core/src/certificate.ts",
+          "line": 12,
+          "end_line": 12,
+          "label": "certified artefacts"
+        },
+        {
+          "path": "packages/poly-core/src/certificate.ts",
+          "line": 135,
+          "end_line": 190,
+          "label": "digest, sign, problems"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "database",
+      "label": "Certified build",
+      "pos": [
+        380,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": ".poly/build and certificate",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 176,
+          "label": "artefactsOnDisk"
+        },
+        {
+          "path": "packages/poly-lower/src/layout.ts"
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "poly-runtime",
+      "pos": [
+        700,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "load and dispatch",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 178,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-runtime/src/runtime.ts",
+          "line": 2081,
+          "end_line": 2082,
+          "label": "load"
+        },
+        {
+          "path": "packages/poly-runtime/src/load.ts",
+          "line": 105,
+          "end_line": 106,
+          "label": "verifyBuild"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "admit--certificate",
+      "from": "admit",
+      "to": "certificate",
+      "label": "digest and sign",
+      "labelAt": [
+        135,
+        145
+      ]
+    },
+    {
+      "id": "admit--build",
+      "from": "admit",
+      "to": "build",
+      "label": "read artefacts, write certificate",
+      "labelAt": [
+        231,
+        124
+      ]
+    },
+    {
+      "id": "runtime--build",
+      "from": "runtime",
+      "to": "build",
+      "label": "read certified artefacts · file",
+      "labelAt": [
+        615,
+        126
+      ]
+    },
+    {
+      "id": "runtime--certificate",
+      "from": "runtime",
+      "to": "certificate",
+      "label": "verify at load",
+      "labelAt": [
+        295,
+        160
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Admission re-runs the pipeline, refuses any check not run, signs a certificate over the digests, and the runtime refuses any file that no longer matches it"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The language packages and the ledger, which admission does not touch",
+        "Connected but out of scope: Workflow server, poly CLI, Check pipeline, Signed records, Feedback commands, Polyaxion"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "A check that did not run or hit a bound is never CLEAN: the verdict fold ranks INCONCLUSIVE and UNDERPOWERED apart from CLEAN, vacuous properties are INCONCLUSIVE, and admission refuses a build with any check not run",
+        "The runtime executes the artefacts the checker checked: the certificate binds each file by digest and load refuses any mismatch, so the checked program is the running program over its check domains",
+        "An agent key never signs a person record: approvals, acceptances, verdicts and adjudications are the owner's decisions; the signature check at admission and at the runtime refuses an agent key, whatever the transport"
+      ]
+    }
+  ]
+}

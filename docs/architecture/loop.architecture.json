@@ -1,0 +1,488 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "From what ran to the next rule",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "From what ran to the next rule",
+        "focus": [
+          "feedback",
+          "mine"
+        ],
+        "note": "The feedback commands export the ledger as traces, a pinned tool proposes, a person signs a verdict, and the result goes back into the sour…"
+      },
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "pipeline",
+          "admit",
+          "records",
+          "feedback"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Ledger",
+      "pos": [
+        735,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "per-run",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 149,
+          "end_line": 150
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger.ts",
+          "line": 12,
+          "end_line": 13
+        }
+      ]
+    },
+    {
+      "id": "feedback",
+      "type": "backend",
+      "label": "Feedback commands",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "export, mine, promote",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/traces.ts",
+          "line": 29,
+          "end_line": 34
+        },
+        {
+          "path": "packages/poly-check/src/promote.ts"
+        },
+        {
+          "path": "packages/poly-check/src/propose.ts"
+        }
+      ]
+    },
+    {
+      "id": "mine",
+      "type": "security",
+      "label": "poly-mine",
+      "pos": [
+        960,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "runs polyx",
+      "sources": [
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 15,
+          "end_line": 15
+        },
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 63,
+          "end_line": 69,
+          "label": "polyx run"
+        },
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 119,
+          "end_line": 132,
+          "label": "polyness run"
+        }
+      ]
+    },
+    {
+      "id": "polyx",
+      "type": "external",
+      "label": "polyx",
+      "pos": [
+        960,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "rule miner, pinned",
+      "sources": [
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 36,
+          "end_line": 69
+        }
+      ]
+    },
+    {
+      "id": "polyness",
+      "type": "external",
+      "label": "polyness",
+      "pos": [
+        1184,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "workflow proposer",
+      "sources": [
+        {
+          "path": "packages/poly-mine/src/index.ts",
+          "line": 91,
+          "end_line": 132
+        }
+      ]
+    },
+    {
+      "id": "records",
+      "type": "backend",
+      "label": "Signed records",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "approvals",
+      "sources": [
+        {
+          "path": "packages/poly-core/src/records.ts",
+          "line": 46,
+          "end_line": 70
+        },
+        {
+          "path": "packages/poly-check/src/records.ts",
+          "line": 1,
+          "end_line": 10
+        },
+        {
+          "path": "packages/poly-check/src/keyrings.ts",
+          "line": 16,
+          "end_line": 30
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        285,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    },
+    {
+      "id": "admit",
+      "type": "backend",
+      "label": "Admission",
+      "pos": [
+        285,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate issuer",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 180
+        },
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 255,
+          "end_line": 265,
+          "label": "refuses unrun checks"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "database",
+      "label": "Certified build",
+      "pos": [
+        510,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": ".poly/build",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 173,
+          "end_line": 176,
+          "label": "artefactsOnDisk"
+        },
+        {
+          "path": "packages/poly-lower/src/layout.ts"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Check path: No model decides a verdict; never imports poly-io",
+      "wraps": [
+        "pipeline",
+        "admit",
+        "records",
+        "feedback"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "pipeline--build",
+      "from": "pipeline",
+      "to": "build",
+      "label": "write lowered artefacts · file",
+      "labelAt": [
+        478,
+        267
+      ]
+    },
+    {
+      "id": "admit--pipeline",
+      "from": "admit",
+      "to": "pipeline",
+      "label": "needs every stage clean",
+      "labelAt": [
+        337,
+        142
+      ]
+    },
+    {
+      "id": "admit--build",
+      "from": "admit",
+      "to": "build",
+      "label": "read artefacts, write certificate",
+      "labelAt": [
+        585,
+        330
+      ],
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          360,
+          330
+        ],
+        [
+          490,
+          330
+        ],
+        [
+          585,
+          330
+        ]
+      ]
+    },
+    {
+      "id": "admit--records",
+      "from": "admit",
+      "to": "records",
+      "label": "read signed acceptances · file",
+      "labelAt": [
+        222,
+        278
+      ]
+    },
+    {
+      "id": "admit--feedback",
+      "from": "admit",
+      "to": "feedback",
+      "label": "read back promotions · file",
+      "labelAt": [
+        229,
+        250
+      ]
+    },
+    {
+      "id": "feedback--admit",
+      "from": "feedback",
+      "to": "admit",
+      "label": "reuse admission helpers",
+      "labelAt": [
+        135,
+        250
+      ]
+    },
+    {
+      "id": "feedback--pipeline",
+      "from": "feedback",
+      "to": "pipeline",
+      "label": "re-check after promotion",
+      "labelAt": [
+        10,
+        124
+      ]
+    },
+    {
+      "id": "feedback--ledger",
+      "from": "feedback",
+      "to": "ledger",
+      "label": "read journals for traces · SQL",
+      "labelAt": [
+        467,
+        4
+      ],
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          135,
+          4
+        ],
+        [
+          810,
+          4
+        ]
+      ]
+    },
+    {
+      "id": "feedback--records",
+      "from": "feedback",
+      "to": "records",
+      "label": "signed verdicts and refits · file",
+      "labelAt": [
+        135,
+        244
+      ]
+    },
+    {
+      "id": "feedback--mine",
+      "from": "feedback",
+      "to": "mine",
+      "label": "run a pinned tool",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          135,
+          16
+        ],
+        [
+          1035,
+          16
+        ]
+      ],
+      "labelAt": [
+        585,
+        37
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "mine--polyx",
+      "from": "mine",
+      "to": "polyx",
+      "label": "mine rules · spawn",
+      "labelAt": [
+        1035,
+        457
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "mine--polyness",
+      "from": "mine",
+      "to": "polyness",
+      "label": "propose a workflow · spawn",
+      "labelAt": [
+        1198,
+        499
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The feedback commands export the ledger as traces, a pinned tool proposes, a person signs a verdict, and the result goes back into the source and through the pipeline and admission like any edit"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The runtime itself and the gate, which only produce the ledger the loop reads",
+        "Connected but out of scope: poly CLI, poly-lang, poly-embed, poly-core, poly-lower, sam-pattern 2.3.0"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "An agent key never signs a person record: approvals, acceptances, verdicts and adjudications are the owner's decisions; the signature check at admission and at the runtime refuses an agent key, whatever the transport"
+      ]
+    }
+  ]
+}

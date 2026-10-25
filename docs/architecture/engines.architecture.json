@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Which engines poly runs and which it checks itself",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "vendored",
+        "label": "Vendored engines",
+        "focus": [
+          "samp",
+          "polygraph",
+          "polyaxion",
+          "polycheck"
+        ],
+        "note": "Copied unchanged from their own repositories and pinned by hash and commit"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    },
+    {
+      "id": "samp",
+      "type": "backend",
+      "label": "sam-pattern 2.3.0",
+      "pos": [
+        380,
+        197
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "SAM v2 strict profile",
+      "sources": [
+        {
+          "path": "vendor/sam-pattern/PROVENANCE.md"
+        }
+      ]
+    },
+    {
+      "id": "polygraph",
+      "type": "backend",
+      "label": "polygraph 8.4.0",
+      "pos": [
+        380,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "kernel and model check",
+      "sources": [
+        {
+          "path": "vendor/polygraph/PROVENANCE.md",
+          "line": 1,
+          "end_line": 8
+        }
+      ]
+    },
+    {
+      "id": "polyaxion",
+      "type": "backend",
+      "label": "Polyaxion",
+      "pos": [
+        700,
+        197
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "policy compile and gate",
+      "sources": [
+        {
+          "path": "vendor/polyaxion/PROVENANCE.md"
+        },
+        {
+          "path": "packages/poly-runtime/src/peers.ts",
+          "line": 36,
+          "end_line": 40
+        }
+      ]
+    },
+    {
+      "id": "polycheck",
+      "type": "backend",
+      "label": "polycheck",
+      "pos": [
+        700,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "regions over effect labels",
+      "sources": [
+        {
+          "path": "peers/polycheck/PROVENANCE.md"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Vendored engines",
+      "wraps": [
+        "samp",
+        "polygraph",
+        "polyaxion",
+        "polycheck"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "pipeline--samp",
+      "from": "pipeline",
+      "to": "samp",
+      "label": "strict validate",
+      "labelAt": [
+        295,
+        60
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "pipeline--polygraph",
+      "from": "pipeline",
+      "to": "polygraph",
+      "label": "model check and cross-check",
+      "labelAt": [
+        377,
+        126
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "pipeline--polyaxion",
+      "from": "pipeline",
+      "to": "polyaxion",
+      "label": "policy admission",
+      "labelAt": [
+        350,
+        114
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "pipeline--polycheck",
+      "from": "pipeline",
+      "to": "polycheck",
+      "label": "capability regions",
+      "labelAt": [
+        355,
+        142
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The engines explore, validate and decide policy",
+        "poly-ref confirms or contradicts what they report and alone decides deadlock, liveness and configurations"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The front end, lowering and admission",
+        "Connected but out of scope: poly CLI, poly-lang, poly-embed, poly-core, poly-lower, Certified build"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "Engines are copied unchanged, never forked: poly relies on the Poly stack conceptually, not physically; a change an engine needs is made in its own repository and copied in again, and a test re-hashes every vendored file"
+      ]
+    }
+  ]
+}

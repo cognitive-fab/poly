@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Why the checker does not agree by accident",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "compiler",
+        "label": "The compiler",
+        "focus": [
+          "lang",
+          "lower"
+        ],
+        "note": "Code that turns source into artefacts; poly-ref imports none of it"
+      },
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "core",
+          "lang",
+          "lower",
+          "ref",
+          "pipeline"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ref",
+      "type": "backend",
+      "label": "poly-ref",
+      "pos": [
+        700,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "reference interpreter",
+      "sources": [
+        {
+          "path": "packages/poly-ref/src/tv.ts",
+          "line": 1,
+          "end_line": 8
+        },
+        {
+          "path": "packages/poly-ref/src/explore.ts",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "path": "packages/poly-ref/src/liveness.ts",
+          "line": 1,
+          "end_line": 6
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "poly-core",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "AST, types, checker, codes",
+      "sources": [
+        {
+          "path": "packages/poly-core/src/ast.ts"
+        },
+        {
+          "path": "packages/poly-core/src/check/check.ts"
+        },
+        {
+          "path": "packages/poly-core/src/diagnostics.ts",
+          "line": 340,
+          "end_line": 368,
+          "label": "verdict fold"
+        }
+      ]
+    },
+    {
+      "id": "lang",
+      "type": "backend",
+      "label": "poly-lang",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "lexer, parser, formatter",
+      "sources": [
+        {
+          "path": "packages/poly-lang/src/parser.ts",
+          "line": 64
+        },
+        {
+          "path": "packages/poly-lang/src/lexer.ts",
+          "line": 8
+        },
+        {
+          "path": "packages/poly-lang/src/format.ts",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "id": "lower",
+      "type": "backend",
+      "label": "poly-lower",
+      "pos": [
+        380,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "machine to artefacts",
+      "sources": [
+        {
+          "path": "packages/poly-lower/src/lower.ts",
+          "line": 31,
+          "end_line": 38
+        },
+        {
+          "path": "packages/poly-lower/src/policy.ts",
+          "line": 19,
+          "end_line": 32
+        },
+        {
+          "path": "packages/poly-lower/src/faults.ts",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "id": "samp",
+      "type": "backend",
+      "label": "sam-pattern 2.3.0",
+      "pos": [
+        1020,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "SAM v2 strict profile",
+      "sources": [
+        {
+          "path": "vendor/sam-pattern/PROVENANCE.md"
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        700,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "The compiler: Code that turns source into artefacts; poly-ref imports none of it",
+      "wraps": [
+        "lang",
+        "lower"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "security-group",
+      "label": "Check path: No model decides a verdict; never imports poly-io",
+      "wraps": [
+        "core",
+        "lang",
+        "lower",
+        "ref",
+        "pipeline"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "pipeline--lang",
+      "from": "pipeline",
+      "to": "lang",
+      "label": "parse source",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          775,
+          268
+        ],
+        [
+          135,
+          268
+        ]
+      ],
+      "labelAt": [
+        455,
+        268
+      ]
+    },
+    {
+      "id": "pipeline--core",
+      "from": "pipeline",
+      "to": "core",
+      "label": "type and domain check",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "pipeline--lower",
+      "from": "pipeline",
+      "to": "lower",
+      "label": "lower a checked machine",
+      "labelAt": [
+        615,
+        126
+      ]
+    },
+    {
+      "id": "pipeline--samp",
+      "from": "pipeline",
+      "to": "samp",
+      "label": "strict validate",
+      "labelAt": [
+        988,
+        189
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "pipeline--ref",
+      "from": "pipeline",
+      "to": "ref",
+      "label": "validate, deadlock, liveness",
+      "labelAt": [
+        775,
+        142
+      ]
+    },
+    {
+      "id": "lang--core",
+      "from": "lang",
+      "to": "core",
+      "label": "AST types",
+      "labelAt": [
+        135,
+        142
+      ]
+    },
+    {
+      "id": "lower--core",
+      "from": "lower",
+      "to": "core",
+      "label": "AST and check result",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "ref--core",
+      "from": "ref",
+      "to": "core",
+      "label": "AST types only",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          775,
+          16
+        ],
+        [
+          135,
+          16
+        ]
+      ],
+      "labelAt": [
+        455,
+        16
+      ]
+    },
+    {
+      "id": "ref--samp",
+      "from": "ref",
+      "to": "samp",
+      "label": "drive a lowered module",
+      "labelAt": [
+        935,
+        63
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "poly-ref imports no compiler code, only erased types from core, and the import-boundary script enforces it",
+        "the pipeline then requires poly-ref and polygraph to agree on counts and findings"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The runtime, the ledger and the feedback commands, none of which touch the independence rule",
+        "Connected but out of scope: poly CLI, poly-embed, Certified build, polygraph 8.4.0, Polyaxion, polycheck"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "poly-ref shares no code with the compiler: a checker written from the same code would agree with its bugs; poly-ref may import only node builtins, sam-pattern and type-only imports of core"
+      ]
+    }
+  ]
+}

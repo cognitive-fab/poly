@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What the design names and the code does not build",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "116bb50c9c3f4e5e965e17d9d1f2b41e7b99a9e5"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "What the design names and the code does not bui…",
+        "focus": [
+          "polyvers",
+          "advisor",
+          "polytrion"
+        ],
+        "note": "The version gate, the adequacy grade, the Polyx advisor and the Polytrion twin are not built, and the commands explain, grade, deploy and d…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stages 0 to 5, folded",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 40,
+          "end_line": 40,
+          "label": "stage names"
+        },
+        {
+          "path": "packages/poly-check/src/pipeline.ts",
+          "line": 540,
+          "end_line": 590,
+          "label": "model check"
+        },
+        {
+          "path": "packages/poly-check/src/policies.ts",
+          "line": 293,
+          "end_line": 333,
+          "label": "policy stages"
+        }
+      ]
+    },
+    {
+      "id": "polyvers",
+      "type": "backend",
+      "label": "Version gate (polyvers)",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "stage 7, lanes",
+      "tag": "planned"
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Effect worker",
+      "pos": [
+        380,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "outbox to gate to handler",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 199,
+          "end_line": 201
+        },
+        {
+          "path": "packages/poly-runtime/src/worker.ts",
+          "line": 459,
+          "end_line": 485,
+          "label": "order of checks"
+        },
+        {
+          "path": "packages/poly-runtime/model/outbox-intent.poly",
+          "label": "OutboxIntent model"
+        }
+      ]
+    },
+    {
+      "id": "advisor",
+      "type": "backend",
+      "label": "Polyx advisor",
+      "pos": [
+        380,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "advice at issue and gate",
+      "tag": "planned"
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Ledger",
+      "pos": [
+        700,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "per-run chain, signed heads",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 149,
+          "end_line": 150
+        },
+        {
+          "path": "packages/poly-runtime/src/ledger.ts",
+          "line": 12,
+          "end_line": 13
+        }
+      ]
+    },
+    {
+      "id": "polytrion",
+      "type": "external",
+      "label": "Polytrion twin",
+      "pos": [
+        1020,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "worlds, deferred to v2",
+      "tag": "planned"
+    }
+  ],
+  "connections": [
+    {
+      "id": "worker--ledger",
+      "from": "worker",
+      "to": "ledger",
+      "label": "verdict, effect, observation · SQL",
+      "labelAt": [
+        615,
+        63
+      ]
+    },
+    {
+      "id": "worker--advisor",
+      "from": "worker",
+      "to": "advisor",
+      "label": "advice at the gate",
+      "labelAt": [
+        455,
+        142
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "pipeline--polyvers",
+      "from": "pipeline",
+      "to": "polyvers",
+      "label": "version gate, stage 7",
+      "labelAt": [
+        135,
+        142
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "ledger--polytrion",
+      "from": "ledger",
+      "to": "polytrion",
+      "label": "export for a twin · file",
+      "labelAt": [
+        935,
+        126
+      ],
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The version gate, the adequacy grade, the Polyx advisor and the Polytrion twin are not built, and the commands explain, grade, deploy and dispatch are listed as not built"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Everything that is built",
+        "the other questions cover it",
+        "Connected but out of scope: poly CLI, poly-lang, poly-embed, poly-core, poly-lower, Certified build"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Risks",
+      "items": [
+        "Nothing in the packages records advice: the runtime can append an advice event, but no package calls it and no advisor is consulted at issue or at the gate; only tests call it. The architecture document describes the advisor as part of the runtime."
+      ]
+    }
+  ]
+}

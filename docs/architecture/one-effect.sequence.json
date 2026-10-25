@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "One effect, in order",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1358,
+      662
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "vendored",
+        "label": "Vendored engines",
+        "focus": [
+          "polygraph",
+          "polyaxion"
+        ],
+        "note": "Copied unchanged from their own repositories and pinned by hash and commit"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Effect worker"
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "Policy gate"
+    },
+    {
+      "id": "polyaxion",
+      "type": "backend",
+      "label": "Polyaxion"
+    },
+    {
+      "id": "handlers",
+      "type": "backend",
+      "label": "Host handlers"
+    },
+    {
+      "id": "polygraph",
+      "type": "backend",
+      "label": "polygraph 8.4.0"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 370,
+      "label": "Propose"
+    },
+    {
+      "from": 396,
+      "to": 476,
+      "label": "Perform"
+    },
+    {
+      "from": 502,
+      "to": 582,
+      "label": "Settle"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "worker",
+      "to": "polygraph",
+      "y": 190,
+      "label": "claim outbox row · SQL"
+    },
+    {
+      "id": "s2",
+      "from": "worker",
+      "to": "gate",
+      "y": 230,
+      "label": "propose with snapshot"
+    },
+    {
+      "id": "s3",
+      "from": "gate",
+      "to": "polyaxion",
+      "y": 270,
+      "label": "evaluate policy"
+    },
+    {
+      "id": "s4",
+      "from": "polyaxion",
+      "to": "gate",
+      "y": 310,
+      "label": "allow, deny or escalate",
+      "variant": "return"
+    },
+    {
+      "id": "s5",
+      "from": "gate",
+      "to": "worker",
+      "y": 350,
+      "label": "decision",
+      "variant": "return"
+    },
+    {
+      "id": "s6",
+      "from": "worker",
+      "to": "handlers",
+      "y": 416,
+      "label": "call handler on allow"
+    },
+    {
+      "id": "s7",
+      "from": "handlers",
+      "to": "worker",
+      "y": 456,
+      "label": "observed result",
+      "variant": "return"
+    },
+    {
+      "id": "s8",
+      "from": "worker",
+      "to": "gate",
+      "y": 522,
+      "label": "settle observed"
+    },
+    {
+      "id": "s9",
+      "from": "worker",
+      "to": "polygraph",
+      "y": 562,
+      "label": "completion action · SQL"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "worker",
+      "from": 185,
+      "to": 568,
+      "type": "backend"
+    },
+    {
+      "participant": "gate",
+      "from": 225,
+      "to": 528,
+      "type": "security"
+    },
+    {
+      "participant": "polyaxion",
+      "from": 265,
+      "to": 316,
+      "type": "backend"
+    },
+    {
+      "participant": "handlers",
+      "from": 411,
+      "to": 462,
+      "type": "backend"
+    },
+    {
+      "participant": "polygraph",
+      "from": 185,
+      "to": 568,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The kernel records the step, the worker checks and proposes the effect to the gate, the handler runs only on allow, and the worker settles the result and completes the intent"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Denial and escalation paths, retries and the person's approval record, which branch from the verdict step",
+        "Connected but out of scope: Check pipeline, Admission, poly-runtime, Ledger, Polyx advisor"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "An effect meets five refusals before the policy engine decides: origin, memory, budget, grant and mandate each refuse or escalate finally whatever a policy says; only then does the Polyaxion gate propose"
+      ]
+    }
+  ]
+}

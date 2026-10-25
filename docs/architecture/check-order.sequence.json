@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "A check, in order",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1464,
+      714
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "compiler",
+        "label": "The compiler",
+        "focus": [
+          "lang",
+          "lower"
+        ],
+        "note": "Code that turns source into artefacts; poly-ref imports none of it"
+      },
+      {
+        "id": "check-path",
+        "label": "Check path",
+        "focus": [
+          "core",
+          "lang",
+          "lower",
+          "ref",
+          "pipeline",
+          "cli"
+        ],
+        "note": "No model decides a verdict; never imports poly-io"
+      },
+      {
+        "id": "vendored",
+        "label": "Vendored engines",
+        "focus": [
+          "samp",
+          "polygraph"
+        ],
+        "note": "Copied unchanged from their own repositories and pinned by hash and commit"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "poly CLI"
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Check pipeline"
+    },
+    {
+      "id": "lang",
+      "type": "backend",
+      "label": "poly-lang"
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "poly-core"
+    },
+    {
+      "id": "lower",
+      "type": "backend",
+      "label": "poly-lower"
+    },
+    {
+      "id": "samp",
+      "type": "backend",
+      "label": "sam-pattern 2.3.0"
+    },
+    {
+      "id": "ref",
+      "type": "backend",
+      "label": "poly-ref"
+    },
+    {
+      "id": "polygraph",
+      "type": "backend",
+      "label": "polygraph 8.4.0"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 290,
+      "label": "Front end"
+    },
+    {
+      "from": 316,
+      "to": 396,
+      "label": "Lower"
+    },
+    {
+      "from": 422,
+      "to": 462,
+      "label": "Agree"
+    },
+    {
+      "from": 488,
+      "to": 568,
+      "label": "Explore"
+    },
+    {
+      "from": 594,
+      "to": 634,
+      "label": "Report"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "cli",
+      "to": "pipeline",
+      "y": 190,
+      "label": "check target"
+    },
+    {
+      "id": "s2",
+      "from": "pipeline",
+      "to": "lang",
+      "y": 230,
+      "label": "parse source"
+    },
+    {
+      "id": "s3",
+      "from": "pipeline",
+      "to": "core",
+      "y": 270,
+      "label": "type and domains"
+    },
+    {
+      "id": "s4",
+      "from": "pipeline",
+      "to": "lower",
+      "y": 336,
+      "label": "lower the machine"
+    },
+    {
+      "id": "s5",
+      "from": "pipeline",
+      "to": "samp",
+      "y": 376,
+      "label": "strict validate",
+      "variant": "security"
+    },
+    {
+      "id": "s6",
+      "from": "pipeline",
+      "to": "ref",
+      "y": 442,
+      "label": "translation validation"
+    },
+    {
+      "id": "s7",
+      "from": "pipeline",
+      "to": "polygraph",
+      "y": 508,
+      "label": "model check",
+      "variant": "security"
+    },
+    {
+      "id": "s8",
+      "from": "pipeline",
+      "to": "ref",
+      "y": 548,
+      "label": "confirm, deadlock, liveness"
+    },
+    {
+      "id": "s9",
+      "from": "pipeline",
+      "to": "cli",
+      "y": 614,
+      "label": "verdict and witnesses",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "cli",
+      "from": 185,
+      "to": 620,
+      "type": "frontend"
+    },
+    {
+      "participant": "pipeline",
+      "from": 185,
+      "to": 620,
+      "type": "backend"
+    },
+    {
+      "participant": "ref",
+      "from": 437,
+      "to": 554,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The pipeline parses and lowers the machine, has sam-pattern validate it, has poly-ref compare it with the semantics, and only then lets polygraph explore it, with poly-ref confirming what polygraph finds"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Effects, composition, configuration and policy stages, which run after these for machines that have them",
+        "Connected but out of scope: MCP server, Language server, Workflow server, poly-new, Admission, Feedback commands"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "A check that did not run or hit a bound is never CLEAN: the verdict fold ranks INCONCLUSIVE and UNDERPOWERED apart from CLEAN, vacuous properties are INCONCLUSIVE, and admission refuses a build with any check not run"
+      ]
+    }
+  ]
+}
