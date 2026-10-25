@@ -1,1 +1,0 @@
-{ "poly": "1", "name": "p3", "modules": ["p3.poly", "p3.policy.poly"], "host": "typescript", "require": { "grade": false }, "engines": { "polygraph": "^8.3" } }

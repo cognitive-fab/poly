@@ -1,3 +1,0 @@
-Pilot runs on the practice task P1 are approved by the owner (decisions-m3.md, 7c5d7e7): one run per arm, with the
-freeze at d1cba58, authenticated by ANTHROPIC_API_KEY set in the owner's shell. This file opens the pilots only. A run
-of T1 to T10 still needs FROZEN, which the owner writes after ruling on the pilot report.
