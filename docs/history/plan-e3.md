@@ -26,7 +26,7 @@ Nothing on `e3` changes the core. A core change is the release session's or an a
 - **No model on a check path.** The compaction gate, the verifier, the fusion classifier, the credential scan, the stage scorer and the acceptance test are deterministic code. The import-boundary check covers `examples/harness/` as it covers the rest.
 - **One heavy job at a time.** Before any full suite or any benchmark run I check that no `node --test` runs from another worktree, and in particular none from `poly-m7`. Targeted tests run while building. The full suite runs through `scripts/suite-summary.mjs` before each commit that changes a `.poly` file, with the log cited by path.
 - **Ids.** Spec issues S550 to S599. Diagnostic codes are the core's; the example adds none.
-- **Records.** `docs/decisions-e3.md`, one entry per step, with polywatch findings marked real or false and why.
+- **Records.** `docs/history/decisions-e3.md`, one entry per step, with polywatch findings marked real or false and why.
 - **Commits.** One change, one commit, as `kizo-core`. Nothing is pushed.
 
 ## 3. How the proposal maps onto poly

@@ -16,7 +16,7 @@ The values are made up for tests, or taken from a vendor's documentation. None w
 ## What was checked, and what was not found
 
 - **Every match in a listed class.** The 60 matches are: class A, 1 (the one file); class B, 2 (two revisions of the one test line); class C, 55 (11 matches of the shapes above in each of five revisions of the one test file, at its two paths); class D, 2 (two revisions of the one line). None is outside a class.
-- **Not found:** a key of a vendor's real shape with a real body, a file named like a credential store, a `.env` or key file, a private key, a token in a report or in the decisions file, or an environment value in a committed file. The live run's key was read from the process environment only and is in no file of any commit. The pilot and live-run reports, and `docs/decisions-e3.md`, hold no match.
+- **Not found:** a key of a vendor's real shape with a real body, a file named like a credential store, a `.env` or key file, a private key, a token in a report or in the decisions file, or an environment value in a committed file. The live run's key was read from the process environment only and is in no file of any commit. The pilot and live-run reports, and `docs/history/decisions-e3.md`, hold no match.
 - **Environment assignments in the tests** (`process.env.ANTHROPIC_API_KEY = …`) assign class A or the string `canary-world-key`, inside a test, and restore the variable after it.
 
 ## Conclusion
