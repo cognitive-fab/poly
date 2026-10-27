@@ -1,0 +1,23 @@
+// The on-call policy (docs/examples/incident-oncall.md). Each effect is allowed only while the incident is in the step
+// that asks for it, read from the machine snapshot as of the emitting step; an unknown snapshot is denied. The decision
+// is named too: without a rule that names decision.triage, polycheck reaches it with no gate crossed (PL7001).
+module oncall_policy
+
+policy paging {
+  scope "oncall"
+  obligation page-while-paging "A page is sent only while the incident is paging." rule {
+    when proposal.kind == "effect" && effect.kind == "pager.page"
+    require machine("oncall.Incident").status == Paging else deny
+    on unknown deny
+  }
+  obligation escalate-while-escalating "An escalation is sent only while the incident is escalating." rule {
+    when proposal.kind == "effect" && effect.kind == "pager.escalate"
+    require machine("oncall.Incident").status == Escalating else deny
+    on unknown deny
+  }
+  obligation triage-while-triaging "A report is sent to a model only while the incident is being triaged." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.triage"
+    require machine("oncall.Incident").status == Triaging else deny
+    on unknown deny
+  }
+}

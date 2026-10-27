@@ -103,6 +103,13 @@ End-to-end test, over recorded traffic, nothing on the network. Timers fire when
 - a refused page (409) ends `Escalating`, then `Escalated` after the escalation POST;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
+## Amendments made when the code existed
+
+- `Ack` on a `Logged` incident is rejected with the reason `terminal`, not `not-waiting`: the runtime refuses every action of a terminal instance before its handler (findings 9).
+- A run does not rest in `Triaging` or `Escalating`: one settle carries an incident through its decision and its page, so the end-to-end tests assert end states and requests (finding 11). No test dispatches a decision's completion.
+- The source comment says what the first draft did: it paged on an unsure answer and was `PL6201` (finding 8).
+- The tests were corrected for these after the code existed, with the fixture path and the use of `rt.create` as in batch 1.
+
 ## Conclusion
 
 Liveness is the property a person cannot see by reading: every action is individually fine, and the starvation is in the cycle between two of them. The check finds it as a lasso of seven steps, and the bound on snoozes is the whole fix.

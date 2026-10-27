@@ -1,0 +1,160 @@
+// expected: FINDING PL3301
+// Incident on-call, the seeded defect (docs/examples/incident-oncall.md): Snooze has no bound, so a person can snooze for
+// ever, and each snooze cancels the escalation timer, so weak fairness never forces the escalation: a lasso, PL3301.
+module oncall
+
+// Declaring the audience is what makes the runtime keep a taint record for a report the host stores (S302).
+audience { public < team }
+
+enum Severity { Low, High }
+
+enum Status { Reported, Triaging, Review, Logged, Paging, Paged, Snoozed, Escalating, Escalated, Unreached, Acked, Resolved }
+
+machine Incident {
+  state {
+    status  : Status = Reported
+    snoozes : 0..2   = 0
+  }
+
+  terminal status in { Logged, Unreached, Resolved }
+
+  action Report(summary: Content)
+  action Triaged(sev: Severity, conf: Conf, margin: Conf)
+  action Untriaged()
+  action Classify(sev: Severity)
+  action PageSent()
+  action PageFailed()
+  action Ack()
+  action Timeout()
+  action Snooze()
+  action Wake()
+  action Escalated()
+  action EscalateFailed()
+  action Resolve()
+
+  on Report(summary) {
+    require status == Reported else reject "reported"
+    status' = Triaging
+    decide triage(report: summary)
+  }
+
+  // The model pages only when it is sure (PL6201: a decision's irreversible effect is gated by its confidence). An
+  // unsure or failed answer goes to a person to classify.
+  on Triaged(sev, conf, margin) {
+    require status == Triaging else reject "not-triaging"
+    if conf >= 0.8 {
+      if sev == Low {
+        status' = Logged
+      } else {
+        status' = Paging
+        emit page()
+        after 5m -> Timeout() as ack
+      }
+    } else {
+      status' = Review
+    }
+  }
+
+  on Untriaged {
+    require status == Triaging else reject "not-triaging"
+    status' = Review
+  }
+
+  on Classify(sev) {
+    require status == Review else reject "not-review"
+    if sev == Low {
+      status' = Logged
+    } else {
+      status' = Paging
+      emit page()
+      after 5m -> Timeout() as ack
+    }
+  }
+
+  on PageSent {
+    require status == Paging else reject "not-paging"
+    status' = Paged
+  }
+
+  on PageFailed {
+    require status == Paging else reject "not-paging"
+    status' = Escalating
+    cancel ack
+    emit escalate()
+  }
+
+  on Ack {
+    require status == Paging || status == Paged else reject "not-waiting"
+    status' = Acked
+    cancel ack
+  }
+
+  on Timeout {
+    require status == Paging || status == Paged else reject "not-waiting"
+    status' = Escalating
+    emit escalate()
+  }
+
+  on Snooze {
+    require status == Paged else reject "cannot-snooze"
+    status' = Snoozed
+    cancel ack
+    after 15m -> Wake() as wake
+  }
+
+  on Wake {
+    require status == Snoozed else reject "not-snoozed"
+    status' = Paged
+    after 5m -> Timeout() as ack
+  }
+
+  on Escalated {
+    require status == Escalating else reject "not-escalating"
+    status' = Escalated
+  }
+
+  on EscalateFailed {
+    require status == Escalating else reject "not-escalating"
+    status' = Unreached
+  }
+
+  on Resolve {
+    require status == Acked || status == Escalated else reject "not-answered"
+    status' = Resolved
+  }
+
+  path property page-at-most-once: count("pager.page") <= 1
+  path property escalate-at-most-once: count("pager.escalate") <= 1
+
+  liveness page-is-answered: status == Paging leads to status == Acked || status == Escalated || status == Unreached under fair { Timeout, Wake, PageSent, PageFailed, Escalated, EscalateFailed }
+
+  decision triage(report: Content) -> Severity {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Triaged(sev: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Untriaged()
+  }
+
+  effect page() {
+    kind "pager.page"
+    labels { egress:external }
+    targets { egress: "https://pager.example/v1/pages" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> PageSent()
+    failed -> PageFailed()
+    exhausted -> PageFailed()
+  }
+
+  effect escalate() {
+    kind "pager.escalate"
+    labels { egress:external }
+    targets { egress: "https://pager.example/v1/escalations" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Escalated()
+    failed -> EscalateFailed()
+    exhausted -> EscalateFailed()
+  }
+}

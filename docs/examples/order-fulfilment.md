@@ -102,6 +102,13 @@ End-to-end test, over recorded services, nothing on the network. The stock is a 
 
 The example has no escalation to a person other than `Stuck`, which leaves an order for one.
 
+## Amendments made when the code existed
+
+- A run does not rest in `Reserving`, `Charging`, `Shipping` or `Refunding`: one settle carries an order to its end (finding 11). The end-to-end tests assert end states and requests. The keyed test makes the first order's shipment fail for good (402), so its compensation gives the one unit back to the second order.
+- `Place` guards against a none warehouse, since the check explores `Place(none)` (finding 10).
+- The configuration's global state count is read from `configurations[].instance.states`, 126 clean and 72 for the defect.
+- The tests were corrected for these after the code existed.
+
 ## Conclusion
 
 The compensation is the thing a saga is for, and the check finds its absence on the machine in four steps. What the configuration shows is that the stock cannot be oversold; what neither shows is that a refund reached the customer, which the end-to-end test shows on the recorded services.
