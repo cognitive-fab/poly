@@ -238,6 +238,17 @@ export async function policyReports(module: Module, program: Module[], root: str
       // An expression's diagnostic names the expression; it belongs to the policy whose text holds its line.
       return ps.some((p) => p.span && d.at.line !== undefined && d.at.line >= p.span.line && d.at.line <= p.span.endLine);
     });
+    // PT8.4 (language findings 20): in a project that holds a machine, a scope that matches no module, glob or configuration
+    // instance's scope governs nothing, and is refused rather than read as clean with every region unreachable. The scope is the first
+    // line of a policy, so its line is the one after the policy's opening.
+    // A scope is a module's name, and a route, a budget or a channel's conversation is a module of its own (`m.r`, `m.c`): the
+    // machine ids of the program's facts are `<scope>.<Machine>`.
+    const governable = facts.machines.size > 0;
+    const scopes = new Set([...facts.machines.keys()].map((id) => id.slice(0, id.lastIndexOf('.'))));
+    // A channel's conversation, a route's and a budget's machines are generated from their declarations, one module each.
+    for (const m of program) for (const d of m.decls) if (d.kind === 'Channel' || d.kind === 'Route' || d.kind === 'Budget' || d.kind === 'Credential') scopes.add(`${m.name}.${d.name}`);
+    const governs = [...scopes].some((m) => scopeGoverns(scope, m)) || program.some((m) => m.decls.some((d) => d.kind === 'Configuration' && d.instances.some((i) => i.scope === scope)));
+    if (governable && !governs) mine.push(diag('PL6504', { module: module.name, node: ps[0].id, line: ps[0].span ? ps[0].span.line + 1 : undefined }, `the scope "${scope}" names no module of the project, no glob that matches one and no instance's scope in a configuration, so its policies govern nothing (PT8.4)`));
     const r: PolicyReport = { scope, policies: ps.map((p) => p.name), stages: [], notRun: [], vacuous: [], diagnostics: [...mine], verdict: 'CLEAN', reads: [...new Set(ps.flatMap((p) => typed.reads.get(p.name) ?? []))].sort() };
     out.push(r);
     const refused = mine.some((d) => d.severity === 'error');

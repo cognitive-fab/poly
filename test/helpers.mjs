@@ -12,11 +12,16 @@ import { resolveUses, resolveProviders, resolveRouting } from '@poly/check';
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const BUILD = join(ROOT, '.poly', 'test-build');
 
-export function polyFiles(dir) {
+export function polyFiles(dir, { refused = false } = {}) {
   const out = [];
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) { if (e !== 'errors') out.push(...polyFiles(p)); } else if (p.endsWith('.poly')) out.push(p);
+    if (statSync(p).isDirectory()) { if (e !== 'errors') out.push(...polyFiles(p, { refused })); } else if (p.endsWith('.poly')) {
+      // A source whose first line expects REFUSED is an error source like those under errors/: no stage after the types can read it.
+      // Only the examples' own sweep (test/examples-expected.mjs) asks for it, to compare its verdict with that line.
+      if (!refused && /^\/\/ expected: REFUSED\b/.test(readFileSync(p, 'utf8').split(/\r?\n/, 1)[0])) continue;
+      out.push(p);
+    }
   }
   return out.sort();
 }
