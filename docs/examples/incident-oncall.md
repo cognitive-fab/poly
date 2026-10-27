@@ -69,7 +69,7 @@ Actions and handlers (a `require` that fails rejects with the quoted reason):
 
 ## Policy
 
-Policy `paging`, scope `"oncall"`, three rules, each `else deny` with `on unknown deny`, each for `proposal.kind == "effect"` and an effect kind, requiring the machine snapshot `machine("oncall.Incident").status` to be: `Paging` for `pager.page`; `Escalating` for `pager.escalate`; `Triaging` for `decision.triage`. Obligation names: `page-while-paging`, `escalate-while-escalating`, `triage-while-triaging`. The policy is signed as a person signs it.
+Policy `paging`, scope `"oncall"`, three rules, each `else deny` with `on unknown deny`, each for `proposal.kind == "effect"` and an `effect.kind` (the decision `triage` is proposed as the kind `decision.triage`, as any decision is), requiring the machine snapshot `machine("oncall.Incident").status` to be: `Paging` for `pager.page`; `Escalating` for `pager.escalate`; `Triaging` for `decision.triage`. Obligation names: `page-while-paging`, `escalate-while-escalating`, `triage-while-triaging`. The policy is signed as a person signs it.
 
 ## Properties
 
@@ -97,7 +97,7 @@ End-to-end test, over recorded traffic, nothing on the network. Timers fire when
 
 - main path: `db-down` pages once, then `Ack` ends `Acked`; advancing 10 minutes sends no escalation; `Resolve` ends `Resolved`;
 - timeout: `db-down`, no ack, advance 5 minutes: one escalation POST, `Escalated`; one page and one escalation in all;
-- refusal: `footer-typo` ends `Logged` with no POST, and `Ack` on it is rejected `not-waiting`; a third `Snooze` is rejected `cannot-snooze`;
+- refusal: `footer-typo` ends `Logged` with no POST, and `Ack` on it is rejected `not-waiting`; on a second incident that pages (`db-down`), two snoozes each woken by the 15 minute timer are accepted and a third is rejected `cannot-snooze` (a snooze on a `Logged` incident is rejected for its status, so it proves nothing about the bound);
 - escalation to a person: `odd-latency` ends `Review` with no POST; `Classify(High)` pages;
 - snooze: `Snooze` cancels the escalation (advance 5 minutes: none), 15 minutes later `Wake` returns to `Paged`, and 5 minutes after that the escalation is sent;
 - a refused page (409) ends `Escalating`, then `Escalated` after the escalation POST;
@@ -108,6 +108,15 @@ End-to-end test, over recorded traffic, nothing on the network. Timers fire when
 - `Ack` on a `Logged` incident is rejected with the reason `terminal`, not `not-waiting`: the runtime refuses every action of a terminal instance before its handler (findings 9).
 - A run does not rest in `Triaging` or `Escalating`: one settle carries an incident through its decision and its page, so the end-to-end tests assert end states and requests (finding 11). No test dispatches a decision's completion.
 - The source comment says what the first draft did: it paged on an unsure answer and was `PL6201` (finding 8).
+- The tests were corrected for these after the code existed, with the fixture path and the use of `rt.create` as in batch 1.
+
+## Amendments made when the code existed
+
+- `Ack` on a `Logged` incident is rejected with the reason `terminal`, not `not-waiting`: the runtime refuses every action of a terminal instance before its handler (language findings 9, settled by `test/ex-terminal-reason.test.mjs`).
+- A run does not rest in `Triaging` or `Escalating`: one settle carries an incident through its decision and its page, so the end-to-end tests assert end states and requests (finding 11). No test dispatches a decision's completion.
+- The source comment says what the first draft did: it paged on an unsure answer and was `PL6201` (finding 8).
+- **A late completion is accepted.** `Ack` is allowed while the page is still out (`Paging`), so `PageSent` and `PageFailed` can arrive in any status. They are now taken in every status and act only from `Paging`, and a new field `answered : bool` records that the page was answered, because a handler that may do nothing is `PL2201` (finding 13). Before, a late `PageSent` was a rejected completion, which is consumed and never completes again (PS6.4, S463). An end-to-end test covers it.
+- **Sizes and the witness changed.** `Incident` has 35 states (22 for the defect). The defect's lasso is **9 steps**, not 7: a prefix of three and a cycle of six, because `PageSent` and `PageFailed` are now enabled in every status and weak fairness holds them in the cycle too. The finding is still exactly `PL3301`.
 - The tests were corrected for these after the code existed, with the fixture path and the use of `rt.create` as in batch 1.
 
 ## Conclusion

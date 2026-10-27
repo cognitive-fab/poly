@@ -1,0 +1,17 @@
+// expected: CLEAN
+// A terminal instance and an action whose handler has its own reject text (docs/examples/language-findings.md, item 9).
+module term
+
+enum Phase { Open, Closed }
+
+machine Door {
+  state { phase : Phase = Open }
+  terminal phase == Closed
+  action Close()
+  action Knock()
+  on Close { phase' = Closed }
+  on Knock {
+    require phase == Open else reject "door-is-closed"
+    phase' = Open
+  }
+}
