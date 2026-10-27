@@ -127,20 +127,22 @@ test('the handler: 201 returns ok; 422 throws with permanent: true; 503 throws w
       },
     };
 
-    // Test for amounts 50, 100, 250, 500.
+    // Amounts in units of 50 euros across the domain.
     for (const amount of [1, 3, 5, 10]) {
       const payload = { amount };
 
       if (tc.shouldThrow) {
+        let threw = true;
         try {
           await pay(payload, caps, ctx);
-          assert.fail(`should throw for status ${tc.status}`);
+          threw = false;
         } catch (err) {
           assert.ok(err instanceof Error, `error is an Error for ${tc.desc}`);
           if (tc.permanent !== undefined) {
             assert.equal(Boolean(err.permanent), tc.permanent, `permanent flag is ${tc.permanent} for ${tc.desc}`);
           }
         }
+        assert.ok(threw, `pay or write must throw for status ${tc.status}`);
       } else {
         const result = await pay(payload, caps, ctx);
         assert.deepEqual(result, { ok: true }, `returns ok for ${tc.desc}`);
@@ -150,7 +152,7 @@ test('the handler: 201 returns ok; 422 throws with permanent: true; 503 throws w
       assert.ok(requestMade, `request made for status ${tc.status}`);
       assert.equal(capturedReq.url, 'https://payroll.example/v1/reimbursements', 'correct URL');
       assert.equal(capturedReq.opts.headers['idempotency-key'], ctx.idempotencyKey, 'idempotency-key header set');
-      // Verify body is { amount }.
+      // The body is the amount in euros.
       assert.deepEqual(capturedReq.body, { euros: amount * 50 }, `body for amount ${amount} is its euros`);
 
       requestMade = false;

@@ -10,10 +10,14 @@ import { ROOT } from '../helpers.mjs';
 import { loadExample, recordingEgress, settle } from '../ex-kit.mjs';
 import { admitExample } from '../ex-kit.mjs';
 
+let cachedAdmission;
+/** One admission for the whole file: each test loads its own runtime from the same certified build. */
+const admitted = () => (cachedAdmission ??= admitExample('appointment-booker'));
+
 const EX_DIR = join(ROOT, 'examples', 'appointment-booker');
 
 test('appointment-booker: admission checks the program and policy; the example admits', { timeout: 60_000 }, async () => {
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   assert.ok(a.dir);
   assert.ok(a.report);
   assert.equal(a.report.verdict, 'CLEAN', JSON.stringify(a.report.diagnostics));
@@ -23,7 +27,7 @@ test('appointment-booker: main path - ask tue-nine, Reset to Idle', { timeout: 1
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   const egress = recordingEgress();
   const { rt, clock } = await loadExample(a, { transports: egress.transports });
   try {
@@ -79,7 +83,7 @@ test('appointment-booker: refusal - tue-nine-again ends Conflict (no second POST
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   const egress = recordingEgress();
   const { rt, clock } = await loadExample(a, { transports: egress.transports });
   try {
@@ -133,7 +137,7 @@ test('appointment-booker: keyed - first 503 then 201 sends two requests with sam
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   // Use a queue of responses: first 503, then 201.
   const responses = [
     { status: 503, headers: {}, body: { error: 'service unavailable' } },
@@ -196,7 +200,7 @@ test('appointment-booker: failure - 409 ends Failed and frees the slot', { timeo
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
   // First instance: 409 error
-  const a1 = await admitExample('appointment-booker', { tag: 'cal-4a' });
+  const a1 = await admitted();
   const egress1 = recordingEgress(() => ({ status: 409, headers: {}, body: { error: 'conflict' } }));
   const { rt: rt1, clock: clock1 } = await loadExample(a1, { transports: egress1.transports });
   try {
@@ -222,7 +226,7 @@ test('appointment-booker: failure - 409 ends Failed and frees the slot', { timeo
   }
 
   // Second instance: successful booking after failure
-  const a2 = await admitExample('appointment-booker', { tag: 'cal-4b' });
+  const a2 = await admitted();
   const egress2 = recordingEgress(() => ({ status: 201, headers: {}, body: { ok: true } }));
   const { rt: rt2, clock: clock2 } = await loadExample(a2, { transports: egress2.transports });
   try {
@@ -248,7 +252,7 @@ test('appointment-booker: uncertainty - three 503s end Uncertain with slot still
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   // Return 503 three times (hit the retry limit).
   const responses = [
     { status: 503, headers: {}, body: {} },
@@ -304,7 +308,7 @@ test('appointment-booker: journal replays with no divergence', { timeout: 120_00
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitExample('appointment-booker');
+  const a = await admitted();
   const egress = recordingEgress();
   const { rt, clock } = await loadExample(a, { transports: egress.transports });
   try {

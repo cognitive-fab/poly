@@ -43,7 +43,7 @@ test('expense-approval: main path - alice submits 3 units (taxi), categorized Tr
     await rt.create('expenses.Expense', { id: 'exp-1' });
     const id = 'exp-1';
 
-    // Alice submits 120 with the taxi receipt.
+    // Alice submits 3 units (150 euros) with the taxi receipt.
     const receiptId = await rt.putContent('Taxi from the airport, 150 euros.');
     await rt.dispatch(id, 'Submit', { amount: 3, receipt: receiptId }, { credentials: { principal: 'alice' } });
     await settle(rt);

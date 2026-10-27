@@ -41,7 +41,7 @@ The tests check the program with its policy beside it, as a project.
 - **Collusion.** Two people approving each other's claims is outside the property.
 - **The finance person.** The gate checks that a signed record is a person's, not that the person is the right one.
 - **The model.** The recorded answers stand in for it, with no calibration map.
-- **The wider domain.** A claim of 0 to 500 euros in single euros was too large to check; see the conclusion.
+- **Amounts in single euros.** Amounts are in units of 50 euros, `0..10`, not `0..500`: a stored `0..500` compared with two thresholds exhausted memory (3.3 GB, no verdict), because the check does not cut a stored value at its comparison constants. `CLEAN` is a statement about 11 amounts, 0 to 500 euros in steps of 50. See `docs/examples/language-findings.md`, item 3.
 
 ## Conclusion
 

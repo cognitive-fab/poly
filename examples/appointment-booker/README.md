@@ -38,6 +38,7 @@ The first two check the program alone. The tests check it with its policy beside
 
 - **The calendar itself.** The check says the program never asks for a taken slot. It cannot say the real calendar agrees about which slots are taken.
 - **The model.** The recorded answers stand in for it. The confidences are the ones the fixture's distributions give, with no calibration map.
+- **A larger calendar.** The calendar has 4 slots, 2 days of 2 hours, to keep the check small (380 states). A week of 8 slots was not tried; `CLEAN` is a statement about these 4 slots.
 - **One person's slots.** There is one calendar with four slots, and `CLEAN` is a statement about that instance.
 - **The escalation to a person.** This example has none; `Resolve` is the owner's dispatch, not a gated approval. Expense approval shows the gate.
 
