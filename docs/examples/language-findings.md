@@ -102,6 +102,52 @@ No check in this batch came near the 8 GB limit: the largest was 126 global stat
 - **Workaround.** A field `answered`, written on every path, so the handler always writes. It doubles the state count (25 to 35) and carries no meaning the program uses.
 - **Proposed fix.** A statement that says a completion was seen and changes nothing (`ignore`), accepted by PL2201 and recorded by the journal, or an exemption for a completion handler whose guard is an `if` on the status (v2.0 proposal P7).
 
+## Batch 3: pr-reviewer, support-drafts
+
+Both policy-dependent findings the batch was asked to show need nothing beyond the default check: the regions (`PL7001`), the `never` statements (`PL6503`) and the path properties (`PL4001`) all run in `poly check` with a policy beside the program. No flag or configuration is needed. Nothing in this batch exceeded 8 GB or lacked a verdict.
+
+### 14. A finding stops a program from running unless a person signs an acceptance of it
+
+- **Symptom.** `admit` of a program with a finding fails ("has no signed acceptance (PT12.5)"). A seeded defect therefore cannot be run to show the gate refusing what the check found, which is the point of a defense in depth.
+- **Appeared in.** pr-reviewer (the end-to-end run of the defect, to show the policy denying the merge).
+- **Workaround.** `acceptFindings` in `test/ex-kit.mjs` checks the project and writes one signed acceptance per finding, as an owner who accepted the defect would. Each README says so.
+- **Proposed fix.** None to the rule, which is right. A `poly accept` example in the READMEs, so the step is a command and not test code (v2.0 note, no proposal).
+
+### 15. A work order spends its order cap, whatever usage it reports
+
+- **Symptom.** With a run cap of 0.20 and an order cap of 0.10 a review held two orders, not four, though the agent reported small usage: the settled record reads `reserved 100000, actual 100000`. The reported usage is kept for reconciliation (`reconciled: "under"`) and nothing reads it.
+- **Appeared in.** pr-reviewer (the spec's budget arithmetic was wrong; the test writer saw it).
+- **Workaround.** The run cap is the number of orders on the longest path times the order cap: order cap 0.05, run cap 0.25. A month cap makes the refusal visible.
+- **Proposed fix.** A check-time finding when a workflow's longest path of orders costs more than its run cap (the path is known), and a README sentence in PT24.6 that the spend is the cap (v2.0 proposal P8).
+
+### 16. The check needs a large heap or it slows by an order of magnitude
+
+- **Symptom.** `support-drafts` (1,705 states) took 112 s in the default heap (the progress lines showed 40 s a pass; garbage collection near the limit is the likely cause and was not measured) and 8 s with `--max-old-space-size=8192`. Nothing tells the author.
+- **Appeared in.** support-drafts.
+- **Workaround.** The serial group runs it with a large heap (`examples/support-drafts/` joins it); the README gives the command.
+- **Proposed fix.** The command-line entry point re-executes itself with a larger heap when the host's memory allows, or reports its peak and says when it was near the limit.
+
+### 17. The check does not read the flow from a source to a decision
+
+- **Symptom.** In `support-drafts-defect.poly` the owner's notes are given to the external model's decision. Beside the program's own policy the check says `CLEAN`: the gate denies the notes at run time, and nothing at check time follows the items from the retrieval to the decision. Beside a policy without the audience rule the finding is `PL7001` and `PL6503`, and it is the policy's, not the program's. A change of the decision's provider is invisible to both, because a policy sees a decision's kind and taint, not its provider.
+- **Appeared in.** support-drafts.
+- **Workaround.** The rule, the `never` that proves it, and the end-to-end test that shows the gate saying no. The README states the limit.
+- **Proposed fix.** A declared audience ceiling on a decision (`audience customer`), checked statically against the classes of the sources its `Items` arguments come from, so the defect is a finding of the program (`PL6831`) without a policy (v2.0 proposal P9).
+
+### 18. Two effects of one machine cannot retrieve the same source
+
+- **Symptom.** `PL1002 effect read_notes has kind "source.notes.retrieve", which read declares with a different payload, completions or class (S41)`: a second effect that retrieves the source the first already retrieves, with other completions, is a duplicate kind.
+- **Appeared in.** support-drafts (the first draft of its defect, which pointed `read` at the notes source).
+- **Workaround.** A defect that adds a decision call instead of redirecting a retrieval.
+- **Proposed fix.** Give a retrieval effect its own kind from its name, or allow two retrievals of one source when their completions differ.
+
+### 19. A workflow must map a tool for an effect the program never emits
+
+- **Symptom.** To name `github.merge` in a policy the machine must declare the effect, and every declared effect of a workflow's machine must map a tool (`PL6803`), so the example maps a `gh_merge` tool that no order will ever use.
+- **Appeared in.** pr-reviewer.
+- **Workaround.** The effect is declared and mapped, never emitted, and the path property `never-merges` proves it. The bridge has no merge.
+- **Proposed fix.** A policy may name an effect kind of a tool declared in the workflow without a machine effect (a `deny tool` item in the workflow), so the denied tool need not be an effect the machine could emit.
+
 ## Conclusion
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.

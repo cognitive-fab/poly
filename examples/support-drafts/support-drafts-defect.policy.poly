@@ -1,0 +1,20 @@
+// The defect's policy: the program's without external-model-audience, so nothing denies the owner's notes to the external model.
+// The support-drafts policy (docs/examples/support-drafts.md). Every draft is escalated to the owner; the external model
+// is given nothing above the customer audience and the internal model nothing above the owner audience; a never statement
+// proves that notes never reach the external model. The rules that name the decisions also gate their region (PL7001).
+module drafts_policy
+
+policy drafts {
+  scope "drafts"
+  obligation owner-approves-drafts "A draft is created only after the owner approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "helpdesk.createDraft"
+    require false else escalate
+    on unknown escalate
+  }
+  obligation internal-model-audience "The internal model is given nothing above the owner audience." rule {
+    when proposal.kind == "effect" && effect.kind in { "decision.write", "decision.brief" } && !(effect.taint.class in { "public", "customer", "owner" })
+    require false else deny
+    on unknown deny
+  }
+  never notes-to-external-model "Notes never reach the external model.": allow when effect.kind == "decision.summary" && effect.taint.class == "owner"
+}

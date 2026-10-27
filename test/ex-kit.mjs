@@ -40,3 +40,29 @@ export const loadExample = (a, extra = {}) => loaded(a, extra);
 export async function settle(rt, n = 20) {
   for (let k = 0; k < n; k++) { await rt.advance?.(); await rt.worker.tick(); }
 }
+
+/**
+ * PT12.5: a program with findings is admitted only when a person has signed an acceptance of each. Checks the project,
+ * writes one acceptance per finding with a witness, signed by PERSON, into `accepted/`, and returns the findings'
+ * codes. The seeded defects of the new examples run in an end-to-end test this way, as an owner who accepted the
+ * finding would run them; the README of each says so.
+ */
+export async function acceptFindings(dir) {
+  const { checkProject } = await import('@poly/check');
+  const { signRecord } = await import('@poly/core');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { PERSON } = await import('./runtime-helpers.mjs');
+  const report = await checkProject(dir, { root: dir });
+  const accepted = [];
+  mkdirSync(join(dir, 'accepted'), { recursive: true });
+  for (const f of report.files) {
+    const all = [...f.machines, ...(f.configurations ?? []), ...(f.policies ?? [])].flatMap((m) => m.diagnostics ?? []);
+    for (const d of all) {
+      if (!d.witness) continue;
+      const subject = `${f.moduleDigest}:${d.witness.id}`;
+      writeFileSync(join(dir, 'accepted', `${accepted.length}.json`), JSON.stringify(signRecord({ kind: 'acceptance', subject, by: PERSON.keyId, at: '2026-10-02T00:00:00.000Z' }, PERSON.privateKeyPem)));
+      accepted.push(d.code);
+    }
+  }
+  return accepted;
+}

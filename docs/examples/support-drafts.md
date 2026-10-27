@@ -104,6 +104,14 @@ End-to-end test, over recorded traffic, nothing on the network (`test/after/`, s
 - uncertainty: a draft answered 503 ends `Uncertain` with one POST, and `Resolve(found: true)` ends `Created`;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
+## Amendments made when the code existed
+
+- **The check needs a large heap.** The 1,705 states take 8 s with `--max-old-space-size=8192` and 112 s in the default heap. `examples/support-drafts/` is in the serial group of `test/serial-sources.mjs`, and the commands in the README give the heap (language findings 16).
+- **The independent writer's end-to-end file first dispatched the completions (`Read`, `Noted`, ...) by hand**, which the runtime refuses; it was rewritten to dispatch only `Open`, `Propose` and `Resolve`. Its fake database used column names `ticket_id` and `owner` that `pgOrders` does not answer; the implementer changed them to `order_id` and `customer_id`. A provider's `cites` is an array of ids, not an object with a count. The policy's findings are in the report's own `diagnostics`, not a machine's.
+- **The handler checks `payload.body`** for none before reading it, since the generated type is `Content | null`.
+- **The refusal test asserts the denial.** The gate denies the extra `decision.summary` over the notes (`wrong-state` from `external-model-audience`), once, as well as the provider never being asked about a note.
+- **The policy-dependent finding needs no flag.** The regions and the `never` statements run in the default check (language findings 17).
+
 ## Conclusion
 
 The audience is held at run time by the gate and proved at check time only through the policy: the check cannot see that the notes reach the summary, and it finds the missing rule. Two lines of policy are all that stand between the notes and an external model, so the example keeps the rule, the `never` that proves it, and the end-to-end test that shows the gate saying no.

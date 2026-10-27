@@ -33,6 +33,8 @@ Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026
 - `expense-approval/`: a strict amount, verified claims, a property that the approver is never the submitter, and a payment above 200 euros that a person approves; checked `CLEAN`, with the submitter check removed in `expense-approval-defect.poly` (`PL3001`, 3-step witness).
 - `incident-oncall/`: a liveness property under fair timers (a page is acknowledged or escalated), paging at most once, and a snooze loop that starves the escalation; checked `CLEAN`, with the bound removed in `incident-oncall-defect.poly` (`PL3301`, 7-step lasso).
 - `order-fulfilment/`: a reserve, charge and ship saga with compensations, a configuration that cannot oversell, and a keyed charge; checked `CLEAN`, with the compensation after a failed shipment skipped in `order-fulfilment-defect.poly` (`PL3001`, 4-step witness).
+- `pr-reviewer/`: a workflow mapping an agent's tools to effects, a policy that allows the comment and the label and denies the merge, and a budget per review and per month; checked `CLEAN`, with the merge made reachable in `pr-reviewer-defect.poly` (`PL4001`, 5-step witness).
+- `support-drafts/`: customer messages and an owner's notes at two audiences, an external and an internal model, and every draft escalated to the owner; checked `CLEAN`, with the notes sent to the external model in `support-drafts-defect.poly` and its weakened policy (`PL6503` and `PL7001`, 1-step witnesses).
 
 ## Glossary
 

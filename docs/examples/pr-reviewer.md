@@ -138,6 +138,15 @@ End-to-end test, over recorded traffic, nothing on the network. A run is `rt.cre
 
 The example has no escalation to a person.
 
+## Amendments made when the code existed
+
+- **The budget spends the order cap, whatever usage is reported.** The spec's arithmetic read the reported steps as the spend. The budget bounds by reservation (K15): each order is charged its order cap, and `usage` is kept for reconciliation. With a run cap of 0.20 and an order cap of 0.10 a review held two orders. The numbers are now: order cap **0.05**, run cap **0.25**, a new month cap **0.45** (`cap usd 0.25 per run` and `cap usd 0.45 per month`). A review of four orders costs 0.20; the defect's merge is a fifth order that fits the run cap, so the policy, not the budget, is what refuses it (the budget is consulted first); and a third review in a month is refused at its second order. The price table and the recorded `steps` are unchanged and decide nothing.
+- **The refusal by budget** is therefore the month cap: pull requests 1 and 2 complete, pull request 3 gets its diff and its `reviewer` order is denied `budget`, ending `Failed` with no comment posted. The test asserts the denial reason, and for the merge that it is not `budget`.
+- **The defect runs only with a signed acceptance.** A program with findings is admitted only when a person has signed an acceptance of each (PT12.5). The end-to-end test uses `acceptFindings` in `test/ex-kit.mjs`, as an owner who accepted the finding would.
+- **The bridge keeps its memory per GitHub client** (the agent's session), not per `deps` object, since a driver may build `deps` anew for each order.
+- **The `PL6836` test** mutates the generated type the bridge imports (`Effects['github.label']['verdict']`), since `order.args` is a plain record and a wrong key in it is no type error.
+- **Sizes.** `Review` has 31 states (34 for the defect) and the budget machine 96. The tests were corrected for these after the code existed: the policy facts argument, `assert.rejects` for an async throw, the `asked` key `number`, and the `tsconfig` file name.
+
 ## Conclusion
 
 The check finds that the program can ask for a merge, in five steps, and the policy is what refuses it when the program does. Neither is enough alone: the policy cannot see why a merge was proposed, and the check cannot see what an agent does with a tool the program never mentions. The budget bounds what one review may spend, and the end-to-end test shows it refusing an order.
