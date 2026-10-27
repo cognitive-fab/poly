@@ -38,7 +38,7 @@ import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 export const isPolicy = (file) => file.endsWith('.policy.poly');
 
 /** The files of a directory that are checked on their own: every program, and no policy. */
-export const exampleFiles = (dir) => polyFiles(dir).filter((f) => !isPolicy(f));
+export const exampleFiles = (dir) => polyFiles(dir, { refused: true }).filter((f) => !isPolicy(f));
 
 /** The policy file beside a program, or null. */
 export function policyOf(file) {

@@ -190,6 +190,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },
+  // PT8.4 (language findings 20): a policy scope that matches no module, glob or configuration scope governs nothing.
+  PL6504: { name: 'POLICY_SCOPE_UNMATCHED', stage: 'policy', severity: 'error' },
   // S149: a policy allows a proposal its own `never` statement forbids.
   PL6503: { name: 'NEVER_VIOLATED', stage: 'policy', severity: 'finding' },
   // PS20.7, PT30.6: a promotion the sources, the record or the corpus kind do not bear out.
