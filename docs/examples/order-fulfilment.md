@@ -32,7 +32,7 @@ Module `fulfilment`. No audience is needed (no decision).
 
 `machine Order`: enum `St { Placed, Reserving, Charging, Shipping, Refunding, Done, Cancelled, Rejected, Stuck }`. State: `st` (`Placed`), `stock : Ref<Stock>` (none), `held : 0..1` (0), `charged : bool` (false). `terminal st in { Done, Cancelled, Rejected, Stuck }`.
 
-- `Place()`: `"not-placed"` unless `Placed`. Goes to `Reserving`, sends `Reserve(from: self)` to `stock`.
+- `Place(warehouse: Ref<Stock>)`: `"not-placed"` unless `Placed`; `"no-warehouse"` when `warehouse` is none. Goes to `Reserving`, records `stock` as `warehouse`, sends `Reserve(from: self)` to it. The host wires an order to the stock by this action, so a `Ref` field needs no creation data.
 - `Reserved()`: `"not-reserving"` unless `Reserving`. Goes to `Charging`, sets `held` to 1, emits `charge()`.
 - `OutOfStock()`: `"not-reserving"` unless `Reserving`. Goes to `Rejected`.
 - `Charged()`: `"not-charging"` unless `Charging`. Goes to `Shipping`, sets `charged`, emits `ship()`.
@@ -73,9 +73,9 @@ On `Order`:
 3. **Path property `charge-at-most-once`**: `count("payments.charge") <= 1`.
 4. **Path property `refund-needs-charge`**: `before("payments.charge", "payments.refund")`.
 
-The configuration `two-orders`: instances `stock : Stock` and `order[2] : Order { stock: stock }`; inputs `order[*].Place` and the completions `order[*].Charged`, `ChargeFailed`, `Shipped`, `ShipFailed`, `Refunded`, `RefundFailed`; bounds `transit 4`; invariant **`never-oversold`**: `sum(order[*].held) <= init(stock.onHand)`. Stock is never negative by its range, which is the automatic invariant `domain:onHand`.
+The configuration `two-orders`: instances `stock : Stock` and `order[2] : Order { stock: stock }`; inputs `order[*].Place` (with its `warehouse` parameter) and the completions `order[*].Charged`, `ChargeFailed`, `Shipped`, `ShipFailed`, `Refunded`, `RefundFailed`; bounds `transit 4`; invariant **`never-oversold`**: `sum(order[*].held) <= init(stock.onHand)`. Stock is never negative by its range, which is the automatic invariant `domain:onHand`.
 
-The program and its policy check `CLEAN`; the configuration has 126 global states.
+The program and its policy check `CLEAN`; the configuration has 126 global states, 2,107 global steps.
 
 ## Seeded defect
 
@@ -91,7 +91,7 @@ Light test:
 - the handlers: 201 ok; 402 throws with `permanent: true`; 503 throws without it; every request carries `idempotency-key`; the body carries `ctx.instanceId`; a missing throw fails the test;
 - `recordedServices`: answers by URL and by call count; defaults to 201; records requests.
 
-End-to-end test, over recorded services, nothing on the network. Orders are `fulfilment.Order` instances created with `{ id, stock }` where the stock instance is created first; check how `rt.create` takes a `Ref` field (look at the tests of `checkout`-like programs) and report an ambiguity rather than guessing:
+End-to-end test, over recorded services, nothing on the network. The stock is a `fulfilment.Stock` instance created first (`rt.create(kind, { id })`); each order is a `fulfilment.Order` instance created with `{ id }` and then `Place` with `{ warehouse: <the stock instance id> }`; messages between instances are delivered by the runtime, so settle between steps:
 
 - main path: `Place` on one order reserves, charges, ships: `Done`, one request to each of charge and ship, none to refund; stock `onHand` 0;
 - refusal: a second order placed against the one unit ends `Rejected` with no request; a charge answered 402 ends `Cancelled`, held 0, charged false, stock back to 1, no ship;
