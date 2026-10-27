@@ -1,0 +1,19 @@
+// The booker's policy (docs/examples/appointment-booker.md). A calendar write is allowed only while the calendar is
+// booking: the machine snapshot as of the emitting step says so, and an unknown snapshot is denied. The decision is
+// gated too: a request goes to a model only while the calendar is parsing. Without a rule that names decision.parse,
+// polycheck reaches it with no gate crossed (PL7001), since it sends private text out.
+module booker_policy
+
+policy calendar {
+  scope "booker"
+  obligation write-while-booking "A calendar write is allowed only while the calendar is booking." rule {
+    when proposal.kind == "effect" && effect.kind == "calendar.write"
+    require machine("booker.Calendar").phase == Booking else deny
+    on unknown deny
+  }
+  obligation parse-while-parsing "A request is sent to a model only while the calendar is parsing." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.parse"
+    require machine("booker.Calendar").phase == Parsing else deny
+    on unknown deny
+  }
+}

@@ -105,6 +105,12 @@ End-to-end test (`test/after/ex-appointment-booker-e2e.test.mjs`), over recorded
 
 The example has no escalation to a person.
 
+## Amendments made when the code existed
+
+- The program declares `audience { public < patient }`. Without an audience the runtime keeps no taint record for a body the host stores, and a decision over it fails closed as `Unparsed` (S302).
+- The policy holds a second obligation, `parse-while-parsing`, a rule that denies `decision.parse` unless the calendar is `Parsing`. Without a rule that names the decision, polycheck reports `PL7001` (a private-text egress region with no gate crossed).
+- The recorded answers are read from `examples/appointment-booker/recorded/answers.json`, as the file table says. The test writer's first version read a fixture elsewhere and used `rt.state`; the implementer corrected those, the refusal test (which asked for a taken slot on a fresh calendar) and two over-strict assertions after the code existed.
+
 ## Conclusion
 
 The property is small and exact: one comparison in `Parsed` is all that stands between the calendar and a double booking, and the check finds its absence in six steps. The keyed write and the held slot on an unanswered write are what the check cannot see, so the end-to-end test shows them.
