@@ -1,0 +1,352 @@
+[
+  {
+    "id": "C001",
+    "name": "Ada Alder",
+    "email": "ada.alder@example.test",
+    "phone": "+1-555-0100",
+    "city": "Oslo"
+  },
+  {
+    "id": "C002",
+    "name": "Bram Alder",
+    "email": "bram.alder@example.test",
+    "phone": "+1-555-0101",
+    "city": "Lima"
+  },
+  {
+    "id": "C003",
+    "name": "Cora Alder",
+    "email": "cora.alder@example.test",
+    "phone": "+1-555-0102",
+    "city": "Pune"
+  },
+  {
+    "id": "C004",
+    "name": "Dev Alder",
+    "email": "dev.alder@example.test",
+    "phone": "+1-555-0103",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C005",
+    "name": "Elin Alder",
+    "email": "elin.alder@example.test",
+    "phone": "+1-555-0104",
+    "city": "Accra"
+  },
+  {
+    "id": "C006",
+    "name": "Femi Alder",
+    "email": "femi.alder@example.test",
+    "phone": "+1-555-0105",
+    "city": "Oslo"
+  },
+  {
+    "id": "C007",
+    "name": "Gus Alder",
+    "email": "gus.alder@example.test",
+    "phone": "+1-555-0106",
+    "city": "Lima"
+  },
+  {
+    "id": "C008",
+    "name": "Hana Alder",
+    "email": "hana.alder@example.test",
+    "phone": "+1-555-0107",
+    "city": "Pune"
+  },
+  {
+    "id": "C009",
+    "name": "Ivo Alder",
+    "email": "ivo.alder@example.test",
+    "phone": "+1-555-0108",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C010",
+    "name": "Jun Alder",
+    "email": "jun.alder@example.test",
+    "phone": "+1-555-0109",
+    "city": "Accra"
+  },
+  {
+    "id": "C011",
+    "name": "Ada Birch",
+    "email": "ada.birch@example.test",
+    "phone": "+1-555-0110",
+    "city": "Oslo"
+  },
+  {
+    "id": "C012",
+    "name": "Bram Birch",
+    "email": "bram.birch@example.test",
+    "phone": "+1-555-0111",
+    "city": "Lima"
+  },
+  {
+    "id": "C013",
+    "name": "Cora Birch",
+    "email": "cora.birch@example.test",
+    "phone": "+1-555-0112",
+    "city": "Pune"
+  },
+  {
+    "id": "C014",
+    "name": "Dev Birch",
+    "email": "dev.birch@example.test",
+    "phone": "+1-555-0113",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C015",
+    "name": "Elin Birch",
+    "email": "elin.birch@example.test",
+    "phone": "+1-555-0114",
+    "city": "Accra"
+  },
+  {
+    "id": "C016",
+    "name": "Femi Birch",
+    "email": "femi.birch@example.test",
+    "phone": "+1-555-0115",
+    "city": "Oslo"
+  },
+  {
+    "id": "C017",
+    "name": "Gus Birch",
+    "email": "gus.birch@example.test",
+    "phone": "+1-555-0116",
+    "city": "Lima"
+  },
+  {
+    "id": "C018",
+    "name": "Hana Birch",
+    "email": "hana.birch@example.test",
+    "phone": "+1-555-0117",
+    "city": "Pune"
+  },
+  {
+    "id": "C019",
+    "name": "Ivo Birch",
+    "email": "ivo.birch@example.test",
+    "phone": "+1-555-0118",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C020",
+    "name": "Jun Birch",
+    "email": "jun.birch@example.test",
+    "phone": "+1-555-0119",
+    "city": "Accra"
+  },
+  {
+    "id": "C021",
+    "name": "Ada Cedar",
+    "email": "ada.cedar@example.test",
+    "phone": "+1-555-0120",
+    "city": "Oslo"
+  },
+  {
+    "id": "C022",
+    "name": "Bram Cedar",
+    "email": "bram.cedar@example.test",
+    "phone": "+1-555-0121",
+    "city": "Lima"
+  },
+  {
+    "id": "C023",
+    "name": "Cora Cedar",
+    "email": "cora.cedar@example.test",
+    "phone": "+1-555-0122",
+    "city": "Pune"
+  },
+  {
+    "id": "C024",
+    "name": "Dev Cedar",
+    "email": "dev.cedar@example.test",
+    "phone": "+1-555-0123",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C025",
+    "name": "Elin Cedar",
+    "email": "elin.cedar@example.test",
+    "phone": "+1-555-0124",
+    "city": "Accra"
+  },
+  {
+    "id": "C026",
+    "name": "Femi Cedar",
+    "email": "femi.cedar@example.test",
+    "phone": "+1-555-0125",
+    "city": "Oslo"
+  },
+  {
+    "id": "C027",
+    "name": "Gus Cedar",
+    "email": "gus.cedar@example.test",
+    "phone": "+1-555-0126",
+    "city": "Lima"
+  },
+  {
+    "id": "C028",
+    "name": "Hana Cedar",
+    "email": "hana.cedar@example.test",
+    "phone": "+1-555-0127",
+    "city": "Pune"
+  },
+  {
+    "id": "C029",
+    "name": "Ivo Cedar",
+    "email": "ivo.cedar@example.test",
+    "phone": "+1-555-0128",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C030",
+    "name": "Jun Cedar",
+    "email": "jun.cedar@example.test",
+    "phone": "+1-555-0129",
+    "city": "Accra"
+  },
+  {
+    "id": "C031",
+    "name": "Ada Dunn",
+    "email": "ada.dunn@example.test",
+    "phone": "+1-555-0130",
+    "city": "Oslo"
+  },
+  {
+    "id": "C032",
+    "name": "Bram Dunn",
+    "email": "bram.dunn@example.test",
+    "phone": "+1-555-0131",
+    "city": "Lima"
+  },
+  {
+    "id": "C033",
+    "name": "Cora Dunn",
+    "email": "cora.dunn@example.test",
+    "phone": "+1-555-0132",
+    "city": "Pune"
+  },
+  {
+    "id": "C034",
+    "name": "Dev Dunn",
+    "email": "dev.dunn@example.test",
+    "phone": "+1-555-0133",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C035",
+    "name": "Elin Dunn",
+    "email": "elin.dunn@example.test",
+    "phone": "+1-555-0134",
+    "city": "Accra"
+  },
+  {
+    "id": "C036",
+    "name": "Femi Dunn",
+    "email": "femi.dunn@example.test",
+    "phone": "+1-555-0135",
+    "city": "Oslo"
+  },
+  {
+    "id": "C037",
+    "name": "Gus Dunn",
+    "email": "gus.dunn@example.test",
+    "phone": "+1-555-0136",
+    "city": "Lima"
+  },
+  {
+    "id": "C038",
+    "name": "Hana Dunn",
+    "email": "hana.dunn@example.test",
+    "phone": "+1-555-0137",
+    "city": "Pune"
+  },
+  {
+    "id": "C039",
+    "name": "Ivo Dunn",
+    "email": "ivo.dunn@example.test",
+    "phone": "+1-555-0138",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C040",
+    "name": "Jun Dunn",
+    "email": "jun.dunn@example.test",
+    "phone": "+1-555-0139",
+    "city": "Accra"
+  },
+  {
+    "id": "C041",
+    "name": "Ada Ember",
+    "email": "ada.ember@example.test",
+    "phone": "+1-555-0140",
+    "city": "Oslo"
+  },
+  {
+    "id": "C042",
+    "name": "Bram Ember",
+    "email": "bram.ember@example.test",
+    "phone": "+1-555-0141",
+    "city": "Lima"
+  },
+  {
+    "id": "C043",
+    "name": "Cora Ember",
+    "email": "cora.ember@example.test",
+    "phone": "+1-555-0142",
+    "city": "Pune"
+  },
+  {
+    "id": "C044",
+    "name": "Dev Ember",
+    "email": "dev.ember@example.test",
+    "phone": "+1-555-0143",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C045",
+    "name": "Elin Ember",
+    "email": "elin.ember@example.test",
+    "phone": "+1-555-0144",
+    "city": "Accra"
+  },
+  {
+    "id": "C046",
+    "name": "Femi Ember",
+    "email": "femi.ember@example.test",
+    "phone": "+1-555-0145",
+    "city": "Oslo"
+  },
+  {
+    "id": "C047",
+    "name": "Gus Ember",
+    "email": "gus.ember@example.test",
+    "phone": "+1-555-0146",
+    "city": "Lima"
+  },
+  {
+    "id": "C048",
+    "name": "Hana Ember",
+    "email": "hana.ember@example.test",
+    "phone": "+1-555-0147",
+    "city": "Pune"
+  },
+  {
+    "id": "C049",
+    "name": "Ivo Ember",
+    "email": "ivo.ember@example.test",
+    "phone": "+1-555-0148",
+    "city": "Kyiv"
+  },
+  {
+    "id": "C050",
+    "name": "Jun Ember",
+    "email": "jun.ember@example.test",
+    "phone": "+1-555-0149",
+    "city": "Accra"
+  }
+]

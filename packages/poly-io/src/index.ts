@@ -4,6 +4,7 @@ export { sms, keywordOf, twilioSignature, OPT_OUT, OPT_IN, HELP, type TwilioConf
 export { email, unsubscribeUrl, type EmailConfig } from './adapters/email.js';
 export { slack, type SlackConfig } from './adapters/slack.js';
 export { webhook, type WebhookConfig } from './adapters/webhook.js';
+export { mcpClient, digestOf, MCP_PROTOCOL_VERSION, TOKEN_SHAPES, type McpClient, type McpConfig, type McpOutcome, type McpTool } from './mcp.js';
 export { submit, dotStuff, type Submission } from './smtp.js';
 export { ingress, type IngressAnswer } from './ingress.js';
 export { oauthVault, devKeychain, kmsStore, credentialIngress } from './vault.js';
