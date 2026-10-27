@@ -7,7 +7,7 @@ import { secretShapes } from '../packages/poly-check/dist/src/secrets.js';
 import { recordedMcp } from './fixtures/agentlab/recorded-mcp.mjs';
 
 const URL = 'https://gateway.example.test/surfaces/customer-records/mcp';
-const TOOLS = ['find_customers', 'get_customer', 'update_customer'];
+const TOOLS = ['find_customers', 'read_customer', 'update_customer'];
 const open = async (opts) => {
   const server = recordedMcp(opts);
   const client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport });
@@ -36,18 +36,37 @@ test('find_customers returns at most 10, over JSON and over a single-event SSE a
     const { client } = await open({ sse });
     const r = await client.callTool('find_customers', { query: 'example.test' });
     assert.equal(r.ok, true);
-    assert.equal(JSON.parse(r.text).length, 10);
+    assert.equal(JSON.parse(r.text).customers.length, 10);
+    assert.equal(r.structured.customers.length, 10);
     assert.equal(r.digest, digestOf(r.text));
   }
 });
 
-test('update_customer changes one field', async () => {
+for (const field of ['phone', 'address', 'email']) {
+  test(`update_customer changes one field: ${field}`, async () => {
+    const { server, client } = await open();
+    const before = { ...server.customers[3] };
+    const r = await client.callTool('update_customer', { id: before.id, field, value: `new ${field}` });
+    assert.equal(r.ok, true);
+    assert.deepEqual({ ...server.customers[3], [field]: before[field] }, before);
+    assert.equal(server.customers[3][field], `new ${field}`);
+  });
+}
+
+test('update_customer refuses a missing value', async () => {
+  const { server, client } = await open();
+  const before = { ...server.customers[0] };
+  const r = await client.callTool('update_customer', { id: before.id, field: 'phone' });
+  assert.deepEqual([r.ok, r.answered], [false, true]);
+  assert.deepEqual(server.customers[0], before);
+});
+
+test('update_customer refuses a field outside phone, address and email', async () => {
   const { server, client } = await open();
   const before = { ...server.customers[3] };
-  const r = await client.callTool('update_customer', { id: before.id, field: 'email', value: 'new@example.test' });
-  assert.equal(r.ok, true);
-  assert.deepEqual({ ...server.customers[3], email: before.email }, before);
-  assert.equal(server.customers[3].email, 'new@example.test');
+  const r = await client.callTool('update_customer', { id: before.id, field: 'name', value: 'x' });
+  assert.deepEqual([r.ok, r.answered], [false, true]);
+  assert.deepEqual(server.customers[3], before);
 });
 
 test('a tool the client was not configured with is refused before any request is sent', async () => {
@@ -61,7 +80,7 @@ test('a tool the client was not configured with is refused before any request is
 
 test('isError is a failure that keeps the tool text by digest', async () => {
   const { client } = await open();
-  const r = await client.callTool('get_customer', { id: 'C999' });
+  const r = await client.callTool('read_customer', { id: 'C999' });
   assert.equal(r.ok, false);
   assert.equal(r.answered, true);
   assert.equal(r.text, 'no customer C999');

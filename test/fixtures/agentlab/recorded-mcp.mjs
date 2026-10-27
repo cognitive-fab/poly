@@ -4,13 +4,19 @@
 import { readFileSync } from 'node:fs';
 
 const CUSTOMERS = JSON.parse(readFileSync(new URL('./customers.json', import.meta.url), 'utf8'));
+// The Desk changes phone and address directly; an email change goes through a person's approval, which is the Desk's rule and not the server's.
+const UPDATABLE = ['phone', 'address', 'email'];
 const SCHEMA = { type: 'object' };
 const LISTED = [
   { name: 'find_customers', description: 'Find customers by a text in name, email or city (at most 10).', inputSchema: SCHEMA },
-  { name: 'get_customer', description: 'One customer by id.', inputSchema: SCHEMA },
-  { name: 'update_customer', description: 'Change one field of a customer.', inputSchema: SCHEMA },
+  { name: 'read_customer', description: 'One customer by id.', inputSchema: SCHEMA },
+  { name: 'update_customer', description: 'Change one field (phone, address or email) of a customer.', inputSchema: SCHEMA },
 ];
 const text = (t, isError = false) => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
+// A find_customers result is { "customers": [...] }, as the text of the one content part and as structuredContent. The host
+// counts the customers of a read as the length of that array: parse McpOutcome.text (or read McpOutcome.structured) and take
+// `customers.length`. A read_customer result is the bare customer, which counts as one.
+const found = (customers) => ({ ...text(JSON.stringify({ customers })), structuredContent: { customers } });
 
 /**
  * opts.status: answer every request with this status (a 403 from the gateway, a 502);
@@ -32,17 +38,18 @@ export function recordedMcp(opts = {}) {
     if (name === 'find_customers') {
       const q = String(a.query ?? '').toLowerCase();
       const hits = customers.filter((c) => [c.name, c.email, c.city].some((v) => v.toLowerCase().includes(q))).slice(0, 10);
-      return text(JSON.stringify(hits));
+      return found(hits);
     }
-    if (name === 'get_customer') {
+    if (name === 'read_customer') {
       const c = customers.find((x) => x.id === a.id);
       return c ? text(JSON.stringify(c)) : text(`no customer ${a.id}`, true);
     }
     if (name === 'update_customer') {
       const c = customers.find((x) => x.id === a.id);
       if (!c) return text(`no customer ${a.id}`, true);
-      if (!['name', 'email', 'phone', 'city'].includes(a.field)) return text(`no field ${a.field}`, true);
-      c[a.field] = String(a.value);
+      if (!UPDATABLE.includes(a.field)) return text(`no field ${a.field}`, true);
+      if (typeof a.value !== 'string' || a.value === '') return text(`no value for ${a.field}`, true);
+      c[a.field] = a.value;
       return text(JSON.stringify(c));
     }
     // The gateway hides export_all_customers; the server behind it still has the tool.

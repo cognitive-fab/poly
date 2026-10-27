@@ -4,349 +4,399 @@
     "name": "Ada Alder",
     "email": "ada.alder@example.test",
     "phone": "+1-555-0100",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "1 Alder Street, Oslo"
   },
   {
     "id": "C002",
     "name": "Bram Alder",
     "email": "bram.alder@example.test",
     "phone": "+1-555-0101",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "2 Alder Street, Lima"
   },
   {
     "id": "C003",
     "name": "Cora Alder",
     "email": "cora.alder@example.test",
     "phone": "+1-555-0102",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "3 Alder Street, Pune"
   },
   {
     "id": "C004",
     "name": "Dev Alder",
     "email": "dev.alder@example.test",
     "phone": "+1-555-0103",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "4 Alder Street, Kyiv"
   },
   {
     "id": "C005",
     "name": "Elin Alder",
     "email": "elin.alder@example.test",
     "phone": "+1-555-0104",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "5 Alder Street, Accra"
   },
   {
     "id": "C006",
     "name": "Femi Alder",
     "email": "femi.alder@example.test",
     "phone": "+1-555-0105",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "6 Alder Street, Oslo"
   },
   {
     "id": "C007",
     "name": "Gus Alder",
     "email": "gus.alder@example.test",
     "phone": "+1-555-0106",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "7 Alder Street, Lima"
   },
   {
     "id": "C008",
     "name": "Hana Alder",
     "email": "hana.alder@example.test",
     "phone": "+1-555-0107",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "8 Alder Street, Pune"
   },
   {
     "id": "C009",
     "name": "Ivo Alder",
     "email": "ivo.alder@example.test",
     "phone": "+1-555-0108",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "9 Alder Street, Kyiv"
   },
   {
     "id": "C010",
     "name": "Jun Alder",
     "email": "jun.alder@example.test",
     "phone": "+1-555-0109",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "10 Alder Street, Accra"
   },
   {
     "id": "C011",
     "name": "Ada Birch",
     "email": "ada.birch@example.test",
     "phone": "+1-555-0110",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "11 Birch Street, Oslo"
   },
   {
     "id": "C012",
     "name": "Bram Birch",
     "email": "bram.birch@example.test",
     "phone": "+1-555-0111",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "12 Birch Street, Lima"
   },
   {
     "id": "C013",
     "name": "Cora Birch",
     "email": "cora.birch@example.test",
     "phone": "+1-555-0112",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "13 Birch Street, Pune"
   },
   {
     "id": "C014",
     "name": "Dev Birch",
     "email": "dev.birch@example.test",
     "phone": "+1-555-0113",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "14 Birch Street, Kyiv"
   },
   {
     "id": "C015",
     "name": "Elin Birch",
     "email": "elin.birch@example.test",
     "phone": "+1-555-0114",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "15 Birch Street, Accra"
   },
   {
     "id": "C016",
     "name": "Femi Birch",
     "email": "femi.birch@example.test",
     "phone": "+1-555-0115",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "16 Birch Street, Oslo"
   },
   {
     "id": "C017",
     "name": "Gus Birch",
     "email": "gus.birch@example.test",
     "phone": "+1-555-0116",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "17 Birch Street, Lima"
   },
   {
     "id": "C018",
     "name": "Hana Birch",
     "email": "hana.birch@example.test",
     "phone": "+1-555-0117",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "18 Birch Street, Pune"
   },
   {
     "id": "C019",
     "name": "Ivo Birch",
     "email": "ivo.birch@example.test",
     "phone": "+1-555-0118",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "19 Birch Street, Kyiv"
   },
   {
     "id": "C020",
     "name": "Jun Birch",
     "email": "jun.birch@example.test",
     "phone": "+1-555-0119",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "20 Birch Street, Accra"
   },
   {
     "id": "C021",
     "name": "Ada Cedar",
     "email": "ada.cedar@example.test",
     "phone": "+1-555-0120",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "21 Cedar Street, Oslo"
   },
   {
     "id": "C022",
     "name": "Bram Cedar",
     "email": "bram.cedar@example.test",
     "phone": "+1-555-0121",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "22 Cedar Street, Lima"
   },
   {
     "id": "C023",
     "name": "Cora Cedar",
     "email": "cora.cedar@example.test",
     "phone": "+1-555-0122",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "23 Cedar Street, Pune"
   },
   {
     "id": "C024",
     "name": "Dev Cedar",
     "email": "dev.cedar@example.test",
     "phone": "+1-555-0123",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "24 Cedar Street, Kyiv"
   },
   {
     "id": "C025",
     "name": "Elin Cedar",
     "email": "elin.cedar@example.test",
     "phone": "+1-555-0124",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "25 Cedar Street, Accra"
   },
   {
     "id": "C026",
     "name": "Femi Cedar",
     "email": "femi.cedar@example.test",
     "phone": "+1-555-0125",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "26 Cedar Street, Oslo"
   },
   {
     "id": "C027",
     "name": "Gus Cedar",
     "email": "gus.cedar@example.test",
     "phone": "+1-555-0126",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "27 Cedar Street, Lima"
   },
   {
     "id": "C028",
     "name": "Hana Cedar",
     "email": "hana.cedar@example.test",
     "phone": "+1-555-0127",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "28 Cedar Street, Pune"
   },
   {
     "id": "C029",
     "name": "Ivo Cedar",
     "email": "ivo.cedar@example.test",
     "phone": "+1-555-0128",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "29 Cedar Street, Kyiv"
   },
   {
     "id": "C030",
     "name": "Jun Cedar",
     "email": "jun.cedar@example.test",
     "phone": "+1-555-0129",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "30 Cedar Street, Accra"
   },
   {
     "id": "C031",
     "name": "Ada Dunn",
     "email": "ada.dunn@example.test",
     "phone": "+1-555-0130",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "31 Dunn Street, Oslo"
   },
   {
     "id": "C032",
     "name": "Bram Dunn",
     "email": "bram.dunn@example.test",
     "phone": "+1-555-0131",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "32 Dunn Street, Lima"
   },
   {
     "id": "C033",
     "name": "Cora Dunn",
     "email": "cora.dunn@example.test",
     "phone": "+1-555-0132",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "33 Dunn Street, Pune"
   },
   {
     "id": "C034",
     "name": "Dev Dunn",
     "email": "dev.dunn@example.test",
     "phone": "+1-555-0133",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "34 Dunn Street, Kyiv"
   },
   {
     "id": "C035",
     "name": "Elin Dunn",
     "email": "elin.dunn@example.test",
     "phone": "+1-555-0134",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "35 Dunn Street, Accra"
   },
   {
     "id": "C036",
     "name": "Femi Dunn",
     "email": "femi.dunn@example.test",
     "phone": "+1-555-0135",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "36 Dunn Street, Oslo"
   },
   {
     "id": "C037",
     "name": "Gus Dunn",
     "email": "gus.dunn@example.test",
     "phone": "+1-555-0136",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "37 Dunn Street, Lima"
   },
   {
     "id": "C038",
     "name": "Hana Dunn",
     "email": "hana.dunn@example.test",
     "phone": "+1-555-0137",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "38 Dunn Street, Pune"
   },
   {
     "id": "C039",
     "name": "Ivo Dunn",
     "email": "ivo.dunn@example.test",
     "phone": "+1-555-0138",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "39 Dunn Street, Kyiv"
   },
   {
     "id": "C040",
     "name": "Jun Dunn",
     "email": "jun.dunn@example.test",
     "phone": "+1-555-0139",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "40 Dunn Street, Accra"
   },
   {
     "id": "C041",
     "name": "Ada Ember",
     "email": "ada.ember@example.test",
     "phone": "+1-555-0140",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "41 Ember Street, Oslo"
   },
   {
     "id": "C042",
     "name": "Bram Ember",
     "email": "bram.ember@example.test",
     "phone": "+1-555-0141",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "42 Ember Street, Lima"
   },
   {
     "id": "C043",
     "name": "Cora Ember",
     "email": "cora.ember@example.test",
     "phone": "+1-555-0142",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "43 Ember Street, Pune"
   },
   {
     "id": "C044",
     "name": "Dev Ember",
     "email": "dev.ember@example.test",
     "phone": "+1-555-0143",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "44 Ember Street, Kyiv"
   },
   {
     "id": "C045",
     "name": "Elin Ember",
     "email": "elin.ember@example.test",
     "phone": "+1-555-0144",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "45 Ember Street, Accra"
   },
   {
     "id": "C046",
     "name": "Femi Ember",
     "email": "femi.ember@example.test",
     "phone": "+1-555-0145",
-    "city": "Oslo"
+    "city": "Oslo",
+    "address": "46 Ember Street, Oslo"
   },
   {
     "id": "C047",
     "name": "Gus Ember",
     "email": "gus.ember@example.test",
     "phone": "+1-555-0146",
-    "city": "Lima"
+    "city": "Lima",
+    "address": "47 Ember Street, Lima"
   },
   {
     "id": "C048",
     "name": "Hana Ember",
     "email": "hana.ember@example.test",
     "phone": "+1-555-0147",
-    "city": "Pune"
+    "city": "Pune",
+    "address": "48 Ember Street, Pune"
   },
   {
     "id": "C049",
     "name": "Ivo Ember",
     "email": "ivo.ember@example.test",
     "phone": "+1-555-0148",
-    "city": "Kyiv"
+    "city": "Kyiv",
+    "address": "49 Ember Street, Kyiv"
   },
   {
     "id": "C050",
     "name": "Jun Ember",
     "email": "jun.ember@example.test",
     "phone": "+1-555-0149",
-    "city": "Accra"
+    "city": "Accra",
+    "address": "50 Ember Street, Accra"
   }
 ]
