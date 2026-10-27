@@ -20,7 +20,8 @@ export async function admitExample(name, { program = `${name}.poly`, policy = `$
   const p = project(`ex-${tag}`, [], key, 'test-examples-e2e');
   copyFileSync(join(dir, program), join(p, 'src', program));
   if (policy && existsSync(join(dir, policy))) copyFileSync(join(dir, policy), join(p, 'src', policy));
-  copyFileSync(join(dir, 'host', 'handlers.ts'), join(p, 'src', 'handlers.ts'));
+  // An example with no effect handler (research-agents) has no host/handlers.ts; project() has written a stub.
+  if (existsSync(join(dir, 'host', 'handlers.ts'))) copyFileSync(join(dir, 'host', 'handlers.ts'), join(p, 'src', 'handlers.ts'));
   for (const d of ['maps', 'prices']) if (existsSync(join(dir, d))) cpSync(join(dir, d), join(p, 'src', d), { recursive: true });
   await signPolicies(p);
   const r = await admit(p);

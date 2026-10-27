@@ -1,0 +1,102 @@
+// expected: REFUSED PL1205
+// Claim intake, the seeded defect (docs/examples/claim-intake.md): the confidence is added to the margin before it is
+// compared. A Conf may be compared with a constant and nothing else, so the type stage refuses the program (PL1205): a
+// refusal is an error with no witness, and no later stage runs.
+module claims
+
+audience { public < claimant < adjuster }
+
+enum Category { Auto, Home, Medical, Other }
+
+enum Status { Received, Classifying, Review, Assigning, Assigned, Failed }
+
+machine Claim {
+  state {
+    status  : Status = Received
+    flagged : bool = false
+    sure    : bool = false
+  }
+
+  terminal status in { Assigned, Failed }
+
+  action File(description: Content, fraud: bool)
+  action Classified(category: Category, conf: Conf, margin: Conf)
+  action Unclassified()
+  action Decide(category: Category)
+  action Assigned()
+  action AssignFailed()
+
+  on File(description, fraud) {
+    require status == Received else reject "filed"
+    flagged' = fraud
+    status' = Classifying
+    decide classify(description: description)
+  }
+
+  // A claim goes to an adjuster's queue by itself only when the calibrated confidence is at least 0.8; below it a person
+  // decides. A fraud flag does not change the route: it makes the assignment wait for a person's approval (the policy).
+  on Classified(category, conf, margin) {
+    require status == Classifying else reject "not-classifying"
+    if conf + margin >= 1 {
+      sure' = true
+      status' = Assigning
+      emit assign(category: category, flagged: flagged)
+    } else {
+      status' = Review
+    }
+  }
+
+  on Unclassified {
+    require status == Classifying else reject "not-classifying"
+    status' = Review
+  }
+
+  on Decide(category) {
+    require status == Review else reject "not-review"
+    status' = Assigning
+    emit assign(category: category, flagged: flagged)
+  }
+
+  on Assigned {
+    require status == Assigning else reject "not-assigning"
+    status' = Assigned
+  }
+
+  on AssignFailed {
+    require status == Assigning else reject "not-assigning"
+    status' = Failed
+  }
+
+  step property confident-or-person: (action == Classified && post.status == Assigning) implies conf >= 0.8
+  path property assign-at-most-once: count("claims.assign") <= 1
+
+  decision classify(description: Content) -> Category {
+    route classify
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(category: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unclassified()
+  }
+
+  effect assign(category: Category, flagged: bool) {
+    kind "claims.assign"
+    labels { egress:external }
+    targets { egress: "https://claims.example/v1/queues" }
+    class compensable
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Assigned()
+    failed -> AssignFailed()
+    exhausted -> AssignFailed()
+  }
+}
+
+route classify {
+  tier small provider "small" prices "prices/small.json" calibration "maps/classify-small.json" max input tokens 4000 max tokens 20
+  tier large provider "large" prices "prices/large.json" calibration "maps/classify-large.json" max input tokens 4000 max tokens 20
+  escalate when conf < 0.8 or failed
+  budget monthly
+}
+
+budget monthly {
+  cap usd 20 per month
+}

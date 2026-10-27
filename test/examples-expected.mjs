@@ -51,7 +51,7 @@ export function policyOf(file) {
  * two with the policy signed as a person signs it, the program's maps and prices copied beside them. The report has the
  * shape `mismatch` reads, with the policies' diagnostics in `diagnostics`.
  */
-export async function checkExample(file, root, name = 'example') {
+export async function checkExample(file, root, name = relative(ROOT, file).replace(/[^a-z0-9]+/gi, '-')) {
   const policy = policyOf(file);
   if (!policy) return checkFile(file, { root });
   const key = makeKey(name);

@@ -113,6 +113,14 @@ End-to-end test, over recorded traffic, nothing on the network (the route's tier
 - escalation on a fraud flag: `staged`, filed with `fraud: true`, is classified and its assignment is **escalated** by the gate, with no POST; a person's signed approval (`approvalFor`, `rt.approve`) releases it, then one POST with `flagged: true`;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`), the route's tier choices among them.
 
+## Amendments made when the code existed
+
+- **The recorded usage is `{ input, output }`**, the keys of the price table, not `inputTokens` and `outputTokens`. The route is priced, so the keys matter (language findings 21).
+- **A route records one decision event**, for the tier that answered (`route`, `tier`, `tierIndex`, `raw`, `conf`, `calibration`). The small tier's call is in `asked`. For `pipe-burst` the large tier's raw 0.90 is recorded with the calibrated confidence **820**, which is the value of the map's largest point not above 0.90: the calibration reads a step of the map, not an interpolation. The test asserts the tier, the raw value, that the calibrated one is at least 800 and is not the raw one, and the map's `fittedFor`.
+- **A route and a budget are machines in the report** (`classify.Route` 6 states, `monthly.Budget` 96), not configurations. A refusal's diagnostic is in the report's own `diagnostics`. The tests were corrected for these after the code existed.
+- **`REFUSED <code>` joins the expected-verdict line** (`test/examples-expected.mjs`, `examples/README.md`), because `PL1205` is an error and its verdict is `REFUSED`.
+- **What "never compared" produces.** The task named `PL1205` for it. `PL1205` is a confidence compared with a non-constant; a confidence never compared is `PL3002` and `PL6201`, which is the second defect file (language findings 22).
+
 ## Conclusion
 
 The confidence is the one number in the program that a model writes, so the language lets it be compared and nothing else, and refuses the arithmetic. What the check cannot say is whether the calibration is right; the example shows the calibrated number the program saw, and the two seeded defects show the two ways of not using it.

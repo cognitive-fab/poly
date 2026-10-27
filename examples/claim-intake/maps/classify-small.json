@@ -1,0 +1,36 @@
+{
+  "decision": "classify",
+  "version": 1,
+  "fittedFor": "flash-2026-09",
+  "points": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      100,
+      60
+    ],
+    [
+      300,
+      220
+    ],
+    [
+      500,
+      400
+    ],
+    [
+      800,
+      700
+    ],
+    [
+      950,
+      880
+    ]
+  ],
+  "digest": "sha256:847ea3e7fa40dee524de96bb63ba1cac4dc12e7c80bee89d0f4ed26708d86a4e"
+}

@@ -1,0 +1,18 @@
+// The claim intake policy (docs/examples/claim-intake.md). A flagged claim is assigned only after a person approves it: the
+// assignment is escalated, and the owner's signed approval releases it. The decision is named too: without a rule that names
+// it, polycheck reaches it with no gate crossed (PL7001).
+module claims_policy
+
+policy intake {
+  scope "claims"
+  obligation fraud-flag-needs-person "A flagged claim is assigned only after a person approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "claims.assign" && machine("claims.Claim").flagged
+    require false else escalate
+    on unknown escalate
+  }
+  obligation classify-while-classifying "A claim is sent to a model only while it is being classified." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.classify"
+    require machine("claims.Claim").status == Classifying else deny
+    on unknown deny
+  }
+}

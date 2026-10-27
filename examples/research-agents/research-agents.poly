@@ -1,0 +1,177 @@
+// expected: CLEAN
+// Research agents (docs/examples/research-agents.md). A planner and two workers answer a question together: the planner asks
+// a model for a focus and sends the question to both workers; each worker retrieves documents, has a model answer from them
+// and tells the planner. An answer must cite the documents it used (the runtime refuses one that cites none), and the
+// planner's and the workers' decisions draw on one budget. The configuration `inquiry` checks the three machines together,
+// within a transit bound of 4, for the property no one machine has: every worker that reports has cited.
+module research
+
+audience { public < team }
+
+source docs: records {
+  adapter "postgres"
+  audience public
+  freshness 8760h
+}
+
+enum Focus { Facts, Opinions }
+
+enum PlannerStatus { Idle, Planning, Waiting, Done, Failed }
+
+enum WorkerStatus { Idle, Reading, Researching, Reported, GaveUp }
+
+service machine Planner {
+  state {
+    status   : PlannerStatus = Idle
+    first    : Ref<Worker> = none
+    second   : Ref<Worker> = none
+    reports  : 0..2 = 0
+    gaveup   : 0..2 = 0
+    asked    : Content = none
+  }
+
+  action Wire(a: Ref<Worker>, b: Ref<Worker>)
+  action Ask(question: Content)
+  action Planned(focus: Focus)
+  action Unplanned()
+  action Report()
+  action GaveUp()
+
+  on Wire(a, b) {
+    require first == none else reject "wired"
+    require a != none && b != none && a != b else reject "no-worker"
+    first' = a
+    second' = b
+  }
+
+  on Ask(question) {
+    require status == Idle && first != none else reject "not-ready"
+    status' = Planning
+    asked' = question
+    decide plan(question: question)
+  }
+
+  on Planned(focus) {
+    require status == Planning else reject "not-planning"
+    status' = Waiting
+    send first <- Task(question: asked, from: self)
+    send second <- Task(question: asked, from: self)
+  }
+
+  // A plan that failed leaves the workers unasked, and they are told so: an idle worker is not an ended one.
+  on Unplanned {
+    require status == Planning else reject "not-planning"
+    status' = Failed
+    send first <- Cancel()
+    send second <- Cancel()
+  }
+
+  on Report {
+    require status == Waiting else reject "not-waiting"
+    reports' = reports + 1
+    if reports + gaveup == 1 {
+      status' = Done
+    }
+  }
+
+  on GaveUp {
+    require status == Waiting else reject "not-waiting"
+    gaveup' = gaveup + 1
+    if reports + gaveup == 1 {
+      status' = Done
+    }
+  }
+
+  decision plan(question: Content) -> Focus {
+    provider "small"
+    prices "prices/small.json" max input tokens 2000 max tokens 20 budget research
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Planned(focus: r.answer)
+    failed -> Unplanned()
+  }
+}
+
+machine Worker {
+  state {
+    status  : WorkerStatus = Idle
+    planner : Ref<Planner> = none
+    cited   : bool = false
+    answer  : Content = none
+  }
+
+  terminal status in { Reported, GaveUp }
+
+  action Task(question: Content, from: Ref<Planner>)
+  action Cancel()
+  action Found(items: Items)
+  action FoundFailed()
+  action Answered(text: Content, cites: Items)
+  action Unanswered()
+
+  on Task(question, from) {
+    require status == Idle else reject "busy"
+    planner' = from
+    status' = Reading
+    emit lookup(topic: question)
+  }
+
+  on Cancel {
+    require status == Idle else reject "busy"
+    status' = GaveUp
+  }
+
+  on Found(items) {
+    require status == Reading else reject "not-reading"
+    status' = Researching
+    decide research(evidence: items)
+  }
+
+  on FoundFailed {
+    require status == Reading else reject "not-reading"
+    status' = GaveUp
+    send planner <- GaveUp()
+  }
+
+  on Answered(text, cites) {
+    require status == Researching else reject "not-researching"
+    status' = Reported
+    cited' = true
+    answer' = text
+    send planner <- Report()
+  }
+
+  on Unanswered {
+    require status == Researching else reject "not-researching"
+    status' = GaveUp
+    send planner <- GaveUp()
+  }
+
+  effect lookup(topic: Content) {
+    retrieve docs limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> FoundFailed()
+  }
+
+  decision research(evidence: Items) -> Content {
+    provider "small"
+    prices "prices/small.json" max input tokens 2000 max tokens 200 budget research
+    labels { egress:external, read:private }
+    timeout 5s
+    cites evidence
+    ok(r) -> Answered(text: r.answer, cites: r.cites)
+    failed -> Unanswered()
+  }
+}
+
+budget research {
+  cap usd 0.001 per month
+}
+
+configuration inquiry {
+  planner   : Planner
+  worker[2] : Worker { planner: planner }
+  inputs    { planner.Wire, planner.Ask, planner.Planned, planner.Unplanned, worker[*].Found, worker[*].FoundFailed, worker[*].Answered, worker[*].Unanswered }
+  bounds    { transit 4 }
+  invariant answers-cite: forall i in worker: worker[i].status is Reported implies worker[i].cited
+}

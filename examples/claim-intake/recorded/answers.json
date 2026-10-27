@@ -1,0 +1,86 @@
+{
+  "models": {
+    "small": "flash-2026-09",
+    "large": "opus-2026-08"
+  },
+  "claims": [
+    {
+      "id": "rear-ended",
+      "text": "Another car hit me from behind at the light.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Auto",
+          "p": 0.97,
+          "usage": {
+            "input": 14,
+            "output": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "pipe-burst",
+      "text": "A pipe burst in the kitchen overnight.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Home",
+          "p": 0.6,
+          "usage": {
+            "input": 12,
+            "output": 2
+          }
+        },
+        {
+          "tier": "large",
+          "answer": "Home",
+          "p": 0.9,
+          "usage": {
+            "input": 12,
+            "output": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "vague-loss",
+      "text": "Something was damaged, I am not sure what.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Other",
+          "p": 0.5,
+          "usage": {
+            "input": 12,
+            "output": 2
+          }
+        },
+        {
+          "tier": "large",
+          "answer": "Other",
+          "p": 0.55,
+          "usage": {
+            "input": 12,
+            "output": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "staged",
+      "text": "Rear-ended again, the same car as last month.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Auto",
+          "p": 0.97,
+          "usage": {
+            "input": 14,
+            "output": 2
+          }
+        }
+      ]
+    }
+  ]
+}

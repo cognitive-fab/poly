@@ -1,0 +1,18 @@
+// The research policy (docs/examples/research-agents.md). Each decision is allowed only while its machine is in the step that
+// asks for it, read from the machine snapshot as of the emitting step; an unknown snapshot is denied. Without a rule that
+// names a decision, polycheck reaches it with no gate crossed (PL7001).
+module research_policy
+
+policy inquiry {
+  scope "research"
+  obligation plan-while-planning "A question is sent to a model for a plan only while the planner is planning." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.plan"
+    require machine("research.Planner").status == Planning else deny
+    on unknown deny
+  }
+  obligation research-while-researching "Documents are sent to a model only while a worker is researching." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.research"
+    require machine("research.Worker").status == Researching else deny
+    on unknown deny
+  }
+}

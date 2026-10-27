@@ -36,6 +36,8 @@ Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026
 - `order-fulfilment/`: a reserve, charge and ship saga with compensations, a configuration that cannot oversell, and a keyed charge; checked `CLEAN`, with the compensation after a failed shipment skipped in `order-fulfilment-defect.poly` (`PL3001`, 4-step witness).
 - `pr-reviewer/`: a workflow mapping an agent's tools to effects, a policy that allows the comment and the label and denies the merge, and a budget per review and per month; checked `CLEAN`, with the merge made reachable in `pr-reviewer-defect.poly` (`PL4001`, 5-step witness).
 - `support-drafts/`: customer messages and an owner's notes at two audiences, an external and an internal model, and every draft escalated to the owner; checked `CLEAN`, with the notes sent to the external model in `support-drafts-defect.poly` and its weakened policy (`PL6503` and `PL7001`, 1-step witnesses).
+- `claim-intake/`: a routed, calibrated classification, assignment by itself above 0.8, a person below it and on a fraud flag; checked `CLEAN`, with two seeded defects: a confidence added to a margin (`REFUSED PL1205`, no witness) and a confidence never compared (`PL3002` and `PL6201`, 2-step witnesses).
+- `research-agents/`: a planner and two workers checked together as a configuration (699 global states), answers that must cite and one shared budget; checked `CLEAN`, with a worker that can report uncited in `research-agents-defect.poly` (`PL5401`, 6-step witness).
 
 ## Glossary
 
