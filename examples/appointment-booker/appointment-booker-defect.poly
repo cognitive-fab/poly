@@ -1,0 +1,112 @@
+// expected: FINDING PL3002
+// Appointment booker, the seeded defect (docs/examples/appointment-booker.md). A typed decision reads a free-text request and answers a
+// day and an hour. The program books that slot through an irreversible write, once, and refuses a slot that is taken.
+// The write carries the intent's idempotency key (host/handlers.ts), so a retry cannot book twice; an unanswered write
+// leaves the slot taken, since the event may exist, and only a person's Resolve frees it. The property the check proves
+// is the step property free-slot-only: Booking is entered only for a slot that was free.
+// Seeded defect: the overlap check is gone, so a confident parse always books, taken or not.
+module booker
+
+// A request body is a patient's text. Declaring the audience is what makes the runtime keep a taint record for the body
+// the host stores (PS17.4, S302); without one, a decision over that body fails closed.
+audience { public < patient }
+
+type When = { day: 0..1, hour: 0..1 }
+
+enum Phase { Idle, Parsing, Booking, Booked, Conflict, Unclear, Failed, Uncertain }
+
+service machine Calendar {
+  state {
+    phase : Phase = Idle
+    taken : map<0..3, bool> = [false, false, false, false]
+    slot  : 0..3 = 0
+  }
+
+  action Ask(text: Content)
+  action Parsed(day: 0..1, hour: 0..1, dconf: Conf, hconf: Conf)
+  action Unparsed()
+  action Written()
+  action WriteFailed()
+  action WriteUncertain()
+  action Resolve(found: bool)
+  action Reset()
+
+  on Ask(text) {
+    require phase == Idle else reject "busy"
+    phase' = Parsing
+    decide parse(text: text)
+  }
+
+  // Both fields must be confident: a day known and an hour guessed is not a booking.
+  on Parsed(day, hour, dconf, hconf) {
+    require phase == Parsing else reject "not-parsing"
+    if dconf >= 0.8 && hconf >= 0.8 {
+      phase' = Booking
+      slot' = day * 2 + hour
+      taken' = taken with [day * 2 + hour] = true
+      emit write(slot: day * 2 + hour)
+    } else {
+      phase' = Unclear
+    }
+  }
+
+  on Unparsed {
+    require phase == Parsing else reject "not-parsing"
+    phase' = Unclear
+  }
+
+  on Written {
+    require phase == Booking else reject "not-booking"
+    phase' = Booked
+  }
+
+  on WriteFailed {
+    require phase == Booking else reject "not-booking"
+    phase' = Failed
+    taken' = taken with [slot] = false
+  }
+
+  // The write was tried to its limit with no answer. The slot stays taken (it may be booked); a person looks.
+  on WriteUncertain {
+    require phase == Booking else reject "not-booking"
+    phase' = Uncertain
+  }
+
+  on Resolve(found) {
+    require phase == Uncertain else reject "not-uncertain"
+    if found {
+      phase' = Booked
+    } else {
+      phase' = Failed
+      taken' = taken with [slot] = false
+    }
+  }
+
+  on Reset {
+    require phase == Booked || phase == Conflict || phase == Unclear || phase == Failed else reject "not-settled"
+    phase' = Idle
+  }
+
+  step property free-slot-only: (action == Parsed && post.phase == Booking) implies !pre.taken[post.slot]
+  invariant booking-holds-slot: phase == Booking implies taken[slot]
+  invariant booked-holds-slot: phase == Booked implies taken[slot]
+
+  decision parse(text: Content) -> When {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Parsed(day: r.answer.day, hour: r.answer.hour, dconf: r.conf.day, hconf: r.conf.hour)
+    failed -> Unparsed()
+  }
+
+  effect write(slot: 0..3) {
+    kind "calendar.write"
+    labels { egress:external }
+    targets { egress: "https://calendar.example/v1/events" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Written()
+    failed -> WriteFailed()
+    exhausted -> WriteUncertain()
+  }
+}

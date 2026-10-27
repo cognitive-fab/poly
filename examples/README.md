@@ -28,6 +28,7 @@ Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026
 - `oms/` and `orders/`: the order management machines.
 - `concierge/`: a small business's customer assistant on WhatsApp and Slack, with refunds through a Stripe grant that a person approves above 100; checked `CLEAN` with its policy and run end to end on recorded traffic (`concierge/README.md`).
 - `inbox/`: the owner's daily Gmail assistant, which triages mail, keeps one to-do per thread and prepares drafts the owner approves; checked `CLEAN` with its policy, with steps to run it on your own mailboxes (`inbox/README.md`).
+- `appointment-booker/`: a typed date and time decision, an irreversible keyed calendar write and a property against double-booking; checked `CLEAN`, with the overlap check removed in `appointment-booker-defect.poly` (`PL3002`, 6-step witness).
 
 ## Glossary
 

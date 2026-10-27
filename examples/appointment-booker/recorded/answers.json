@@ -1,0 +1,13 @@
+{
+  "models": { "small": "recorded-small-2026-10" },
+  "requests": [
+    { "id": "tue-nine", "text": "Can I get Tuesday at nine?", "answer": { "day": 0, "hour": 0 },
+      "distribution": [[{ "day": 0, "hour": 0 }, 0.95], [{ "day": 0, "hour": 1 }, 0.05]], "usage": { "inputTokens": 12, "outputTokens": 6 } },
+    { "id": "tue-nine-again", "text": "Tuesday at nine please, for my sister.", "answer": { "day": 0, "hour": 0 },
+      "distribution": [[{ "day": 0, "hour": 0 }, 0.95], [{ "day": 0, "hour": 1 }, 0.05]], "usage": { "inputTokens": 13, "outputTokens": 6 } },
+    { "id": "wed-ten", "text": "Wednesday at ten works.", "answer": { "day": 1, "hour": 1 },
+      "distribution": [[{ "day": 1, "hour": 1 }, 0.92], [{ "day": 1, "hour": 0 }, 0.08]], "usage": { "inputTokens": 9, "outputTokens": 6 } },
+    { "id": "vague", "text": "Sometime next week?", "answer": { "day": 1, "hour": 0 },
+      "distribution": [[{ "day": 1, "hour": 0 }, 0.5], [{ "day": 0, "hour": 1 }, 0.5]], "usage": { "inputTokens": 5, "outputTokens": 6 } }
+  ]
+}
