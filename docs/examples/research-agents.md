@@ -105,6 +105,13 @@ End-to-end test, over recorded traffic, nothing on the network:
 
 The example has no escalation to a person.
 
+## Amendments made when the code existed
+
+- **The recorded usage is `{ input, output }`, per decision.** The fixture's `usage` moved into `plan.usage` (2000 input, 20 output tokens) and `research.usage` (2000, 200), the maxima the decisions declare, so a call's actual cost equals its reservation and the arithmetic above holds: an inquiry costs 0.000208 + 2 x 0.00028 = 0.000768 of the 0.001 cap, and a second inquiry's plan (0.000208) fits while its first worker's research does not. With the keys `inputTokens` and `outputTokens`, which the price table does not name, the call was charged at the table's highest price, 0.000808, and every later call was denied (language findings 21).
+- **`admitExample` copies `host/handlers.ts` only when it exists**; this example has none (its only effect is a retrieval), so `test/ex-kit.mjs` was changed.
+- The report's machines include the budget machine (`research.Budget`); the writer's light test expected two machines. `plan` records only `{ decision }` in `asked`, as this spec says, and the test was corrected to expect items on `research` entries only. `host/inquiry.ts` casts the question to the branded `Content` the generated type asks for.
+- Planner 301 states, Worker 19 states, configuration 699 global states (1,545 for the defect), as predicted; the check takes about 2 s.
+
 ## Conclusion
 
 The property is about the system: no one machine breaks it, and the configuration finds the worker that can report without citing, in six steps. The check is within a bound (one planner, two workers, four messages in transit), and the shared budget is the thing neither machine can see of the other.

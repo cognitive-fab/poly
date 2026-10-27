@@ -184,6 +184,31 @@ The static check follows a taint from a source to the places where data *leaves*
 - **Workaround.** The scope is the module's name.
 - **Proposed fix.** A policy whose scope matches no module of the project is a finding (`PL6504`, "the scope governs nothing"), since the regions it reports are then about no effect at all.
 
+## Batch 4: claim-intake, research-agents
+
+The stopping rule (a liveness or saga check over 8 GB, or with no verdict) did not apply: the largest instance was the 699 global states of `inquiry` and each check took 2 to 3 s.
+
+### 21. A usage key the price table does not name is charged at the table's highest price
+
+- **Symptom.** A recorded decision reported `usage: { inputTokens: 2000, outputTokens: 20 }`; the price table's keys are `input` and `output`. The runtime charged both unknown keys at the highest price in the table: 808 micro-dollars against a reservation of 208, an overrun of 600, so the shared budget of 1,000 was spent by one call and every later call was denied `budget`. Nothing said why; the record lists the keys as `unpriced`.
+- **Appeared in.** research-agents (the first end-to-end run: both workers gave up).
+- **Workaround.** The fixture uses `input` and `output`.
+- **Proposed fix.** A usage report with an unpriced key is a failed call (`usage-invalid`), as a missing report is (`chargeOf` already has the two violations), or at least a warning in `poly cost`. A fail-safe charge that exhausts a budget is a silent denial of service on the example's own run.
+
+### 22. `PL1205` is not "a confidence that is never compared", and its verdict has no expected line
+
+- **Symptom.** `PL1205 CONFIDENCE_NOT_COMPARED` fires on a `Conf` used in arithmetic or compared with a non-constant (`conf + margin >= 1`), and its verdict is `REFUSED`, with no witness. A confidence never compared at all is a finding of the machine (`PL3002` against a step property that reads it, `PL6201` when an irreversible effect follows), with witnesses. The name of the code suggests the second.
+- **Appeared in.** claim-intake.
+- **Workaround.** Two defect files, one for each meaning. The expected-verdict line grammar gained `REFUSED <code>`, since it could state only `CLEAN`, `FINDING` and `INCONCLUSIVE`.
+- **Proposed fix.** Rename `PL1205` to say what it checks (`CONFIDENCE_USED_NOT_COMPARED_TO_CONSTANT`), and report a confidence a handler never reads as its own diagnostic where no irreversible effect follows.
+
+### 23. An example with no effect handler has no handler file, and its wiring is an action
+
+- **Symptom.** `research-agents` has only a retrieval effect, so it has no `host/handlers.ts`; the shared admission helper assumed one. Its planner also needs `Wire(a, b)` to hold its workers (the configuration wires the field for the check, an action does at run time: finding 10 again), and needs `Cancel` so a plan that fails does not leave idle workers `PL5402 STUCK`.
+- **Appeared in.** research-agents.
+- **Workaround.** `admitExample` copies the handlers file only when it exists; the host code is `host/inquiry.ts`; `Wire` and `Cancel` are in the program.
+- **Proposed fix.** See finding 10 for the wiring. A worker that was never asked is "idle", and `terminal` could be allowed to name an initial state when a machine's whole life is waiting for a task.
+
 ## Conclusion
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.

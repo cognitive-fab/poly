@@ -1,0 +1,38 @@
+{
+  "models": {
+    "small": "recorded-small-2026-10"
+  },
+  "documents": [
+    {
+      "id": "d-1",
+      "asOf": "2026-09-01T09:00:00.000Z",
+      "body": "The harbour dredging of 1912 deepened the channel to nine metres."
+    },
+    {
+      "id": "d-2",
+      "asOf": "2026-09-02T09:00:00.000Z",
+      "body": "The channel was widened again in 1958 to take larger ships."
+    },
+    {
+      "id": "d-3",
+      "asOf": "2026-09-03T09:00:00.000Z",
+      "body": "Silting has reduced the depth by about a metre since the last survey."
+    }
+  ],
+  "plan": {
+    "focus": "Facts",
+    "p": 0.9,
+    "usage": {
+      "input": 2000,
+      "output": 20
+    }
+  },
+  "research": {
+    "text": "The channel was dredged to nine metres in 1912 and widened in 1958; silting has since taken about a metre.",
+    "p": 0.9,
+    "usage": {
+      "input": 2000,
+      "output": 200
+    }
+  }
+}
