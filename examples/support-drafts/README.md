@@ -22,7 +22,7 @@ node --test test/ex-support-drafts.test.mjs
 node --test test/after/ex-support-drafts-e2e.test.mjs
 ```
 
-The first two check each program alone, with no policy, so they report what a program alone shows; the tests check each program with its policy beside it, as a project.
+A larger instance than this one (1,705 states, about 10 s in the default heap) may need a larger heap: set `NODE_OPTIONS=--max-old-space-size=8192`. The first two check each program alone, with no policy, so they report what a program alone shows; the tests check each program with its policy beside it, as a project.
 
 ## What is checked
 

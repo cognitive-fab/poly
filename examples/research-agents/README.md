@@ -22,7 +22,7 @@ node --test test/ex-research-agents.test.mjs
 node --test test/after/ex-research-agents-e2e.test.mjs
 ```
 
-The tests check each program with its policy beside it, as a project. The program has no effect handler (its only effect is a retrieval), so the host code is `host/inquiry.ts`, which wires and starts an inquiry against the generated types.
+The tests check each program with its policy beside it, as a project. The configuration is small (699 global states, about 2 s); a larger bound or a third worker may need `NODE_OPTIONS=--max-old-space-size=8192`. The program has no effect handler (its only effect is a retrieval), so the host code is `host/inquiry.ts`, which wires and starts an inquiry against the generated types.
 
 ## What is checked
 

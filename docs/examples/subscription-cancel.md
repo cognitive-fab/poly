@@ -87,6 +87,11 @@ End-to-end test, over recorded services, nothing on the network. Timers fire whe
 - escalation to a person: a cancellation refused by billing (422) ends `Stuck`;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
+## Amendments made when the code existed
+
+- **One settle carries a request through its offer.** After `Request` and a settle the subscription is `Offered` (the offer was sent in the same settle), not `Offering`; the writer's end-to-end file asserted the middle state (language findings 11) and dispatched `OfferFailed` by hand, which a test must not do. The failed-offer test now scripts the marketing service to answer 422 and asserts the end: `Cancelled` with the offer attempted once. The tests were corrected for this after the code existed.
+- The defect's lasso is 5 steps and its path witness 3, as predicted; `Subscription` has 7 states in both programs.
+
 ## Conclusion
 
 Liveness is what a retention flow owes the subscriber: whatever the service does, a request ends. The check finds the loop in five steps, and the one-line fix is what the property says: a decline cancels. What no check can say is that the offer is worth making.

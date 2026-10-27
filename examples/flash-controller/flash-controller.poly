@@ -1,0 +1,77 @@
+// expected: CLEAN
+// Flash controller (docs/examples/flash-controller.md). A pure state machine for one block of a flash chip: erased,
+// programming, programmed, verifying, verified, erasing, bad. A block is programmed only when it is erased (the step property
+// erased-before-program), and one that fails verification is erased and programmed again up to two retries, then marked bad.
+// There is no effect, no decision and no model: the host drives a device and tells the machine what the device did.
+module flash
+
+enum State { Erased, Programming, Programmed, Verifying, Verified, Erasing, Bad }
+
+machine Block {
+  state {
+    state   : State = Erased
+    data    : 0..3 = 0
+    retries : 0..2 = 0
+  }
+
+  terminal state == Bad
+
+  action Program(value: 0..3)
+  action ProgramDone()
+  action ProgramFailed()
+  action Verify()
+  action VerifyPassed()
+  action VerifyFailed()
+  action Erase()
+  action EraseDone()
+
+  on Program(value) {
+    require state == Erased else reject "not-erased"
+    state' = Programming
+    data' = value
+  }
+
+  on ProgramDone {
+    require state == Programming else reject "not-programming"
+    state' = Programmed
+  }
+
+  on ProgramFailed {
+    require state == Programming else reject "not-programming"
+    state' = Programmed
+  }
+
+  on Verify {
+    require state == Programmed else reject "not-programmed"
+    state' = Verifying
+  }
+
+  on VerifyPassed {
+    require state == Verifying else reject "not-verifying"
+    state' = Verified
+  }
+
+  on VerifyFailed {
+    require state == Verifying else reject "not-verifying"
+    if retries < 2 {
+      retries' = retries + 1
+      state' = Erasing
+    } else {
+      state' = Bad
+    }
+  }
+
+  on Erase {
+    require state == Programmed || state == Verified else reject "nothing-to-erase"
+    state' = Erasing
+  }
+
+  on EraseDone {
+    require state == Erasing else reject "not-erasing"
+    state' = Erased
+  }
+
+  step property erased-before-program: action == Program implies pre.state == Erased
+  invariant bad-after-limit: state == Bad implies retries == 2
+  step property data-written-only-by-program: action != Program implies post.data == pre.data
+}

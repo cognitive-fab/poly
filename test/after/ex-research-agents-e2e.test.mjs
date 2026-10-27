@@ -183,12 +183,11 @@ test('research-agents: uncited answer refusal - recorded research with no cites 
   const { rt, clock } = await loadExample(a);
 
   try {
-    // Modify the recorded provider to return no cites for one call.
-    const originalAnswers = { ...answers };
-    originalAnswers.research = { ...answers.research, cites: [] };
-
-    const provider = recordedResearch(originalAnswers);
+    // The recorded models answer as usual, and then `research` is replaced by a provider whose answer cites nothing (PS17.6):
+    // the recorded provider always cites the items it was given, so a changed fixture could not make it uncited.
+    const provider = recordedResearch(answers);
     provideRecorded(rt, provider);
+    rt.provide('research', { provider: () => ({ answer: answers.research.text, distribution: [[answers.research.text, answers.research.p]], cites: [], usage: answers.research.usage, reported: answers.models.small, latencyMs: 0 }), model: answers.models.small });
 
     const docRows = answers.documents.map((d) => ({
       order_id: d.id,
@@ -211,16 +210,16 @@ test('research-agents: uncited answer refusal - recorded research with no cites 
 
     for (let i = 0; i < 20; i++) await settle(rt);
 
-    // The worker that got the uncited answer should be GaveUp, not Reported.
-    const state1 = (await rt.getState(workerId1)).state;
-    assert.ok(['GaveUp', 'Reported'].includes(state1.status), `worker-uncited-1 status; got ${state1.status}`);
-    if (state1.status === 'GaveUp') {
-      assert.equal(state1.cited, false, 'worker-uncited-1 cited is false when GaveUp');
+    // Both workers' answers were uncited, so the runtime refused them: each worker gave up and cited nothing, and the refusal is on
+    // each run's ledger. (Strengthened by the implementer: the writer's version accepted Reported and passed with no refusal.)
+    for (const id of [workerId1, workerId2]) {
+      const state = (await rt.getState(id)).state;
+      assert.deepEqual([state.status, state.cited], ['GaveUp', false], id);
+      const refusals = (await rt.chain(id)).filter((e) => e.body?.stage === 'citation' && e.body.outcome === 'uncited');
+      assert.equal(refusals.length, 1, `${id}: the citation refusal is recorded`);
     }
-
-    // The planner should still reach Done (one report, one give-up, or two gives-up).
     const plannerState = (await rt.getState(plannerId)).state;
-    assert.equal(plannerState.status, 'Done', `planner should be Done; got ${plannerState.status}`);
+    assert.deepEqual([plannerState.status, plannerState.reports, plannerState.gaveup], ['Done', 0, 2]);
 
     console.log(`research-agents uncited: uncited answer caused worker GaveUp`);
   } finally {
