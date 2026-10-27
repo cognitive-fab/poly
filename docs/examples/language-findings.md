@@ -65,12 +65,12 @@ No check in this batch came near the 8 GB limit: the largest was 126 global stat
 - **Workaround.** `Triaged` pages only when `conf >= 0.8`; an unsure or failed answer goes to `Review`, and a person's `Classify` pages. The example gained a state and an action.
 - **Proposed fix.** None to the rule, which is right. The message could say that a failed or unsure answer routed to a person is the usual shape, and a fail-safe default for an alarm (page when unsure) has no spelling: it needs the confidence to be compared and the paging on both sides of the comparison, which the rule reads as ungated.
 
-### 9. A terminal instance rejects with `terminal`, not the handler's reason
+### 9. A terminal instance rejects with `terminal`, not the handler's reason (resolved: the specification now says so)
 
 - **Symptom.** The spec said `Ack` on a `Logged` incident is rejected `not-waiting`. The runtime answers `terminal`: every action of an instance in a terminal state is refused before its handler.
 - **Appeared in.** incident-oncall (the end-to-end refusal test).
 - **Workaround.** The spec and the test say `terminal`.
-- **Proposed fix.** Say it in PT4.4a where the terminal rule is written, with the reason string; a handler's own `reject` text is unreachable from a terminal state, so it cannot be tested there.
+- **Resolved.** The runtime was right: PS3.2 already gives the row `term(s)` the verdict `rejected("terminal")` and PS3.1 reserves the reason. The example spec was wrong, and PT4.4a did not say it. PT4.4a now says it, with a pointer to PS3.2, and `test/ex-terminal-reason.test.mjs` shows that the dispatch is rejected `terminal` before the handler, so a handler's own `reject` text is unreachable from a terminal state. The choice was the spec, not the runtime, because PS3.2 is the definition and the runtime agrees with it.
 
 ### 10. A `Ref` field is wired in the check and by an action at run time
 
@@ -92,6 +92,15 @@ No check in this batch came near the 8 GB limit: the largest was 126 global stat
 - **Appeared in.** incident-oncall.
 - **Workaround.** The recorded provider's distribution gives the confidence; no test dispatches a completion.
 - **Proposed fix.** Print a `Conf` in a witness and in the host types as the decimal the source writes, or document the scale in PT28.1a next to the `number` type it gives.
+
+## Batch 2 follow-up: incident-oncall
+
+### 13. A handler may not do nothing, so a late completion cannot be ignored
+
+- **Symptom.** `on PageSent { if status == Paging { status' = Paged } }` is `PL2201` ("can complete with no write, no effect and no rejection", PT4.4): the `if` has a path that does nothing. The alternative, a `require`, makes a late completion a rejected one, which is consumed and never completes again, so the machine's liveness assumption (S126, S463) is open. A page can be acknowledged before its answer, so the case is real; a review found it.
+- **Appeared in.** incident-oncall (a review of the batch 2 commit).
+- **Workaround.** A field `answered`, written on every path, so the handler always writes. It doubles the state count (25 to 35) and carries no meaning the program uses.
+- **Proposed fix.** A statement that says a completion was seen and changes nothing (`ignore`), accepted by PL2201 and recorded by the journal, or an exemption for a completion handler whose guard is an `if` on the status (v2.0 proposal P7).
 
 ## Conclusion
 

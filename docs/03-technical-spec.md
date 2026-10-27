@@ -293,6 +293,8 @@ A handler that can complete with no write, no effect and no rejection is reporte
 
 `terminal <expr>` is a predicate over the state. The compiler requires it to depend only on the primary control field, which is the first field of the `state` block (the polygraph contract rule "the first key is treated as the primary control state"). It lowers to `terminalStates`, the list of values of that field that satisfy the predicate. A terminal predicate that reads any other field is `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`.
 
+**A terminal instance refuses every action (PS3.2).** A dispatch to an instance whose control field is terminal is rejected with the reserved reason `terminal`, before any guard and before the handler runs, whatever the action. A handler's own `reject` text is therefore never seen in a terminal state, and a test of one there gets `terminal` (`test/ex-terminal-reason.test.mjs`).
+
 ### PT4.5 Example and lowering
 
 ```poly

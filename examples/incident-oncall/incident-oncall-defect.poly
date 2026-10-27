@@ -12,8 +12,9 @@ enum Status { Reported, Triaging, Review, Logged, Paging, Paged, Snoozed, Escala
 
 machine Incident {
   state {
-    status  : Status = Reported
-    snoozes : 0..2   = 0
+    status   : Status = Reported
+    snoozes  : 0..2   = 0
+    answered : bool   = false
   }
 
   terminal status in { Logged, Unreached, Resolved }
@@ -71,16 +72,23 @@ machine Incident {
     }
   }
 
+  // An acknowledgement can arrive before the page's answer, so these two completions are taken in any status and act
+  // only from Paging: a completion that a handler rejects is consumed and never completes again (PS6.4, S463). `answered`
+  // records that the page was answered, since a handler that may do nothing is PL2201.
   on PageSent {
-    require status == Paging else reject "not-paging"
-    status' = Paged
+    answered' = true
+    if status == Paging {
+      status' = Paged
+    }
   }
 
   on PageFailed {
-    require status == Paging else reject "not-paging"
-    status' = Escalating
-    cancel ack
-    emit escalate()
+    answered' = true
+    if status == Paging {
+      status' = Escalating
+      cancel ack
+      emit escalate()
+    }
   }
 
   on Ack {

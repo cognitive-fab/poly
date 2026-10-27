@@ -52,7 +52,6 @@ test('incident-oncall: main path - db-down pages once, Ack ends Acked, advance 1
 
     // The recorded decision answers High at 0.95, so the incident pages and is Paged.
     let state = (await rt.getState(id)).state;
-    state = (await rt.getState(id)).state;
     assert.equal(state.status, 'Paged', 'status should be Paged after page succeeds');
     assert.equal(egress.sent.length, 1, 'one page POST sent');
     assert.equal(egress.sent[0].url, 'https://pager.example/v1/pages');
@@ -70,7 +69,7 @@ test('incident-oncall: main path - db-down pages once, Ack ends Acked, advance 1
 
     // Still one POST (the page), no escalation.
     assert.equal(egress.sent.length, 1, 'no escalation after 10 minutes with Ack');
-    assert.equal(state.status, 'Acked', 'still Acked');
+    assert.equal((await rt.getState(id)).state.status, 'Acked', 'still Acked after the clock moved');
 
     // Resolve.
     await rt.dispatch(id, 'Resolve', {});
@@ -388,6 +387,41 @@ test('incident-oncall: journal replays with no divergence', { timeout: 120_000 }
     }
 
     console.log(`replay: ${replays.length} runs, ${replays.reduce((n, x) => n + x.rows, 0)} rows; ${sessions.length} gate sessions; divergences: ${replays.reduce((n, x) => n + x.diagnostics.length, 0) + sessions.reduce((n, s) => n + s.diagnostics.length, 0)}`);
+  } finally {
+    await rt.close();
+  }
+});
+
+// Written by the implementer after the code existed, for a review finding (the writer's spec had no such case): an
+// acknowledgement can arrive before the page's answer. The late PageSent is taken, changes nothing, and is not a rejected
+// step, so the machine does not wait on a completion that a handler refused (PS6.4, S463).
+test('incident-oncall: an Ack before the page is answered leaves the late PageSent accepted, and the incident Acked', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  let pages = 0;
+  const egress = recordingEgress((req) => ({ status: req.url.endsWith('/pages') && ++pages === 1 ? 503 : 201, headers: {}, body: {} }));
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-late' });
+    await rt.dispatch('inc-late', 'Report', { summary: await rt.putContent('Primary database is down, all writes are failing.') });
+    await settle(rt);
+    assert.equal((await rt.getState('inc-late')).state.status, 'Paging', 'the first page attempt was answered 503, so the page is still out');
+    const ack = await rt.dispatch('inc-late', 'Ack', {});
+    assert.equal(ack.stepKind, 'accepted');
+    clock.advance(1000);
+    await settle(rt);
+    const journal = await rt.getJournal('inc-late');
+    const late = journal.find((j) => j.action === 'PageSent');
+    assert.ok(late, 'the retried page was answered and PageSent was dispatched');
+    assert.deepEqual(journal.filter((j) => j.action === 'PageSent').map((j) => j.stepKind ?? j.verdict ?? 'accepted'), ['accepted']);
+    const state = (await rt.getState('inc-late')).state;
+    assert.deepEqual([state.status, state.answered], ['Acked', true]);
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 2, 'two attempts, one page');
   } finally {
     await rt.close();
   }

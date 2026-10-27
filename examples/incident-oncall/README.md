@@ -28,23 +28,23 @@ The tests check the program with its policy beside it, as a project.
 
 | Check | Result |
 |---|---|
-| Program with its policy | `CLEAN`; `Incident` over 25 states, 2 content representatives; the liveness stage ran under weak fairness; about 1 s |
+| Program with its policy | `CLEAN`; `Incident` over 35 states, 2 content representatives; the liveness stage ran under weak fairness; about 1 s |
 | Policy | all seven stages `CLEAN` |
-| Defect copy | `FINDINGS`, exactly `PL3301 LIVENESS_LASSO` (`page-is-answered`), a witness of 7 steps: `Report`, `Triaged(High, 800, 0)`, `PageSent`, then the cycle `Snooze`, `Wake`, `Snooze`, `Wake`; 12 states |
+| Defect copy | `FINDINGS`, exactly `PL3301 LIVENESS_LASSO` (`page-is-answered`), a witness of 9 steps: `Report`, `Triaged(High, 800, 0)`, `PageSent`, then a cycle of six that holds `Snooze` and `Wake` (and the late `PageSent` and `PageFailed`, which weak fairness also holds in it); 22 states |
 | Host handlers | compile under `poly check --host`; a wrong payload field is `PL6836` |
-| End to end | 8 tests: main path, a timeout that escalates, a low severity logged and a third snooze refused, an unsure report sent to a person, a snooze that cancels the escalation and wakes, a refused page that escalates, and a journal that replays (3 runs, 18 rows, 1 gate session, no divergence) |
+| End to end | 9 tests: main path, a timeout that escalates, a low severity logged and a third snooze refused, an unsure report sent to a person, a snooze that cancels the escalation and wakes, a refused page that escalates, an acknowledgement that arrives before the page is answered, and a journal that replays (3 runs, 18 rows, 1 gate session, no divergence) |
 
 ## What is not checked
 
 - **Time.** The check does not compare durations: 5 minutes and 15 minutes are only "a timer that may fire". That the escalation comes five minutes after the page is the end-to-end test's, on a clock it moves.
 - **The bound on snoozes is 2.** `snoozes` is `0..2`, so `CLEAN` is a statement about at most two snoozes. The defect shows what an unbounded one does. No other domain was reduced.
-- **Liveness assumes the completions.** The property assumes every completion of the program's own page and escalation is accepted (S126). The handlers of those completions reject only when the status is wrong, which the program's own steps cannot reach.
+- **Liveness assumes the completions.** The property assumes every completion of the program's own page and escalation is accepted (S126). Since an `Ack` can arrive while the page is out, `PageSent` and `PageFailed` are taken in every status and act only from `Paging`, so the handlers of the program's own completions never reject; a test covers the late one.
 - **Nobody acts.** `Ack` is not assumed, which is why the escalation exists; a person who never classifies a `Review` incident leaves it there, and the property is about pages, not reviews.
 - **The pager.** The recorded services answer by status; the real pager's dedupe by key is its own.
 
 ## Conclusion
 
-Liveness is the property a person cannot see by reading: every action is individually fine, and the starvation is in the cycle between two of them. The check finds it as a lasso of seven steps, and the bound on snoozes is the whole fix. The check is fast here (25 states); the cost of the example was in the decision, which may not page unless it is sure.
+Liveness is the property a person cannot see by reading: every action is individually fine, and the starvation is in the cycle between two of them. The check finds it as a lasso of nine steps, and the bound on snoozes is the whole fix. The check is fast here (35 states); the cost of the example was in the decision, which may not page unless it is sure.
 
 ## Glossary
 
