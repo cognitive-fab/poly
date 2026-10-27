@@ -1,0 +1,7 @@
+{
+  "prs": [
+    { "number": 1, "title": "Fix off-by-one in pager", "diff": "--- a/pager.c\n+++ b/pager.c\n@@ -41 +41 @@\n-  for (i = 0; i <= n; i++)\n+  for (i = 0; i < n; i++)", "verdict": "Good", "comment": "The loop bound was one too high; the fix is right and covered by the new test.", "steps": 4000 },
+    { "number": 2, "title": "Remove input validation", "diff": "--- a/api.c\n+++ b/api.c\n@@ -12,4 +12,0 @@\n-  if (!valid(req)) return 400;", "verdict": "Bad", "comment": "This removes the only check on the request; an invalid request now reaches the parser.", "steps": 4000 },
+    { "number": 3, "title": "Rewrite the scheduler", "diff": "--- a/sched.c\n+++ b/sched.c\n@@ -1,300 +1,420 @@\n(a rewrite of the scheduler, 420 lines)", "verdict": "Good", "comment": "A large rewrite with tests for each queue; no defect found, but the size deserves a second reader.", "steps": 10000 }
+  ]
+}

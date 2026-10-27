@@ -1,0 +1,31 @@
+{
+  "models": { "small": "recorded-small-2026-10", "internal": "recorded-internal-2026-10" },
+  "customers": {
+    "owner-1": { "label": "the owner of the first mailbox" },
+    "owner-2": { "label": "the owner of the second mailbox" }
+  },
+  "tickets": [
+    { "id": "t-1001", "owner": "owner-1", "asOf": "2026-10-20T09:00:00.000Z", "body": "My invoice shows two charges for March." },
+    { "id": "t-1002", "owner": "owner-1", "asOf": "2026-10-21T09:00:00.000Z", "body": "Please confirm you have fixed it." },
+    { "id": "t-2001", "owner": "owner-2", "asOf": "2026-10-20T10:00:00.000Z", "body": "Where is my parcel?" }
+  ],
+  "notes": [
+    { "id": "n-1001", "owner": "owner-1", "asOf": "2026-10-19T09:00:00.000Z", "body": "Refund is allowed up to 100 for this customer; be brief." },
+    { "id": "n-2001", "owner": "owner-2", "asOf": "2026-10-19T10:00:00.000Z", "body": "Customer prefers email over phone." }
+  ],
+  "answers": {
+    "summary": {
+      "owner-1": { "text": "The customer reports a double charge on the March invoice and asks for confirmation of the fix.", "p": 0.9 },
+      "owner-2": { "text": "The customer asks where a parcel is.", "p": 0.9 }
+    },
+    "write": {
+      "owner-1": { "text": "Thank you for writing. The second March charge was a duplicate and has been reversed.", "p": 0.9 },
+      "owner-2": { "text": "Thank you for writing. Your parcel is on its way.", "p": 0.9 }
+    },
+    "brief": {
+      "owner-1": { "text": "Refunds up to 100 are allowed for this customer; keep the reply short.", "p": 0.9 },
+      "owner-2": { "text": "This customer prefers email.", "p": 0.9 }
+    }
+  },
+  "usage": { "inputTokens": 40, "outputTokens": 20 }
+}

@@ -1,0 +1,209 @@
+// expected: CLEAN
+// Support drafts (docs/examples/support-drafts.md). For one customer the program reads the customer's messages (audience
+// customer), has an external model summarize them and an internal model write a draft that cites them, reads the owner's
+// private notes (audience owner) and has the internal model brief the owner, then proposes the draft; every draft waits for
+// the owner's signed approval. The external model may be given nothing above the customer audience: the policy denies a
+// summary whose taint is higher, and a never statement proves it.
+module drafts
+
+audience { public < customer < owner }
+
+source tickets: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 720h
+}
+
+source notes: records {
+  adapter "postgres"
+  audience owner owned
+  freshness 720h
+}
+
+enum Status { Opening, Reading, Drafting, Noting, Briefing, Ready, Proposed, Created, Uncertain, Failed }
+
+machine Ticket {
+  state {
+    status   : Status = Opening
+    owner    : Principal = none
+    summed   : bool = false
+    written  : bool = false
+    summary  : Content = none
+    draft    : Content = none
+    brief    : Content = none
+  }
+
+  terminal status in { Created, Failed }
+
+  action Open(who: Principal)
+  action Read(items: Items)
+  action ReadFailed()
+  action Summed(text: Content)
+  action Unsummed()
+  action Written(text: Content, cites: Items)
+  action Unwritten()
+  action Noted(items: Items)
+  action NotesFailed()
+  action Briefed(text: Content)
+  action Unbriefed()
+  action Propose()
+  action Made()
+  action NotMade()
+  action MakeUncertain()
+  action Resolve(found: bool)
+
+  on Open(who) {
+    require status == Opening else reject "opened"
+    owner' = who
+    status' = Reading
+    emit read(who: who)
+  }
+
+  on Read(items) {
+    require status == Reading else reject "not-reading"
+    status' = Drafting
+    decide summary(thread: items)
+    decide write(thread: items)
+  }
+
+  on ReadFailed {
+    require status == Reading else reject "not-reading"
+    status' = Failed
+  }
+
+  on Summed(text) {
+    require status == Drafting && !summed else reject "not-drafting"
+    summed' = true
+    summary' = text
+    if written {
+      status' = Noting
+      emit read_notes(who: owner)
+    }
+  }
+
+  on Unsummed {
+    require status == Drafting && !summed else reject "not-drafting"
+    summed' = true
+    if written {
+      status' = Noting
+      emit read_notes(who: owner)
+    }
+  }
+
+  on Written(text, cites) {
+    require status == Drafting && !written else reject "not-drafting"
+    written' = true
+    draft' = text
+    if summed {
+      status' = Noting
+      emit read_notes(who: owner)
+    }
+  }
+
+  on Unwritten {
+    require status == Drafting && !written else reject "not-drafting"
+    status' = Failed
+  }
+
+  on Noted(items) {
+    require status == Noting else reject "not-noting"
+    status' = Briefing
+    decide brief(notes: items)
+  }
+
+  on NotesFailed {
+    require status == Noting else reject "not-noting"
+    status' = Ready
+  }
+
+  on Briefed(text) {
+    require status == Briefing else reject "not-briefing"
+    brief' = text
+    status' = Ready
+  }
+
+  on Unbriefed {
+    require status == Briefing else reject "not-briefing"
+    status' = Ready
+  }
+
+  // The draft is proposed to the owner: the policy escalates it, and only the owner's signed approval lets it through.
+  on Propose {
+    require status == Ready else reject "not-ready"
+    status' = Proposed
+    emit createDraft(who: owner, body: draft)
+  }
+
+  on Made {
+    require status == Proposed else reject "not-proposed"
+    status' = Created
+  }
+
+  on NotMade {
+    require status == Proposed else reject "not-proposed"
+    status' = Ready
+  }
+
+  on MakeUncertain {
+    require status == Proposed else reject "not-proposed"
+    status' = Uncertain
+  }
+
+  on Resolve(found) {
+    require status == Uncertain else reject "not-uncertain"
+    if found {
+      status' = Created
+    } else {
+      status' = Ready
+    }
+  }
+
+  effect read(who: Principal) {
+    retrieve tickets where owner == who limit 3
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  effect read_notes(who: Principal) {
+    retrieve notes where owner == who limit 3
+    ok(r) -> Noted(items: r.items)
+    failed -> NotesFailed()
+  }
+
+  decision summary(thread: Items) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Summed(text: r.answer)
+    failed -> Unsummed()
+  }
+
+  decision write(thread: Items) -> Content {
+    provider "internal"
+    labels { egress:external, read:private }
+    timeout 20s
+    cites thread
+    ok(r) -> Written(text: r.answer, cites: r.cites)
+    failed -> Unwritten()
+  }
+
+  decision brief(notes: Items) -> Content {
+    provider "internal"
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Briefed(text: r.answer)
+    failed -> Unbriefed()
+  }
+
+  effect createDraft(who: Principal, body: Content) {
+    kind "helpdesk.createDraft"
+    labels { egress:external, read:private }
+    targets { egress: "https://helpdesk.example/v1/drafts" }
+    to who
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 30s }
+    ok -> Made()
+    failed -> NotMade()
+    exhausted -> MakeUncertain()
+  }
+}

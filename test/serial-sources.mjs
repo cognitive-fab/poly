@@ -3,10 +3,11 @@
 // validation 210 s, about eleven minutes added to the parallel suite. They stay in the standing rule's coverage
 // (test/standing.test.mjs); only where their checks run moves. A path is a directory from the repository root.
 // The inbox joins the concierge (ruled 2026-10-10): its check takes about two minutes and up to 8 GB.
+// support-drafts joins them (batch 3 of the new examples): its check takes about two minutes.
 import { relative, sep } from 'node:path';
 import { ROOT } from './helpers.mjs';
 
-export const SERIAL = ['examples/concierge/', 'examples/inbox/'];
+export const SERIAL = ['examples/concierge/', 'examples/inbox/', 'examples/support-drafts/'];
 
 /** Whether a source is checked in the serial group. */
 export const serial = (file) => SERIAL.some((d) => (relative(ROOT, file).split(sep).join('/') + '/').startsWith(d));

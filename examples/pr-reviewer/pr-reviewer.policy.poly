@@ -1,0 +1,24 @@
+// The reviewer's policy (docs/examples/pr-reviewer.md). A comment is posted only while the review is commenting and a label set
+// only while it is labelling, which also gates the repository-to-egress region (PL7001 without a rule that names them). The
+// merge is denied, and a never statement proves that no merge is ever allowed.
+module reviewer_policy
+
+policy review {
+  scope "reviewer"
+  obligation comment-while-commenting "A comment is posted only while the review is commenting." rule {
+    when proposal.kind == "effect" && effect.kind == "github.comment"
+    require machine("reviewer.Review").phase == Commenting else deny
+    on unknown deny
+  }
+  obligation label-while-labelling "A label is set only while the review is labelling." rule {
+    when proposal.kind == "effect" && effect.kind == "github.label"
+    require machine("reviewer.Review").phase == Labelling else deny
+    on unknown deny
+  }
+  obligation no-merge "The reviewer never merges." rule {
+    when proposal.kind == "effect" && effect.kind == "github.merge"
+    require false else deny
+    on unknown deny
+  }
+  never merge-is-never-allowed "No merge is ever allowed.": allow when effect.kind == "github.merge"
+}
