@@ -137,15 +137,17 @@ test('the handler: 201 returns ok; 409 throws with permanent: true; 503 throws w
       const payload = { slot };
 
       if (tc.shouldThrow) {
+        let threw = true;
         try {
           await write(payload, caps, ctx);
-          assert.fail(`should throw for status ${tc.status}`);
+          threw = false;
         } catch (err) {
           assert.ok(err instanceof Error, `error is an Error for ${tc.desc}`);
           if (tc.permanent !== undefined) {
             assert.equal(Boolean(err.permanent), tc.permanent, `permanent flag is ${tc.permanent} for ${tc.desc}`);
           }
         }
+        assert.ok(threw, `pay or write must throw for status ${tc.status}`);
       } else {
         const result = await write(payload, caps, ctx);
         assert.deepEqual(result, { ok: true }, `returns ok for ${tc.desc}`);

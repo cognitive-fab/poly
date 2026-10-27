@@ -1,0 +1,12 @@
+// expected: CLEAN
+// What a dispatch does with a value outside the domain, for a range type and for a check clause
+// (docs/examples/language-findings.md, item 4).
+module range
+
+machine Gauge {
+  state { last : 0..10 = 0 }
+  action SetRange(v: 0..10)
+  action SetCheck(v: int check 0..10)
+  on SetRange { last' = v }
+  on SetCheck { last' = v }
+}
