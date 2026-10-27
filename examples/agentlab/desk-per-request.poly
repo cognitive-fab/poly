@@ -1,10 +1,11 @@
-// expected: FINDING PL4001
+// expected: FINDING PL3102
 // Act 1 of the demo (poly-agentlab PROPOSAL 3.2): the first draft of the desk, with only the per-request rules of the Lab's
 // recipes and no read budget. Stop the export is kept (the program declares no effect for export_all_customers) and so is
 // Protect the email (an email change is refused outright, as the gateway's Rego refuses it). Each of those looks at one
-// request. The path property of desk.poly is kept: no path emits more than 10 customer reads. The check finds the slow
-// export, the eleven searches that each pass every per-request rule (PS5.4, PT12.3a). desk.poly adds the read budget and
-// reads CLEAN.
+// request. The bound of desk.poly is kept: customersRead, the customers the server has returned to this Desk, is in 0..19,
+// the most a Desk with a budget of 10 can reach. Nothing here refuses a read, so the field escapes its domain: the check
+// finds the slow export, the searches that each pass every per-request rule and together read more customers than the bound
+// (PT3.5, PL3102). desk.poly adds the budget and reads CLEAN.
 module desk_per_request
 
 enum Field { Phone, Address, Email }
@@ -28,17 +29,18 @@ channel gateway: webhook {
   Failed -> Desk.SendFailed
 }
 
-// Desk: one per caller. It keeps no count of reads: every search passes every per-request rule. writing is a write issued
-// and not yet settled. turn flips on each read so that a read changes the state: without it the check reports PL4002 for the
-// repeated read as well, a second finding on the same defect, and the teaching variant is to give the one its line names.
+// Desk: one per caller. customersRead is the customers the server has returned to this Desk, with the domain of desk.poly,
+// 0..19. Nothing refuses a read on it. reading is a read issued and not yet completed (one at a time, as in desk.poly).
+// writing is a write issued and not yet settled.
 service machine Desk {
   state {
     started   : bool      = false
     caller    : Principal = none
+    customersRead : 0..19 = 0
+    reading   : bool      = false
     writing   : bool      = false
     arrivals  : bool      = false
     receipts  : bool      = false
-    turn      : bool      = false
   }
 
   action Start()
@@ -46,6 +48,8 @@ service machine Desk {
   action Find(query: string check { "ada" })
   action Read(id: string check { "c1" })
   action Update(id: string check { "c1" }, field: Field, value: string check { "v1" })
+  action Returned(n: 0..10)
+  action ReadFailed()
   action Updated()
   action UpdateFailed()
   action Delivered()
@@ -57,7 +61,6 @@ service machine Desk {
     started' = true
   }
 
-  // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body.
   // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body. The
   // Desk returns the request's own Content on the thread as the receipt of its arrival, so each arrival is answered and the
   // channel's rules (one send at a time, none to a disabled endpoint) are exercised by the program. The server's answer to the
@@ -71,14 +74,30 @@ service machine Desk {
 
   on Find(query) {
     require caller != none else reject "unverified"
-    turn' = !turn
+    require !reading else reject "read-pending"
+    reading' = true
     emit read(tool: Find, arg: query)
   }
 
   on Read(id) {
     require caller != none else reject "unverified"
-    turn' = !turn
+    require !reading else reject "read-pending"
+    reading' = true
     emit read(tool: Read, arg: id)
+  }
+
+  // The read's completion carries n, the number of customers the server returned, as a strict range 0..10: a server that
+  // answers more is refused at dispatch (outside-check-domain), which is the safe side. The host sends n (see the README).
+  on Returned(n) {
+    require reading else reject "not-reading"
+    reading' = false
+    customersRead' = customersRead + n
+  }
+
+  // A read that failed returned nothing the agent saw, so nothing is counted.
+  on ReadFailed {
+    require reading else reject "not-reading"
+    reading' = false
   }
 
   // Protect the email, per request: an email change is refused. A phone or address change runs, one write at a time.
@@ -115,14 +134,13 @@ service machine Desk {
     receipts' = !receipts
   }
 
-  // Kept from desk.poly. Both read tools are the one kind, so one property counts them together.
-  path property bounded-reads: count("customers.read") <= 10
-
-  // MCP carries a read as a POST, which class none refuses (PS23.10, PL6412), so a read is declared reversible.
+  // MCP carries a read as a POST, which class none refuses (PS23.10, PL6412), so a read is declared reversible. Both read tools are one effect.
   effect read(tool: Tool, arg: string) {
     kind "customers.read"
     labels { egress:external }
     class reversible
+    ok(r) -> Returned(n: r.n)
+    failed -> ReadFailed()
   }
 
   // One attempt only: a lost answer ends with the failed completion. No idempotent line: the server honours no key.

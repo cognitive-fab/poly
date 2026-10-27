@@ -2,7 +2,7 @@
 // The support desk for the MISSION Agent Lab (poly-agentlab PROPOSAL 3.2, Acts 1 to 3; PS2.3, PS5.4, PS23, AC27). A coding
 // agent reaches the Lab's customer-records server through an Affinidi Agent Gateway, and this program governs the order of
 // its calls. The gateway already allows or refuses each request and hides export_all_customers. A per-request rule cannot
-// count: an agent can collect the fifty customers ten at a time, each search allowed. The Desk counts.
+// count: an agent can collect the fifty customers ten at a time, each search allowed. The Desk counts customers.
 //
 // One Desk per caller (S450, PS15.0a). The caller is the gateway's DID, delivered as a verified claim and never read from a
 // request: a channel declares `principal from principal`, so the first verified message of a thread fixes the thread's
@@ -12,8 +12,12 @@
 // verified arrival that fixes the caller, and a typed action is refused `unverified` before it.
 //
 // What it says:
-//   - at most 10 customer reads per Desk (a find_customers result or a read_customer), above that `read-budget`: the handler
-//     refuses it, and the path property `bounded-reads` checks that no path emits more than 10 reads;
+//   - at most 10 customers read per Desk, counted by the customers the server returns and not by calls (the first draft
+//     counted calls, and five searches of 10 read all fifty inside a budget of 10 calls). A read is refused `read-budget` when
+//     customersRead is already 10 or more, so one full page is allowed and the next request is refused. The server decides n,
+//     so the worst case is 9 + 10 = 19 customers, and the field's domain 0..19 states the bound: the check proves that no path
+//     escapes it (PT3.5, PL3102 otherwise). One read is in flight at a time, since two issued together would pass the same
+//     check;
 //   - no export: the program declares no effect for export_all_customers (see the README for why no `never` states it);
 //   - a phone or address change runs; an email change is escalated to a person by desk.policy.poly, and while a write is
 //     waiting or in flight the Desk takes reads but no second write;
@@ -42,14 +46,16 @@ channel gateway: webhook {
   Failed -> Desk.SendFailed
 }
 
-// Desk: one per caller. reads counts the customer reads of this Desk, 0..10: the domain holds the whole budget and, at
-// reads == 10, the eleventh attempt, which the handlers refuse. writing is a write issued and not yet settled; sensitive
-// says it is an email change, which the policy reads to escalate.
+// Desk: one per caller. customersRead counts the customers the server has returned to this Desk, 0..19: a read is allowed
+// only below 10, and the server returns at most 10, so 19 is the most it can reach. reading is a read issued and not yet
+// completed. writing is a write issued and not yet settled; sensitive says it is an email change, which the policy reads
+// to escalate.
 service machine Desk {
   state {
     started   : bool      = false
     caller    : Principal = none
-    reads     : 0..10     = 0
+    customersRead : 0..19 = 0
+    reading   : bool      = false
     writing   : bool      = false
     arrivals  : bool      = false
     receipts  : bool      = false
@@ -61,6 +67,8 @@ service machine Desk {
   action Find(query: string check { "ada" })
   action Read(id: string check { "c1" })
   action Update(id: string check { "c1" }, field: Field, value: string check { "v1" })
+  action Returned(n: 0..10)
+  action ReadFailed()
   action Updated()
   action UpdateFailed()
   action Delivered()
@@ -72,7 +80,6 @@ service machine Desk {
     started' = true
   }
 
-  // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body.
   // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body. The
   // Desk returns the request's own Content on the thread as the receipt of its arrival, so each arrival is answered and the
   // channel's rules (one send at a time, none to a disabled endpoint) are exercised by the program. The server's answer to the
@@ -86,16 +93,32 @@ service machine Desk {
 
   on Find(query) {
     require caller != none else reject "unverified"
-    require reads < 10 else reject "read-budget"
-    reads' = reads + 1
+    require customersRead < 10 else reject "read-budget"
+    require !reading else reject "read-pending"
+    reading' = true
     emit read(tool: Find, arg: query)
   }
 
   on Read(id) {
     require caller != none else reject "unverified"
-    require reads < 10 else reject "read-budget"
-    reads' = reads + 1
+    require customersRead < 10 else reject "read-budget"
+    require !reading else reject "read-pending"
+    reading' = true
     emit read(tool: Read, arg: id)
+  }
+
+  // The read's completion carries n, the number of customers the server returned, as a strict range 0..10: a server that
+  // answers more is refused at dispatch (outside-check-domain), which is the safe side. The host sends n (see the README).
+  on Returned(n) {
+    require reading else reject "not-reading"
+    reading' = false
+    customersRead' = customersRead + n
+  }
+
+  // A read that failed returned nothing the agent saw, so nothing is counted.
+  on ReadFailed {
+    require reading else reject "not-reading"
+    reading' = false
   }
 
   // A phone or address change runs. An email change is emitted too, and the policy holds it for a person. Until the write
@@ -135,14 +158,13 @@ service machine Desk {
     receipts' = !receipts
   }
 
-  // Both read tools are the one kind, so one path property counts them together.
-  path property bounded-reads: count("customers.read") <= 10
-
-  // MCP carries a read as a POST, which class none refuses (PS23.10, PL6412), so a read is declared reversible.
+  // MCP carries a read as a POST, which class none refuses (PS23.10, PL6412), so a read is declared reversible. Both read tools are one effect.
   effect read(tool: Tool, arg: string) {
     kind "customers.read"
     labels { egress:external }
     class reversible
+    ok(r) -> Returned(n: r.n)
+    failed -> ReadFailed()
   }
 
   // One attempt only: a lost answer ends with the failed completion. No idempotent line: the server honours no key.
