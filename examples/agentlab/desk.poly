@@ -1,0 +1,157 @@
+// expected: CLEAN
+// The support desk for the MISSION Agent Lab (poly-agentlab PROPOSAL 3.2, Acts 1 to 3; PS2.3, PS5.4, PS23, AC27). A coding
+// agent reaches the Lab's customer-records server through an Affinidi Agent Gateway, and this program governs the order of
+// its calls. The gateway already allows or refuses each request and hides export_all_customers. A per-request rule cannot
+// count: an agent can collect the fifty customers ten at a time, each search allowed. The Desk counts.
+//
+// One Desk per caller (S450, PS15.0a). The caller is the gateway's DID, delivered as a verified claim and never read from a
+// request: a channel declares `principal from principal`, so the first verified message of a thread fixes the thread's
+// principal and a later message that names another is refused `principal-mismatch`. The thread key is the DID too. This
+// follows the concierge, which keys a Desk per WhatsApp thread. The tool calls themselves (find, read, update) reach the
+// Desk as typed actions that the host dispatches after the adapter has verified the gateway's presentation; `Got` is the
+// verified arrival that fixes the caller, and a typed action is refused `unverified` before it.
+//
+// What it says:
+//   - at most 10 customer reads per Desk (a find_customers result or a read_customer), above that `read-budget`: the handler
+//     refuses it, and the path property `bounded-reads` checks that no path emits more than 10 reads;
+//   - no export: the program declares no effect for export_all_customers (see the README for why no `never` states it);
+//   - a phone or address change runs; an email change is escalated to a person by desk.policy.poly, and while a write is
+//     waiting or in flight the Desk takes reads but no second write;
+//   - the write is irreversible and has one attempt only. The Lab's server takes no idempotency key, so none is declared:
+//     K17 would be an assumption the server does not meet.
+module desk
+
+enum Field { Phone, Address, Email }
+
+// Which read tool a customer read is: find_customers(query) or read_customer(id). One effect carries both, so one kind counts them.
+enum Tool { Find, Read }
+
+// S450: the bound action's claims, a field of the webhook kind's Sender claims.
+claims Caller {
+  principal: Principal
+}
+
+channel gateway: webhook {
+  adapter "webhook"
+  thread "{source}"
+  principal from principal
+  starts Desk.Start on inbound
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+// Desk: one per caller. reads counts the customer reads of this Desk, 0..10: the domain holds the whole budget and, at
+// reads == 10, the eleventh attempt, which the handlers refuse. writing is a write issued and not yet settled; sensitive
+// says it is an email change, which the policy reads to escalate.
+service machine Desk {
+  state {
+    started   : bool      = false
+    caller    : Principal = none
+    reads     : 0..10     = 0
+    writing   : bool      = false
+    arrivals  : bool      = false
+    receipts  : bool      = false
+    sensitive : bool      = false
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Find(query: string check { "ada" })
+  action Read(id: string check { "c1" })
+  action Update(id: string check { "c1" }, field: Field, value: string check { "v1" })
+  action Updated()
+  action UpdateFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "endpoint-disabled" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body.
+  // The verified arrival of a request from the gateway. The claims come from the adapter (K11), never from the body. The
+  // Desk returns the request's own Content on the thread as the receipt of its arrival, so each arrival is answered and the
+  // channel's rules (one send at a time, none to a disabled endpoint) are exercised by the program. The server's answer to the
+  // tool call is the host's to return (the README says so). arrivals flips on each, as receipts does below: an arrival from the
+  // same caller would otherwise emit and change nothing, which polyrun reports as PL2501.
+  on Got(body) by c: Caller {
+    caller' = c.principal
+    arrivals' = !arrivals
+    emit gateway.reply(body: body)
+  }
+
+  on Find(query) {
+    require caller != none else reject "unverified"
+    require reads < 10 else reject "read-budget"
+    reads' = reads + 1
+    emit read(tool: Find, arg: query)
+  }
+
+  on Read(id) {
+    require caller != none else reject "unverified"
+    require reads < 10 else reject "read-budget"
+    reads' = reads + 1
+    emit read(tool: Read, arg: id)
+  }
+
+  // A phone or address change runs. An email change is emitted too, and the policy holds it for a person. Until the write
+  // settles (ok, refused, or denied by the person) no second write is taken; reads are.
+  on Update(id, field, value) {
+    require caller != none else reject "unverified"
+    require !writing else reject "write-pending"
+    writing' = true
+    sensitive' = field == Email
+    emit update(id: id, field: field, value: value)
+  }
+
+  on Updated {
+    require writing else reject "not-writing"
+    writing' = false
+    sensitive' = false
+  }
+
+  on UpdateFailed {
+    require writing else reject "not-writing"
+    writing' = false
+    sensitive' = false
+  }
+
+  // The webhook conversation's receipts. The Desk sends nothing through it (the host answers the agent), but the binding
+  // is total (PL6813), so each receipt is taken. It flips `receipts`, because polyrun reports a receipt that emits (the
+  // conversation's Ack) and changes nothing as PL2501, and a count of receipts would need a bound the Desk has no use for.
+  on Delivered {
+    receipts' = !receipts
+  }
+
+  on SendRejected(reason) {
+    receipts' = !receipts
+  }
+
+  on SendFailed {
+    receipts' = !receipts
+  }
+
+  // Both read tools are the one kind, so one path property counts them together.
+  path property bounded-reads: count("customers.read") <= 10
+
+  // MCP carries a read as a POST, which class none refuses (PS23.10, PL6412), so a read is declared reversible.
+  effect read(tool: Tool, arg: string) {
+    kind "customers.read"
+    labels { egress:external }
+    class reversible
+  }
+
+  // One attempt only: a lost answer ends with the failed completion. No idempotent line: the server honours no key.
+  effect update(id: string, field: Field, value: string) {
+    kind "customers.write"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1 }
+    ok -> Updated()
+    failed -> UpdateFailed()
+  }
+}
