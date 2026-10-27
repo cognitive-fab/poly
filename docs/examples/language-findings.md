@@ -54,9 +54,48 @@ Where the language or its toolchain got in the way while writing the ten example
 - **Workaround.** One admission per file, shared by the tests, each loading its own runtime.
 - **Proposed fix.** `admit` keyed by the digest of the sources and the handlers, so an unchanged project returns its certificate.
 
+## Batch 2: incident-oncall, order-fulfilment
+
+No check in this batch came near the 8 GB limit: the largest was 126 global states (order-fulfilment's configuration) and each check took about a second.
+
+### 8. A decision that pages must be confident, which moves the unsure case to a person
+
+- **Symptom.** A decision whose completion emits an irreversible effect at every confidence is `PL6201 UNGATED_DECISION` ("for sev = High, its completion Triaged can emit a compensable or irreversible effect at every confidence and margin the program tells apart", PD1.4d). The first draft paged on an unsure answer, on the reasoning that a missed page costs more than a needless one.
+- **Appeared in.** incident-oncall.
+- **Workaround.** `Triaged` pages only when `conf >= 0.8`; an unsure or failed answer goes to `Review`, and a person's `Classify` pages. The example gained a state and an action.
+- **Proposed fix.** None to the rule, which is right. The message could say that a failed or unsure answer routed to a person is the usual shape, and a fail-safe default for an alarm (page when unsure) has no spelling: it needs the confidence to be compared and the paging on both sides of the comparison, which the rule reads as ungated.
+
+### 9. A terminal instance rejects with `terminal`, not the handler's reason
+
+- **Symptom.** The spec said `Ack` on a `Logged` incident is rejected `not-waiting`. The runtime answers `terminal`: every action of an instance in a terminal state is refused before its handler.
+- **Appeared in.** incident-oncall (the end-to-end refusal test).
+- **Workaround.** The spec and the test say `terminal`.
+- **Proposed fix.** Say it in PT4.4a where the terminal rule is written, with the reason string; a handler's own `reject` text is unreachable from a terminal state, so it cannot be tested there.
+
+### 10. A `Ref` field is wired in the check and by an action at run time
+
+- **Symptom.** In a configuration, `order[2]: Order { stock: stock }` wires the field. At run time `rt.create` takes no `Ref` and the field starts `none`, so the program needs an action that carries the reference. The first draft had none. With one, the check explores `Place(none)` and reports `PL5404 SEND_TO_NONE` and `PL5402 STUCK` until a `require warehouse != none` is added.
+- **Appeared in.** order-fulfilment.
+- **Workaround.** `Place(warehouse: Ref<Stock>)` with the guard; the configuration still wires the field, though the action overwrites it.
+- **Proposed fix.** Let `rt.create` take a `Ref` for a field with an initial value of `none`, checked against the configuration's wiring, so the checked wiring and the running wiring are one declaration.
+
+### 11. There is no way to observe the middle of a chain of effects
+
+- **Symptom.** `settle` runs the worker until nothing is due, which carries a saga from `Place` to `Done` in one call. All three independent test writers asserted intermediate states (`Triaging`, `Reserving`, `Escalating`) that a run never rests in.
+- **Appeared in.** incident-oncall, order-fulfilment (about a dozen assertions between them).
+- **Workaround.** Assert the end state and the requests sent, in order.
+- **Proposed fix.** A `rt.worker.tick` that takes one step and reports it, or a journal view of the states a run passed through (the journal has them; a test helper that folds it would do).
+
+### 12. `Conf` is a decimal in source and thousandths in data
+
+- **Symptom.** Source compares `conf >= 0.8`; the witness prints `Triaged(High, 800, 0)`; a dispatch of `conf: 0.95` is refused (`Triaged.conf is 0.95, outside 0..1000`). A test writer dispatched the decision's own completion, which the runtime also forbids for an outside caller (K10).
+- **Appeared in.** incident-oncall.
+- **Workaround.** The recorded provider's distribution gives the confidence; no test dispatches a completion.
+- **Proposed fix.** Print a `Conf` in a witness and in the host types as the decimal the source writes, or document the scale in PT28.1a next to the `number` type it gives.
+
 ## Conclusion
 
-Three of the seven are the cost of a check or an admission (3, 7) or of a silent failure (2) that the toolchain could name at check time. Two (1, 5) are rules whose workaround is arbitrary or whose natural spelling is refused. Item 4 is a difference that the specification states in two places, and the test now holds it.
+After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.
 
 ## Glossary
 

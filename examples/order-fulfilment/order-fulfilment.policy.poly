@@ -1,0 +1,22 @@
+// The fulfilment policy (docs/examples/order-fulfilment.md). Each step's effect is allowed only while the order is in
+// the step that asks for it, read from the machine snapshot as of the emitting step; an unknown snapshot is denied.
+module fulfilment_policy
+
+policy orders {
+  scope "fulfilment"
+  obligation charge-while-charging "A charge is made only while the order is charging." rule {
+    when proposal.kind == "effect" && effect.kind == "payments.charge"
+    require machine("fulfilment.Order").st == Charging else deny
+    on unknown deny
+  }
+  obligation ship-while-shipping "A shipment is made only while the order is shipping." rule {
+    when proposal.kind == "effect" && effect.kind == "carrier.ship"
+    require machine("fulfilment.Order").st == Shipping else deny
+    on unknown deny
+  }
+  obligation refund-while-refunding "A refund is made only while the order is refunding." rule {
+    when proposal.kind == "effect" && effect.kind == "payments.refund"
+    require machine("fulfilment.Order").st == Refunding else deny
+    on unknown deny
+  }
+}

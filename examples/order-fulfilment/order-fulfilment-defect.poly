@@ -1,0 +1,152 @@
+// expected: FINDING PL3001
+// Order fulfilment, the seeded defect (docs/examples/order-fulfilment.md): ShipFailed goes straight to Cancelled, so the
+// stock is never given back and the charge never refunded. The machine invariant cancelled-holds-nothing finds it.
+module fulfilment
+
+service machine Stock {
+  state { onHand : 0..1 = 1 }
+
+  action Reserve(from: Ref<Order>)
+  action Release()
+
+  on Reserve(from) {
+    if onHand > 0 {
+      onHand' = onHand - 1
+      send from <- Reserved()
+    } else {
+      send from <- OutOfStock()
+    }
+  }
+
+  on Release {
+    require onHand < 1 else reject "nothing-reserved"
+    onHand' = onHand + 1
+  }
+}
+
+enum St { Placed, Reserving, Charging, Shipping, Refunding, Done, Cancelled, Rejected, Stuck }
+
+machine Order {
+  state {
+    st      : St = Placed
+    stock   : Ref<Stock> = none
+    held    : 0..1 = 0
+    charged : bool = false
+  }
+
+  terminal st in { Done, Cancelled, Rejected, Stuck }
+
+  action Place(warehouse: Ref<Stock>)
+  action Reserved()
+  action OutOfStock()
+  action Charged()
+  action ChargeFailed()
+  action Shipped()
+  action ShipFailed()
+  action Refunded()
+  action RefundFailed()
+
+  on Place(warehouse) {
+    require st == Placed else reject "not-placed"
+    require warehouse != none else reject "no-warehouse"
+    st' = Reserving
+    stock' = warehouse
+    send warehouse <- Reserve(from: self)
+  }
+
+  on Reserved {
+    require st == Reserving else reject "not-reserving"
+    st' = Charging
+    held' = 1
+    emit charge()
+  }
+
+  on OutOfStock {
+    require st == Reserving else reject "not-reserving"
+    st' = Rejected
+  }
+
+  on Charged {
+    require st == Charging else reject "not-charging"
+    st' = Shipping
+    charged' = true
+    emit ship()
+  }
+
+  // The charge failed: nothing was taken, so only the stock goes back.
+  on ChargeFailed {
+    require st == Charging else reject "not-charging"
+    st' = Cancelled
+    held' = 0
+    send stock <- Release()
+  }
+
+  on Shipped {
+    require st == Shipping else reject "not-shipping"
+    st' = Done
+  }
+
+  // The shipment failed: the compensations run. The stock goes back and the charge is refunded.
+  on ShipFailed {
+    require st == Shipping else reject "not-shipping"
+    st' = Cancelled
+  }
+
+  on Refunded {
+    require st == Refunding else reject "not-refunding"
+    st' = Cancelled
+    charged' = false
+  }
+
+  // The refund could not be made: a person must. The order ends Stuck, still charged.
+  on RefundFailed {
+    require st == Refunding else reject "not-refunding"
+    st' = Stuck
+  }
+
+  invariant cancelled-holds-nothing: st == Cancelled implies held == 0 && !charged
+  invariant done-is-charged: st == Done implies charged
+  path property charge-at-most-once: count("payments.charge") <= 1
+  path property refund-needs-charge: before("payments.charge", "payments.refund")
+
+  effect charge() {
+    kind "payments.charge"
+    labels { egress:external }
+    targets { egress: "https://payments.example/v1/charges" }
+    class compensable
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Charged()
+    failed -> ChargeFailed()
+    exhausted -> ChargeFailed()
+  }
+
+  effect ship() {
+    kind "carrier.ship"
+    labels { egress:external }
+    targets { egress: "https://carrier.example/v1/shipments" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Shipped()
+    failed -> ShipFailed()
+    exhausted -> ShipFailed()
+  }
+
+  effect refund() {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://payments.example/v1/refunds" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Refunded()
+    failed -> RefundFailed()
+    exhausted -> RefundFailed()
+  }
+}
+
+configuration two-orders {
+  stock    : Stock
+  order[2] : Order { stock: stock }
+  inputs   { order[*].Place, order[*].Charged, order[*].ChargeFailed, order[*].Shipped, order[*].ShipFailed, order[*].Refunded, order[*].RefundFailed }
+  bounds   { transit 4 }
+  invariant never-oversold: sum(order[*].held) <= init(stock.onHand)
+}

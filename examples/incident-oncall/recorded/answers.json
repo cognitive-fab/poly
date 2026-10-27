@@ -1,0 +1,11 @@
+{
+  "models": { "small": "recorded-small-2026-10" },
+  "reports": [
+    { "id": "db-down", "text": "Primary database is down, all writes are failing.", "answer": "High",
+      "distribution": [["High", 0.95], ["Low", 0.05]], "usage": { "inputTokens": 12, "outputTokens": 2 } },
+    { "id": "footer-typo", "text": "There is a typo in the status page footer.", "answer": "Low",
+      "distribution": [["Low", 0.92], ["High", 0.08]], "usage": { "inputTokens": 11, "outputTokens": 2 } },
+    { "id": "odd-latency", "text": "Latency looks odd in one region, maybe.", "answer": "High",
+      "distribution": [["High", 0.55], ["Low", 0.45]], "usage": { "inputTokens": 9, "outputTokens": 2 } }
+  ]
+}
