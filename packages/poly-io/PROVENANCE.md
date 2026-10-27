@@ -117,6 +117,19 @@ Mail is untrusted input, so the reader never throws on a message's content and n
 
 **Poly's own bounds.** At most 8 levels of multipart and 200 parts are read. An attachment is listed by name, type and decoded size, never read. HTML is used only when a message has no plain text: its script, style and head are dropped, block ends become line ends, tags are removed and entities decoded.
 
+## MCP client (`mcp.ts`)
+
+The Model Context Protocol specification revision 2025-11-25, read on 2026-10-27. The revision of 2026-07-28 drops `initialize` and the session; a gateway that speaks it is not handled, and the client reads the one it is given as 2025-11-25.
+
+| What the client does | Source |
+|---|---|
+| POSTs each JSON-RPC message to the one endpoint with `Accept: application/json, text/event-stream`; takes a JSON answer or an SSE stream, and reads from a stream the event whose JSON-RPC id is the request's | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports (Streamable HTTP, sending messages) |
+| Sends `initialize` with `protocolVersion` 2025-11-25, then the `notifications/initialized` notification, which the server answers 202 | https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle |
+| Keeps the `MCP-Session-Id` of the `initialize` answer (visible ASCII only) and sends it on every later request; sends `MCP-Protocol-Version` with the negotiated version | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports (session management, protocol version header) |
+| `tools/list` and `tools/call` with `name` and `arguments`; a result with `isError` is a failure of the tool, and its `text` parts are joined | https://modelcontextprotocol.io/specification/2025-11-25/server/tools |
+
+**Poly's own bounds.** No GET stream, no resumption, no `DELETE`, no pagination of `tools/list`. A 404 for an expired session is a permanent failure, not a new `initialize`. One request is one attempt and nothing retries. A 401 or 403 is permanent, a transport error or a 5xx is a failure with no answer, and any other non-2xx status is permanent. The client sends no credential and refuses a configuration that holds one (PT10g, PL6825): a header named like a credential, a user or password in the URL, a key or token parameter, or a value with the shape of a token. The shapes are copied from `poly-check` because this package imports no check package (S182), and a test keeps them in step.
+
 ## Conclusion
 
 Every rule the adapters apply to a provider's traffic is listed here with its source, and the tests replay that traffic from the documented payloads, forged variants included. What is not listed is not handled.
