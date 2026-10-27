@@ -74,9 +74,13 @@ test('the defect program with the program\'s own policy is CLEAN', { timeout: 12
   const defectSrc = readFileSync(DEFECT, 'utf8');
   const policySrc = readFileSync(POLICY, 'utf8');
   writeFileSync(join(tmpRoot, 'support-drafts-defect.poly'), defectSrc);
-  writeFileSync(join(tmpRoot, 'support-drafts.policy.poly'), policySrc);
+  // The policy is named after the program, since checkExample pairs X.poly with X.policy.poly by basename; a policy named for the
+  // other program is not read, and the check would be of the program alone (found by review: the first version did exactly that).
+  writeFileSync(join(tmpRoot, 'support-drafts-defect.policy.poly'), policySrc);
   // Run the check.
   const report = await checkExample(join(tmpRoot, 'support-drafts-defect.poly'), tmpRoot);
+  assert.ok((report.policies ?? []).some((p) => p.scope === 'drafts'), 'the policy of the program was read');
+  assert.deepEqual((report.policies ?? []).flatMap((p) => p.stages.map((s) => [s.stage, s.verdict])).filter(([, v]) => v !== 'CLEAN'), [], 'every stage of the policy ran and is CLEAN');
   assert.equal(report.verdict, 'CLEAN', JSON.stringify(report.diagnostics));
   console.log('the defect program checked with the program\'s policy is CLEAN (gate denies at runtime, check does not see the flow)');
 });

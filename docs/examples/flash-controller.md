@@ -74,6 +74,11 @@ End-to-end test, over the recorded device, nothing on the network (the example h
 
 The example has no escalation to a person; a `Bad` block is the machine's last word.
 
+## Amendments made when the code existed
+
+- `recordedDevice(script)` returns `{ calls, device }`, as this spec says. The writer's tests used the returned object as the device with its calls on it; they were corrected after the code existed with a small wrapper, not by changing the spec's shape.
+- The machine is checked `CLEAN` over 76 states and the defect has 2 steps, as predicted; the end-to-end replay is 1 run of 5 rows with no gate session, since the machine has no effect.
+
 ## Conclusion
 
 The invariant is one comparison, and the check finds its absence in two steps. The machine is pure, so everything it knows is in its state, and the example shows what that buys: the controller can be checked over all 76 states, replayed from its journal, and driven by any device that tells it the truth.

@@ -23,7 +23,7 @@ node --test test/ex-expense-approval.test.mjs
 node --test test/after/ex-expense-approval-e2e.test.mjs
 ```
 
-The tests check the program with its policy beside it, as a project.
+The tests check the program with its policy beside it, as a project. The check explores 1,231 states and takes about 25 s; a larger instance may need a larger heap, which `NODE_OPTIONS=--max-old-space-size=8192` gives (the amount of this example was reduced because a stored `0..500` exhausted the default heap, see below).
 
 ## What is checked
 

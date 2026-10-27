@@ -1,0 +1,17 @@
+// The retention policy (docs/examples/subscription-cancel.md). The offer is sent only while the subscription is offering and the
+// cancellation only while it is cancelling, read from the machine snapshot as of the emitting step; an unknown snapshot is denied.
+module subscription_policy
+
+policy retention {
+  scope "subscription"
+  obligation offer-while-offering "A retention offer is sent only while the subscription is offering." rule {
+    when proposal.kind == "effect" && effect.kind == "retention.offer"
+    require machine("subscription.Subscription").status == Offering else deny
+    on unknown deny
+  }
+  obligation cancel-while-cancelling "A cancellation is sent to billing only while the subscription is cancelling." rule {
+    when proposal.kind == "effect" && effect.kind == "billing.cancel"
+    require machine("subscription.Subscription").status == Cancelling else deny
+    on unknown deny
+  }
+}

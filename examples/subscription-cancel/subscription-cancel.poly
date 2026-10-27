@@ -1,0 +1,105 @@
+// expected: CLEAN
+// Subscription cancel (docs/examples/subscription-cancel.md). A subscriber asks to cancel. The service may make one retention
+// offer first; the subscriber may keep the subscription, decline, or say nothing, in which case the offer lapses after a week
+// and the cancellation goes ahead. Cancellation is an irreversible, keyed call to billing. The liveness property request-ends
+// says a request always ends, in a cancellation or in the subscriber's own choice to keep; the offer is made at most once.
+module subscription
+
+enum Status { Active, Offering, Offered, Cancelling, Cancelled, Retained, Stuck }
+
+machine Subscription {
+  state {
+    status : Status = Active
+    offers : 0..1 = 0
+  }
+
+  terminal status in { Cancelled, Retained, Stuck }
+
+  action Request()
+  action OfferSent()
+  action OfferFailed()
+  action Keep()
+  action Decline()
+  action Lapse()
+  action Billed()
+  action BillFailed()
+
+  on Request {
+    require status == Active else reject "not-active"
+    if offers == 0 {
+      status' = Offering
+      offers' = 1
+      emit offer()
+    } else {
+      status' = Cancelling
+      emit cancel()
+    }
+  }
+
+  on OfferSent {
+    require status == Offering else reject "not-offering"
+    status' = Offered
+    after 168h -> Lapse() as lapse
+  }
+
+  on OfferFailed {
+    require status == Offering else reject "not-offering"
+    status' = Cancelling
+    emit cancel()
+  }
+
+  on Keep {
+    require status == Offered else reject "not-offered"
+    status' = Retained
+    cancel lapse
+  }
+
+  on Decline {
+    require status == Offered else reject "not-offered"
+    status' = Cancelling
+    cancel lapse
+    emit cancel()
+  }
+
+  on Lapse {
+    require status == Offered else reject "not-offered"
+    status' = Cancelling
+    emit cancel()
+  }
+
+  on Billed {
+    require status == Cancelling else reject "not-cancelling"
+    status' = Cancelled
+  }
+
+  on BillFailed {
+    require status == Cancelling else reject "not-cancelling"
+    status' = Stuck
+  }
+
+  path property offer-at-most-once: count("retention.offer") <= 1
+  path property cancel-at-most-once: count("billing.cancel") <= 1
+  liveness request-ends: status == Offering || status == Offered leads to status == Cancelled || status == Retained || status == Stuck under fair { OfferSent, OfferFailed, Lapse, Billed, BillFailed }
+
+  effect offer() {
+    kind "retention.offer"
+    labels { egress:external }
+    targets { egress: "https://marketing.example/v1/offers" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> OfferSent()
+    failed -> OfferFailed()
+    exhausted -> OfferFailed()
+  }
+
+  effect cancel() {
+    kind "billing.cancel"
+    labels { egress:external }
+    targets { egress: "https://billing.example/v1/subscriptions/cancel" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Billed()
+    failed -> BillFailed()
+    exhausted -> BillFailed()
+  }
+}

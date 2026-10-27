@@ -1,0 +1,9 @@
+// The flash controller's policy (docs/examples/flash-controller.md). The machine has no effect and no decision, so there is
+// nothing for an obligation to govern; the policy records the rule the program checks, as a recalled item, and the scope is the
+// module's name so that it governs the machine (PL6504).
+module flash_policy
+
+policy flash {
+  scope "flash"
+  recalled style "A block is erased before it is programmed."
+}

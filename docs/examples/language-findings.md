@@ -177,12 +177,12 @@ Claim 7 is the one test that is not a check: it holds that the three end-to-end 
 
 The static check follows a taint from a source to the places where data *leaves* (an effect's recipient, a message, and, by label, a region), and it proves a policy over the decision table; it does not follow a source into a decision's inputs, and it never sees a decision's provider. A decision's audience is enforced by the gate, through a policy rule over its taint.
 
-### 20. A policy whose scope names no module governs nothing, and says CLEAN
+### 20. A policy whose scope names no module governs nothing, and says CLEAN (fixed)
 
 - **Symptom.** A policy with `scope "fb"` beside a program in module `fb_input` checks `CLEAN` with every stage clean, and its regions read "unreachable, no effect provides sensitive, egress": the scope is the module it governs, and no module is named `fb`. The ungated decision that should have been `PL7001` is not reported.
 - **Appeared in.** the flow-boundary tests (the first version of claim 3 passed for the wrong reason).
 - **Workaround.** The scope is the module's name.
-- **Proposed fix.** A policy whose scope matches no module of the project is a finding (`PL6504`, "the scope governs nothing"), since the regions it reports are then about no effect at all.
+- **Fixed (rule 7a).** PT8.4 now says it, `test/policy-scope-unmatched.test.mjs` holds it, and `PL6504 POLICY_SCOPE_UNMATCHED` is an error: in a project that holds a machine, a scope that matches no module, glob or configuration instance's `scope` is refused (verdict `REFUSED`, at the line after the policy's opening), and its later stages are not run. A policy file with no machine anywhere is not reported. The first version matched only the project's declared modules and broke six tests: the conversation of a channel, a route and a budget are modules of their own (`m.c`, `m.r`), so five channel tests refused their policies (`concierge.support`), and the poly-lang test that every error code has a source (`each error source raises exactly the code it names`) needed `PL6504` among the project-level codes. The check now matches the machine ids of the program's facts, whose module part is the scope. Run after the change: the whole parallel suite and the examples sweep (results in the batch 5 report).
 
 ## Batch 4: claim-intake, research-agents
 
@@ -208,6 +208,45 @@ The stopping rule (a liveness or saga check over 8 GB, or with no verdict) did n
 - **Appeared in.** research-agents.
 - **Workaround.** `admitExample` copies the handlers file only when it exists; the host code is `host/inquiry.ts`; `Wire` and `Cancel` are in the program.
 - **Proposed fix.** See finding 10 for the wiring. A worker that was never asked is "idle", and `terminal` could be allowed to name an initial state when a machine's whole life is waiting for a task.
+
+### 24. A glob scope matches modules but cannot be lowered
+
+- **Symptom.** `scopeGoverns` accepts a scope with `*` (`fb_*`) and the region check uses it, but lowering the policy gives it the id `fb_*`, which Polyaxion's schema refuses (`policy.id must match /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/`): the project's verdict is `ERROR`. Found while testing finding 20.
+- **Appeared in.** test/policy-scope-unmatched.test.mjs.
+- **Workaround.** None in the examples; their scopes are module names.
+- **Proposed fix.** Slug the id as the artefact path already is (`policySlug`), or refuse a glob scope with a diagnostic of its own.
+
+## Batch 5: subscription-cancel, flash-controller
+
+Both checks were tiny (7 and 76 states, about a second each); nothing came near a limit.
+
+### 25. The independent writers still assert the middle of a run and dispatch completions
+
+- **Symptom.** In batch 5 the subscription writer asserted `Offering` after a settle that had already sent the offer, and dispatched `OfferFailed` by hand; the flash writer used the recorded device as one object, where the spec returns `{ calls, device }`. This is finding 11 again: of five batches, every one had a writer assert a state a run never rests in or dispatch a completion the runtime owns.
+- **Appeared in.** subscription-cancel, flash-controller.
+- **Workaround.** Corrected after the code existed; the brief to each writer states the rule.
+- **Proposed fix.** P6 (a step-by-step settle) and, with it, a refusal that says why: a dispatch of a decision's or an effect's completion by a caller is refused with its rule (K9, K10), and the message could name the way to script the outcome instead (a recorded provider, a fake transport that answers 422).
+
+### 26. A source that the type stage refuses breaks every sweep over the examples
+
+- **Symptom.** `claim-intake-defect.poly` is refused with `PL1205` (verdict `REFUSED`). Every test that loads each source under `examples/` (strict validate, translation validation, "every example checks with no diagnostic") failed on it: they assume that a source can be loaded. The repository's convention is that such sources live in a directory called `errors/`, which `polyFiles` skips.
+- **Appeared in.** claim-intake (found by the full parallel suite, not by the example's own tests).
+- **Workaround.** `polyFiles` also skips a source whose first line expects `REFUSED`, and the examples' own sweep (`test/examples-expected.mjs`) asks for them, to compare each verdict with its line. The alternative, moving the file to `examples/claim-intake/errors/`, would have left its expected line unchecked.
+- **Proposed fix.** None needed beyond the helper; the `REFUSED` form of the expected line is documented in `examples/README.md`.
+
+### 27. The embedded surface's declaration of a workflow had no budget
+
+- **Symptom.** PT10 says the embedded workflow call takes `budget: { name, prices, orderCap }`, and the printer and the reader support it, but `packages/poly-embed/embed/index.d.ts` did not declare it, so every printed source of a workflow with a budget (`pr-reviewer.poly` printed as TypeScript) failed `tsc --noEmit` in test/embed.test.mjs (S71, S84). The same test, once the key was declared, showed the amount typed as a string where the printer writes a number.
+- **Appeared in.** pr-reviewer (found by the full parallel suite).
+- **Workaround.** Fixed: the declaration is `budget?: { name: string; prices: string; orderCap: { currency: string; amount: number } }`, as a budget's caps are.
+- **Proposed fix.** None further; the specification already said it.
+
+### 28. The recorded vacuity table lists the seeded defects
+
+- **Symptom.** `test/m4f-recheck.test.mjs` compares every conformance and example source with a table of the properties that are vacuous in it. `order-fulfilment-defect.poly` has one (`refund-needs-charge`, since the defect never refunds), so the table needed an entry, found only by the full suite.
+- **Appeared in.** order-fulfilment.
+- **Workaround.** The entry was added.
+- **Proposed fix.** The table could be generated from the expected-verdict lines and a recorded run, so that a new teaching variant does not need a hand edit in a test about something else.
 
 ## Conclusion
 
