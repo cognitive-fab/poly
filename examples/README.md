@@ -7,11 +7,12 @@ The programs here show what poly checks and what it finds. Some are correct prog
 Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026-10-10):
 
 ```
-// expected: CLEAN | FINDING <code> [<code> …] | INCONCLUSIVE <reason>
+// expected: CLEAN | FINDING <code> [<code> …] | REFUSED <code> [<code> …] | INCONCLUSIVE <reason>
 ```
 
 - `CLEAN`: the check finds nothing, and every stage ran.
 - `FINDING <code> …`: the check reports exactly these codes, the variant's defect.
+- `REFUSED <code> …`: the type stage rejects the program with exactly these codes (an error, not a finding), the verdict is `REFUSED`, and there is no witness. Added with `claim-intake` for `PL1205`.
 - `INCONCLUSIVE <reason>`: the check stops short, for the reason given, and never reads `CLEAN`. A reason that begins with a code, such as `PL3901`, names a code the check must report.
 
 `test/examples-expected.test.mjs` checks each file and compares its verdict with this line, and the V10 gate does the same. A reader can tell a teaching variant from a correct program by its first line, and so can the gate, with no list kept anywhere else. A new example states its line when it is added.
