@@ -120,12 +120,13 @@ Both policy-dependent findings the batch was asked to show need nothing beyond t
 - **Workaround.** The run cap is the number of orders on the longest path times the order cap: order cap 0.05, run cap 0.25. A month cap makes the refusal visible.
 - **Proposed fix.** A check-time finding when a workflow's longest path of orders costs more than its run cap (the path is known), and a README sentence in PT24.6 that the spend is the cap (v2.0 proposal P8).
 
-### 16. The check needs a large heap or it slows by an order of magnitude
+### 16. (Retracted) The check was said to need a large heap
 
-- **Symptom.** `support-drafts` (1,705 states) took 112 s in the default heap (the progress lines showed 40 s a pass; garbage collection near the limit is the likely cause and was not measured) and 8 s with `--max-old-space-size=8192`. Nothing tells the author.
-- **Appeared in.** support-drafts.
-- **Workaround.** The serial group runs it with a large heap (`examples/support-drafts/` joins it); the README gives the command.
-- **Proposed fix.** The command-line entry point re-executes itself with a larger heap when the host's memory allows, or reports its peak and says when it was near the limit.
+- **What was reported.** `support-drafts` (1,705 states) took 112 s in the default heap and 8 s with `--max-old-space-size=8192`, so batch 3 put it in the serial group and told readers to pass the flag.
+- **What the re-measurement shows.** Run alone, the project check of `support-drafts` takes 10 s in the default heap and 12 s with 8 GB; the program alone through the command line takes 24 s and 18 s. The 112 s was a run that shared the machine with other processes. The heap is not the cause, and no re-execution is needed for this example.
+- **What is still true.** The heap limit is real for the expense example: its first version, with an amount of `0..500`, exhausted the default 4 GB heap (3.3 GB in use, no verdict). Whether 8 GB would have finished it was not tried; the amount was reduced instead (finding 3).
+- **Why no launcher was built.** Giving `poly check` an 8 GB re-execution would make the command-line module start a process, which the import-boundary check forbids on a check path (rule 6: only poly-new and poly-mine may start one). A change to that rule is the owner's to rule on; it is not needed for this example, and none was made. If the owner wants the launcher for the cases where the heap does matter, the specification line, the test and the code are small (the work was done and reverted: `heapReexec(limitMb, totalMb, env)` as a pure function, a child with `--max-old-space-size=8192` and `POLY_HEAP_REEXEC=1`), and the rule would need one exception for a launcher file that starts only `node` with the command line's own path.
+- **Proposed fix.** Decide whether the exception is wanted. A note in the READMEs that a check of a large instance may need `--max-old-space-size`, when one does.
 
 ### 17. The check does not read the flow from a source to a decision
 
@@ -147,6 +148,41 @@ Both policy-dependent findings the batch was asked to show need nothing beyond t
 - **Appeared in.** pr-reviewer.
 - **Workaround.** The effect is declared and mapped, never emitted, and the path property `never-merges` proves it. The bridge has no merge.
 - **Proposed fix.** A policy may name an effect kind of a tool declared in the workflow without a machine effect (a `deny tool` item in the workflow), so the denied tool need not be an effect the machine could emit.
+
+## Where the static check stops (finding 17, in full)
+
+The question: what does `poly check` follow for taint, what does it not, and what does only the gate enforce at run time. The answer is written from the specification and shown by `test/ex-flow-boundary.test.mjs`, one test for each claim, over the programs in `test/fixtures/flow-boundary/`. Quotations are from `docs/04-semantics.md` (PS) and `docs/03-technical-spec.md` (PT).
+
+### What the check follows
+
+1. **A tainted `Content` that leaves in an effect whose recipient is below it: the flow rule, `PL6831 AUDIENCE_LEAK`.** PS17.3: "The flow rule is the step property: on every accepted step, for every intent of an effect other than a retrieval, a decision or a `remember`, the recipient may read the taint of every `Content` value of the payload. It is checked on every machine alone, over its pending taints, and in every configuration". The taint comes from a source through a retrieval and a decision's *answer* (PS17.2: "A decision's intent's taint is the join of the taints of the `Content` and `Items` values of its payload" and "every `Content` and `Items` value in its data carries `t`" in the completion). The recipient is the field `to p` names, the claims' audience, the effect's `audience c`, a channel's declared audience, or otherwise the lowest class. Only a `Content` answer carries it: "*Limit (S323):* only a `Content` answer carries the decision's taint. An answer of a finite type (a `bool`, an enum, a range) carries none: a decision with a finite answer is a declassification point" (PS17.2). Test: claim 1 (`leak.poly`: the owner's notes come back as a `Content` and are sent at audience `customer`; `PL6831`, witness of 3 steps, no other code).
+2. **A message that carries a taint to another machine, where a configuration holds both.** PS17.3: "a message keeps the taints of its values, so a value tainted in one instance and emitted by another is judged where it leaves." Where no configuration holds the two machines it is not followed: "`PL6838 FLOW_NOT_FOLLOWED`, inconclusive, naming the message; the flow rule's verdict is then at best `INCONCLUSIVE`, never a silent clean" (S322; PT10k, "Messages no configuration follows"). Test: claim 2 (`send-taint.poly`: `INCONCLUSIVE`, exactly `PL6838`).
+3. **A region reached with no gate crossed: `PL7001 REGION_WITNESS`, by labels and not by taint.** PT8.4, "Stage 5a as built (M5a, S161)": polycheck "models the effects of the modules the scope governs: each effect kind is an action whose flags are its labels' by the table below, gated when an obligation of the scope names that kind (`effect.kind == "k"` or `effect.kind in { … }`); a `never` statement enforces nothing and gates nothing". The default regions are `lethal-trifecta`, `credential-egress` and `source-egress`; `read:private` is `sensitive`, `read:repo` is `proprietary`, `egress:external` and `egress:public` are `egress`. A decision is one of the effects, so a decision labelled `read:private` and `egress:external` is reached with no gate crossed until a rule of the scope names it. The region is named for credentials but is about labels: it is reported with no credential in the program. A rule that names it gates it whatever the rule says; one that reads only the phase is enough. Test: claim 3 (`PL7001` with a policy that names only the retrieval; still `PL7001` with a policy that adds only a `never`; `CLEAN` once a rule names the decision).
+
+### What the check does not follow
+
+4. **A source's body into a decision's inputs.** The flow rule's own text excludes decisions ("an effect other than a retrieval, a decision or a `remember`"), so nothing compares the taint of an `Items` or `Content` argument of a `decide` with any class. The owner's notes can be given to a decision with provider `"external"` and the check says `CLEAN`, with no policy and with a policy that gates the decision by phase alone. Only the decision's *answer* is followed, and only when it leaves (item 1). Test: claim 4 (`decision-input.poly`; the test also pins the sentence of PS17.3 it relies on).
+5. **A decision's provider.** `provider "x"` is a string. No stage reads it, no policy input carries it, and the decision table's proposals for a decision have no `provider` or `model` field (PT10k: a policy reads `effect.taint.class`, `effect.items.count`, `effect.items.class` and `effect.items.age`). Changing the provider changes no verdict, no diagnostic and no state count. Test: claim 5 (the same program with another provider string is identical in every report field the test reads).
+6. **A decision's audience.** A decision has no declared audience. What exists is a policy rule over `effect.taint.class`, which is read when the proposal is made at run time and over the decision table at check time. The check proves the *policy*: a `never` over the table (`PL6503`) says whether the policy allows the class. It does not say that the program gives the decision that class. Test: claim 6 (the policy that allows the owner class is `PL6503`; the one that denies it is `CLEAN`; the program's own check is `CLEAN` either way, by claim 4).
+
+### What only the gate enforces at run time
+
+7. **A decision denied for the audience of its inputs.** PT10k, "The proposal": "An intent carrying a `Content` is proposed with `taint: { class, owners }` … one carrying an `Items`, an effect's or a decision's, with `items: { count, class, ageMs, provenance }`". The policy rule that reads it is evaluated by the gate when the decision is proposed. Shown by `test/after/ex-support-drafts-e2e.test.mjs` (the gate denies `decision.summary` over the notes, `wrong-state` from `external-model-audience`, and the provider is never asked about a note).
+8. **The effect flow rule, again.** PT10k, "The flow check (S302)": the worker applies PS17.3 "before the grant check and the policy … A recipient that may not read a taint denies the intent `audience`, final whatever a policy says". The check finds the leak of item 1 statically; the gate refuses it at run time too, and a body with no taint record is refused `audience`, fail closed. Shown by `test/memory-enforce.test.mjs` ("AC22 (run time): the variant without where owner == customer has its reply denied audience before the handler runs").
+9. **Freshness.** PT10k, "Freshness (S307)": an item set older than its source's `freshness` is denied `stale-items` or escalated, "both before the policy"; the check never reads a clock. Shown by `test/memory-enforce.test.mjs` ("S307: with stale deny, the answer over stale orders is denied stale-items").
+
+Claim 7 is the one test that is not a check: it holds that the three end-to-end tests exist and assert the denials, so a change that removed one would fail here.
+
+### One sentence for the documents
+
+The static check follows a taint from a source to the places where data *leaves* (an effect's recipient, a message, and, by label, a region), and it proves a policy over the decision table; it does not follow a source into a decision's inputs, and it never sees a decision's provider. A decision's audience is enforced by the gate, through a policy rule over its taint.
+
+### 20. A policy whose scope names no module governs nothing, and says CLEAN
+
+- **Symptom.** A policy with `scope "fb"` beside a program in module `fb_input` checks `CLEAN` with every stage clean, and its regions read "unreachable, no effect provides sensitive, egress": the scope is the module it governs, and no module is named `fb`. The ungated decision that should have been `PL7001` is not reported.
+- **Appeared in.** the flow-boundary tests (the first version of claim 3 passed for the wrong reason).
+- **Workaround.** The scope is the module's name.
+- **Proposed fix.** A policy whose scope matches no module of the project is a finding (`PL6504`, "the scope governs nothing"), since the regions it reports are then about no effect at all.
 
 ## Conclusion
 

@@ -1,0 +1,99 @@
+// expected: FINDING PL6831
+// docs/examples/language-findings.md, item 17, claim 1: the static flow rule (PS17.3) follows a taint from a source,
+// through a retrieval and a decision's answer, to an effect whose recipient is below it. The owner's notes come back as a
+// Content in Written, and the send's recipient is the customer audience: PL6831 AUDIENCE_LEAK, with a witness.
+module fb_leak
+
+audience { public < customer < owner }
+
+source notes: records {
+  adapter "postgres"
+  audience owner owned
+  freshness 720h
+}
+
+enum Phase { Idle, Reading, Writing, Sending, Done, Failed }
+
+machine Relay {
+  state {
+    phase : Phase = Idle
+    who   : Principal = none
+  }
+
+  terminal phase in { Done, Failed }
+
+  action Open(owner: Principal)
+  action Read(items: Items)
+  action ReadFailed()
+  action Written(text: Content, conf: Conf)
+  action Unwritten()
+  action Sent()
+  action SendFailed()
+
+  on Open(owner) {
+    require phase == Idle else reject "opened"
+    who' = owner
+    phase' = Reading
+    emit read(owner: owner)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Writing
+    decide write(notes: items)
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Failed
+  }
+
+  on Written(text, conf) {
+    require phase == Writing else reject "not-writing"
+    if conf >= 0.8 {
+      phase' = Sending
+      emit send(body: text)
+    } else {
+      phase' = Failed
+    }
+  }
+
+  on Unwritten {
+    require phase == Writing else reject "not-writing"
+    phase' = Failed
+  }
+
+  on Sent {
+    require phase == Sending else reject "not-sending"
+    phase' = Done
+  }
+
+  on SendFailed {
+    require phase == Sending else reject "not-sending"
+    phase' = Failed
+  }
+
+  effect read(owner: Principal) {
+    retrieve notes where owner == owner limit 2
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  decision write(notes: Items) -> Content {
+    provider "internal"
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Written(text: r.answer, conf: r.conf)
+    failed -> Unwritten()
+  }
+
+  effect send(body: Content) {
+    kind "mail.send"
+    labels { egress:external }
+    targets { egress: "https://mail.example/v1/send" }
+    audience customer
+    class irreversible
+    ok -> Sent()
+    failed -> SendFailed()
+  }
+}

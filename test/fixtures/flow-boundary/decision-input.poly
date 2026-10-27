@@ -1,0 +1,73 @@
+// expected: CLEAN
+// docs/examples/language-findings.md, item 17, claims 2 to 4. The owner's notes (a source of class owner) are given to a
+// decision whose provider is "external". Nothing leaves the machine: the answer is stored, never emitted. The static
+// check compares nothing here: no flow rule applies to a decision's inputs (PS17.3 excludes decisions), and the provider
+// is a string no policy and no check reads. The gate is the only enforcement, through a policy rule on the decision's taint.
+module fb_input
+
+audience { public < customer < owner }
+
+source notes: records {
+  adapter "postgres"
+  audience owner owned
+  freshness 720h
+}
+
+enum Phase { Idle, Reading, Summing, Done, Failed }
+
+machine Briefing {
+  state {
+    phase   : Phase = Idle
+    summary : Content = none
+  }
+
+  terminal phase in { Done, Failed }
+
+  action Open(owner: Principal)
+  action Read(items: Items)
+  action ReadFailed()
+  action Summed(text: Content)
+  action Unsummed()
+
+  on Open(owner) {
+    require phase == Idle else reject "opened"
+    phase' = Reading
+    emit read(owner: owner)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Summing
+    decide summarize(notes: items)
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Failed
+  }
+
+  on Summed(text) {
+    require phase == Summing else reject "not-summing"
+    summary' = text
+    phase' = Done
+  }
+
+  on Unsummed {
+    require phase == Summing else reject "not-summing"
+    phase' = Failed
+  }
+
+  effect read(owner: Principal) {
+    retrieve notes where owner == owner limit 2
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  decision summarize(notes: Items) -> Content {
+    provider "external"
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Summed(text: r.answer)
+    failed -> Unsummed()
+  }
+}

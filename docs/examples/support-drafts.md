@@ -24,7 +24,7 @@ All paths are under `examples/support-drafts/`. The names are fixed.
 | `recorded/answers.json` | the recorded customers, tickets, notes and answers |
 | `README.md` | what it shows, how to run it, what is checked, what is not, a conclusion, a glossary |
 
-Tests: `test/ex-support-drafts.test.mjs` (light) and `test/after/ex-support-drafts-e2e.test.mjs` (admission and a run). The shared helper is `test/ex-kit.mjs`. This example's check takes about two minutes, so `examples/support-drafts/` joins the serial group of `test/serial-sources.mjs`. For a source, a retrieval, decisions over `Items` and an escalation, read `test/after/ex-concierge-e2e.test.mjs`, `test/ex-concierge-refund.test.mjs` and `test/memory-helpers.mjs` (`pgOrders`, a fake Postgres whose table and column names the test gives to `postgresSource`).
+Tests: `test/ex-support-drafts.test.mjs` (light) and `test/after/ex-support-drafts-e2e.test.mjs` (admission and a run). The shared helper is `test/ex-kit.mjs`. This example's check takes about ten seconds. For a source, a retrieval, decisions over `Items` and an escalation, read `test/after/ex-concierge-e2e.test.mjs`, `test/ex-concierge-refund.test.mjs` and `test/memory-helpers.mjs` (`pgOrders`, a fake Postgres whose table and column names the test gives to `postgresSource`).
 
 ## Sources and audience
 
@@ -106,7 +106,7 @@ End-to-end test, over recorded traffic, nothing on the network (`test/after/`, s
 
 ## Amendments made when the code existed
 
-- **The check needs a large heap.** The 1,705 states take 8 s with `--max-old-space-size=8192` and 112 s in the default heap. `examples/support-drafts/` is in the serial group of `test/serial-sources.mjs`, and the commands in the README give the heap (language findings 16).
+- **The check takes about ten seconds in the default heap**, not the two minutes the spec first expected. A first run took 112 s while other processes were running; measured again alone, the 1,705 states take 10 s in the default heap and 12 s with an 8 GB heap, and the program alone through the command line 24 s and 18 s. `examples/support-drafts/` was put in the serial group on the first figure and is out of it again (language findings 16, retracted).
 - **The independent writer's end-to-end file first dispatched the completions (`Read`, `Noted`, ...) by hand**, which the runtime refuses; it was rewritten to dispatch only `Open`, `Propose` and `Resolve`. Its fake database used column names `ticket_id` and `owner` that `pgOrders` does not answer; the implementer changed them to `order_id` and `customer_id`. A provider's `cites` is an array of ids, not an object with a count. The policy's findings are in the report's own `diagnostics`, not a machine's.
 - **The handler checks `payload.body`** for none before reading it, since the generated type is `Content | null`.
 - **The refusal test asserts the denial.** The gate denies the extra `decision.summary` over the notes (`wrong-state` from `external-model-audience`), once, as well as the provider never being asked about a note.

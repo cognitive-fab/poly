@@ -262,6 +262,11 @@ test('support-drafts: isolation - owner-1 and owner-2 do not share tickets or no
 
     // Verify that the database queries filtered by owner.
     const allQueries = [...ticketsDb.seen];
+    // The notes source too: every retrieval it saw names one owner, and each owner's run asked it once for its own notes.
+    const noteRetrievals = notesDb.seen.filter((q) => q.text.startsWith('SELECT "order_id" AS id'));
+    assert.deepEqual(noteRetrievals.map((q) => q.params[0]).sort(), ['owner-1', 'owner-2'], 'the notes source was asked for each owner, by owner');
+    const briefAsked = provider.asked.filter((a) => a.decision === 'brief');
+    assert.deepEqual(briefAsked.map((a) => a.items).sort(), [['n-1001'], ['n-2001']], 'each brief was given only its own note');
     const owner1Queries = allQueries.filter((q) => q.params && q.params[0] === 'owner-1');
     const owner2Queries = allQueries.filter((q) => q.params && q.params[0] === 'owner-2');
     assert.ok(owner1Queries.length > 0, 'queries made for owner-1');

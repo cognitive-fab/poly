@@ -1,0 +1,82 @@
+// expected: INCONCLUSIVE PL6838
+// docs/examples/language-findings.md, item 17, claim 5: a message that carries a tainted Content to a machine that no
+// configuration holds together with the sender's is judged nowhere (S322, PS17.3): PL6838 FLOW_NOT_FOLLOWED, and the flow
+// stage is INCONCLUSIVE, never a silent clean.
+module fb_send
+
+audience { public < customer < owner }
+
+source notes: records {
+  adapter "postgres"
+  audience owner owned
+  freshness 720h
+}
+
+enum Phase { Idle, Reading, Writing, Passed, Failed }
+
+service machine Inbox {
+  state { got : bool = false }
+  action Note(body: Content)
+  on Note(body) {
+    got' = true
+  }
+}
+
+machine Relay {
+  state {
+    phase : Phase = Idle
+    peer  : Ref<Inbox> = none
+  }
+
+  terminal phase in { Passed, Failed }
+
+  action Open(owner: Principal, to: Ref<Inbox>)
+  action Read(items: Items)
+  action ReadFailed()
+  action Written(text: Content)
+  action Unwritten()
+
+  on Open(owner, to) {
+    require phase == Idle else reject "opened"
+    require to != none else reject "no-peer"
+    peer' = to
+    phase' = Reading
+    emit read(owner: owner)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Writing
+    decide write(notes: items)
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Failed
+  }
+
+  on Written(text) {
+    require phase == Writing else reject "not-writing"
+    phase' = Passed
+    send peer <- Note(body: text)
+  }
+
+  on Unwritten {
+    require phase == Writing else reject "not-writing"
+    phase' = Failed
+  }
+
+  effect read(owner: Principal) {
+    retrieve notes where owner == owner limit 2
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  decision write(notes: Items) -> Content {
+    provider "internal"
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Written(text: r.answer)
+    failed -> Unwritten()
+  }
+}
