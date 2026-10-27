@@ -1,0 +1,11 @@
+{
+  "models": { "small": "recorded-small-2026-10" },
+  "receipts": [
+    { "id": "taxi", "text": "Taxi from the airport, 150 euros.", "answer": "Travel",
+      "distribution": [["Travel", 0.93], ["Other", 0.07]], "usage": { "inputTokens": 11, "outputTokens": 2 } },
+    { "id": "laptop", "text": "Laptop stand and keyboard, 350 euros.", "answer": "Equipment",
+      "distribution": [["Equipment", 0.9], ["Other", 0.1]], "usage": { "inputTokens": 12, "outputTokens": 2 } },
+    { "id": "blurry", "text": "Receipt photo, unreadable.", "answer": "Meals",
+      "distribution": [["Meals", 0.4], ["Travel", 0.35], ["Other", 0.25]], "usage": { "inputTokens": 7, "outputTokens": 2 } }
+  ]
+}

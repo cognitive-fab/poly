@@ -1,0 +1,18 @@
+// The expense policy (docs/examples/expense-approval.md). A payment above 200 waits for a person's signed approval;
+// a manager's Approve on the claim is a dispatch with claims and approves nothing here. The decision is named too, since
+// polycheck reaches an unnamed decision that sends private text out with no gate crossed (PL7001).
+module expenses_policy
+
+policy payments {
+  scope "expenses"
+  obligation large-payment-reviewed "A payment above 200 is made only after a person approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "payroll.pay" && machine("expenses.Expense").large
+    require false else escalate
+    on unknown escalate
+  }
+  obligation categorize-while-categorizing "A receipt is sent to a model only while the claim is being categorized." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.categorize"
+    require machine("expenses.Expense").status == Categorizing else deny
+    on unknown deny
+  }
+}

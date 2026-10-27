@@ -93,6 +93,14 @@ End-to-end test (`test/after/ex-expense-approval-e2e.test.mjs`), over recorded t
 - escalation: `carol` submits 350 with `laptop`; `dave` approves; the payment is proposed and **escalated**, with no POST; a person's signed approval releases it, then one POST; the claim is `Settled`;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
+## Amendments made when the code existed
+
+- **The amount is in units of 50 euros, `0..10`, and `large` is `amount > 4`.** With `0..500` the check did not finish: a ranged value that a handler stores is not cut at its comparison constants (S458 cuts only parameters the state never keeps), so the field took all 501 values. At `0..10` the check takes about 25 s. Read every amount above as units: 120 euros is 3 (150 euros), 350 euros is 7, 600 euros is 12 and outside the domain. The receipts say 150 and 350 euros.
+- **The strict domain is a check clause.** `Submit(amount: int check 0..10, ...)`: a range type refuses an outside value as a dispatch that is no step (S140, a thrown `RefusedDispatch`), where a `check` clause gives the journaled rejection `outside-check-domain` the e2e test asserts. The state field is `cost` and the `Categorized` parameter is `picked`, since a parameter named after a field is a warning (S19).
+- The handler posts `{ euros: amount * 50 }`.
+- The program declares `audience { public < staff }` (S302, as in the booker), and the policy holds a second obligation, `categorize-while-categorizing`, naming `decision.categorize` (PL7001, as in the booker).
+- The recorded answers are read from `examples/expense-approval/recorded/answers.json`. Test assertions about amounts and the POST body were changed to match after the code existed.
+
 ## Conclusion
 
 The property is one comparison on the approving step, and the check finds its absence in three steps. What the check cannot see is who the principals are; the example shows that the verifier supplies them, and that a manager's approval of a claim and a person's approval of a payment are two different records.

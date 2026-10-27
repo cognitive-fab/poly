@@ -1,0 +1,121 @@
+// expected: FINDING PL3001
+// Expense approval (docs/examples/expense-approval.md). An employee submits a claim with a receipt; a typed decision
+// categorizes the receipt; a manager approves or declines; an approved claim is paid through an irreversible, keyed
+// payment, which the policy holds for a person's signed approval above 200 euros.
+// The amount is in units of 50 euros (0..10): a stored range is not cut at its comparison constants (S458), so a wider
+// domain makes the check too large to finish. The property the check proves: the
+// approver of a claim is never its submitter. Claims come from the host's verifier, never from an action's data.
+// Seeded defect: Approve no longer refuses the submitter, so the same principal can approve its own claim.
+module expenses
+
+// Declaring the audience is what makes the runtime keep a taint record for a receipt the host stores; without one, the
+// decision over it fails closed (PS17.4, S302).
+audience { public < staff }
+
+enum Category { Travel, Meals, Equipment, Other }
+
+enum Status { Draft, Categorizing, Submitted, Paying, Settled, Declined, Failed, Held }
+
+claims Employee {
+  principal: Principal
+}
+
+claims Approver {
+  principal: Principal
+}
+
+machine Expense {
+  state {
+    status    : Status    = Draft
+    submitter : Principal = none
+    approver  : Principal = none
+    cost      : 0..10     = 0
+    large     : bool      = false
+    category  : Category  = Other
+  }
+
+  terminal status in { Settled, Declined, Failed, Held }
+
+  action Submit(amount: int check 0..10, receipt: Content)
+  action Categorized(picked: Category, conf: Conf, margin: Conf)
+  action Uncategorized()
+  action Approve()
+  action Decline()
+  action Paid()
+  action PayFailed()
+  action PayHeld()
+
+  on Submit(amount, receipt) by s: Employee {
+    require status == Draft else reject "not-draft"
+    require amount > 0 else reject "empty"
+    submitter' = s.principal
+    cost' = amount
+    large' = amount > 4
+    status' = Categorizing
+    decide categorize(receipt: receipt)
+  }
+
+  on Categorized(picked, conf, margin) {
+    require status == Categorizing else reject "not-categorizing"
+    if conf >= 0.8 {
+      category' = picked
+    }
+    status' = Submitted
+  }
+
+  on Uncategorized {
+    require status == Categorizing else reject "not-categorizing"
+    status' = Submitted
+  }
+
+  on Approve by a: Approver {
+    require status == Submitted else reject "not-submitted"
+    approver' = a.principal
+    status' = Paying
+    emit pay(amount: cost)
+  }
+
+  on Decline by a: Approver {
+    require status == Submitted else reject "not-submitted"
+    require a.principal != submitter else reject "own-claim"
+    status' = Declined
+  }
+
+  on Paid {
+    require status == Paying else reject "not-paying"
+    status' = Settled
+  }
+
+  on PayFailed {
+    require status == Paying else reject "not-paying"
+    status' = Failed
+  }
+
+  on PayHeld {
+    require status == Paying else reject "not-paying"
+    status' = Held
+  }
+
+  invariant approver-not-submitter: approver != none implies approver != submitter
+  invariant large-flag: cost > 4 implies large
+  path property pay-at-most-once: count("payroll.pay") <= 1
+
+  decision categorize(receipt: Content) -> Category {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Categorized(picked: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Uncategorized()
+  }
+
+  effect pay(amount: 0..10) {
+    kind "payroll.pay"
+    labels { egress:external }
+    targets { egress: "https://payroll.example/v1/reimbursements" }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 10s }
+    ok -> Paid()
+    failed -> PayFailed()
+    exhausted -> PayHeld()
+  }
+}
