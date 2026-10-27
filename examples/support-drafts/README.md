@@ -12,23 +12,23 @@ A support owner receives customer messages and keeps private notes about each cu
 
 ## Run it
 
-From the repository root, after `npm ci` and `npm run build`. The check needs a large heap; in the default heap it is ten times slower (see the limits below).
+From the repository root, after `npm ci` and `npm run build`.
 
 ```sh
-node --max-old-space-size=8192 packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts.poly
-node --max-old-space-size=8192 packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts-defect.poly
-node --max-old-space-size=8192 packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts.poly --root examples/support-drafts --host examples/support-drafts/host/tsconfig.json
-node --max-old-space-size=8192 --test test/ex-support-drafts.test.mjs
-node --max-old-space-size=8192 --test --test-concurrency=1 test/after/ex-support-drafts-e2e.test.mjs
+node packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts.poly
+node packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts-defect.poly
+node packages/poly-check/dist/src/cli.js check examples/support-drafts/support-drafts.poly --root examples/support-drafts --host examples/support-drafts/host/tsconfig.json
+node --test test/ex-support-drafts.test.mjs
+node --test test/after/ex-support-drafts-e2e.test.mjs
 ```
 
-The first two check each program alone, with no policy, so they report what a program alone shows; the tests check each program with its policy beside it, as a project. The directory is in the serial group of `test/serial-sources.mjs`.
+The first two check each program alone, with no policy, so they report what a program alone shows; the tests check each program with its policy beside it, as a project.
 
 ## What is checked
 
 | Check | Result |
 |---|---|
-| Program with its policy | `CLEAN`; `Ticket` over 1,705 states; about 8 s with an 8 GB heap |
+| Program with its policy | `CLEAN`; `Ticket` over 1,705 states; about 10 s in the default heap |
 | Policy | all seven stages `CLEAN`, including the regions and the `never` |
 | Defect copy with its own (weakened) policy | `FINDINGS`, exactly two codes, each with a witness of 1 step: `PL7001` (the credential-egress region is reached at `decision.summary` with no gate crossed) and `PL6503` (the policy allows a proposal its `never` forbids) |
 | Defect program with the program's policy | `CLEAN`: the check does not read the flow from the notes to the summary, and the gate denies it at run time |
@@ -39,7 +39,6 @@ The first two check each program alone, with no policy, so they report what a pr
 ## What is not checked
 
 - **The flow through the machine.** The finding depends on the policy and not on the program: beside its own policy the defect program checks `CLEAN`. A policy sees a decision's kind and taint, never its provider, so changing which provider a decision uses is invisible to both. The gate at run time is what holds the line, and the end-to-end test shows it. (Language findings 17.)
-- **The heap.** With the default heap the check took 112 s against 8 s with an 8 GB heap; the progress lines suggest garbage collection near the limit, which was not measured. (Language findings 16.)
 - **Domains.** Three items per retrieval, one owner per run, two content representatives. Nothing else was reduced; `CLEAN` is a statement about 1,705 states.
 - **Which models.** The recorded answers stand in for the external and the internal model; their confidences are the fixture's, with no calibration.
 - **The owner.** That the person who approves is the owner is the keyring's, not the program's.

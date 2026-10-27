@@ -91,7 +91,7 @@ test('the program\'s policy through poly-ref\'s decision table: decision.summary
   const { rows } = proposalTable(scope, policyFacts([program]));
   const summary = rows.filter((x) => x.effect?.kind === 'decision.summary');
   const at = (cls) => summary.filter((x) => (x.effect?.taint?.class ?? null) === cls);
-  assert.ok(at('owner').length && at('customer').length, `the table proposes decision.summary with owner and customer: ${JSON.stringify(summary.map((x) => x.effect?.taint ?? null))}`);
+  assert.ok(at('owner').length && at('customer').length && at('public').length, `the table proposes decision.summary with owner and customer: ${JSON.stringify(summary.map((x) => x.effect?.taint ?? null))}`);
   // decision.summary with owner taint is denied.
   for (const row of at('owner')) {
     const d = decide(scope, initialSigma(scope), row);
@@ -115,6 +115,7 @@ test('the program\'s policy through poly-ref\'s decision table: decision.write a
   const write = rows.filter((x) => x.effect?.kind === 'decision.write');
   const brief = rows.filter((x) => x.effect?.kind === 'decision.brief');
   const atOwner = (decisions) => decisions.filter((x) => (x.effect?.taint?.class ?? null) === 'owner');
+  assert.ok(atOwner(write).length > 0 && atOwner(brief).length > 0, 'the table proposes write and brief with an owner taint');
   // decision.write with owner taint is allowed.
   for (const row of atOwner(write)) assert.equal(decide(scope, initialSigma(scope), row).decision, 'allow');
   // decision.brief with owner taint is allowed.
