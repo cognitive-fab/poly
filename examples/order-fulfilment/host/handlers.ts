@@ -1,7 +1,7 @@
 // The handlers of payments.charge, carrier.ship and payments.refund (docs/examples/order-fulfilment.md). They hold no
 // rule: the gate has let the intent through, and the program has already decided the step. Each request carries the
-// intent's idempotency key, the same on every attempt, so a retry whose answer was lost is one charge, one shipment or
-// one refund. The body names the order by its instance id.
+// intent's idempotency key, the same on every attempt; no documentation says a service honours it, so the shipment and the
+// refund are attempted once (finding 31). The body names the order by its instance id.
 import type { Effects } from '../.poly/build/fulfilment.Order/types.js';
 
 interface Egress {
@@ -23,7 +23,8 @@ async function send(url: string, caps: { egress: Egress }, ctx: Context): Promis
   const headers: Record<string, string> = ctx.idempotencyKey ? { 'idempotency-key': ctx.idempotencyKey } : {};
   const res = await caps.egress.post(url, { order: ctx.instanceId }, { headers });
   if (res.status === 200 || res.status === 201) return { ok: true };
-  // A 4xx other than 429 is the service refusing this request; anything else is tried again.
+  // A 4xx other than 429 is the service refusing this request; anything else is retried for the
+  // charge and ends the shipment or the refund as exhausted, its one attempt (finding 31).
   if (res.status >= 400 && res.status < 500 && res.status !== 429) throw refuse(`${url} answered ${res.status}`);
   throw new Error(`${url} answered ${res.status}`);
 }

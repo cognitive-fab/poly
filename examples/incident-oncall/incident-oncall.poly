@@ -10,7 +10,7 @@ audience { public < team }
 
 enum Severity { Low, High }
 
-enum Status { Reported, Triaging, Review, Logged, Paging, Paged, Snoozed, Escalating, Escalated, Unreached, Acked, Resolved }
+enum Status { Reported, Triaging, Review, Logged, Paging, Paged, Unconfirmed, Snoozed, Escalating, Escalated, EscalationUnconfirmed, Unreached, Acked, Resolved }
 
 machine Incident {
   state {
@@ -27,12 +27,15 @@ machine Incident {
   action Classify(sev: Severity)
   action PageSent()
   action PageFailed()
+  action PageUncertain()
   action Ack()
   action Timeout()
   action Snooze()
   action Wake()
   action Escalated()
   action EscalateFailed()
+  action EscalateUncertain()
+  action Confirm(reached: bool)
   action Resolve()
 
   on Report(summary) {
@@ -93,14 +96,24 @@ machine Incident {
     }
   }
 
+  // The one attempt of the page ended with no answer the program can trust: the engineer may have been paged. Nothing
+  // pages again (finding 31). The ack timer stays armed, so the engineer acknowledges or the timer escalates to the next
+  // person. Taken in every status, like PageSent and PageFailed, and acting only from Paging.
+  on PageUncertain {
+    answered' = true
+    if status == Paging {
+      status' = Unconfirmed
+    }
+  }
+
   on Ack {
-    require status == Paging || status == Paged else reject "not-waiting"
+    require status == Paging || status == Paged || status == Unconfirmed else reject "not-waiting"
     status' = Acked
     cancel ack
   }
 
   on Timeout {
-    require status == Paging || status == Paged else reject "not-waiting"
+    require status == Paging || status == Paged || status == Unconfirmed else reject "not-waiting"
     status' = Escalating
     emit escalate()
   }
@@ -129,6 +142,22 @@ machine Incident {
     status' = Unreached
   }
 
+  // The one attempt of the escalation ended with no answer the program can trust: somebody may have been reached.
+  on EscalateUncertain {
+    require status == Escalating else reject "not-escalating"
+    status' = EscalationUnconfirmed
+  }
+
+  // A person's reading of the pager service for an unconfirmed escalation. It never escalates again (finding 31).
+  on Confirm(reached) {
+    require status == EscalationUnconfirmed else reject "not-unconfirmed"
+    if reached {
+      status' = Escalated
+    } else {
+      status' = Unreached
+    }
+  }
+
   on Resolve {
     require status == Acked || status == Escalated else reject "not-answered"
     status' = Resolved
@@ -137,7 +166,7 @@ machine Incident {
   path property page-at-most-once: count("pager.page") <= 1
   path property escalate-at-most-once: count("pager.escalate") <= 1
 
-  liveness page-is-answered: status == Paging leads to status == Acked || status == Escalated || status == Unreached under fair { Timeout, Wake, PageSent, PageFailed, Escalated, EscalateFailed }
+  liveness page-is-answered: status == Paging leads to status == Acked || status == Escalated || status == Unreached under fair { Timeout, Wake, PageSent, PageFailed, Escalated, EscalateFailed, Confirm }
 
   decision triage(report: Content) -> Severity {
     provider "small"
@@ -152,10 +181,10 @@ machine Incident {
     labels { egress:external }
     targets { egress: "https://pager.example/v1/pages" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> PageSent()
     failed -> PageFailed()
-    exhausted -> PageFailed()
+    exhausted -> PageUncertain()
   }
 
   effect escalate() {
@@ -163,9 +192,9 @@ machine Incident {
     labels { egress:external }
     targets { egress: "https://pager.example/v1/escalations" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Escalated()
     failed -> EscalateFailed()
-    exhausted -> EscalateFailed()
+    exhausted -> EscalateUncertain()
   }
 }

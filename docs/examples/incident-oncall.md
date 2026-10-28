@@ -133,7 +133,7 @@ v1.4 is built on v1.3.1, whose retry-safety rule (PS23.5) reports an irreversibl
 - **The page.** Before, an exhausted page went to `PageFailed` and escalated at once, as if nobody had been paged. Now `PageUncertain` goes to `Unconfirmed`, with the acknowledgement timer still armed. The engineer, if paged, acknowledges; otherwise the timer escalates to the next person five minutes later. This is the program's own hand-off to people, so no new action is needed, and the liveness property holds without a new assumption.
 - **The escalation.** Before, an exhausted escalation went to `Unreached`, as if nobody had been reached. Now `EscalateUncertain` goes to `EscalationUnconfirmed`, and a person's `Confirm(reached)` says which it was. `Confirm` joins the fair set of `page-is-answered`.
 
-The defect copy changes in the same way. The expected lines and the defect's lasso (9 steps, a prefix of three and a cycle of six) do not change: the new completions are not fair, and `Confirm` is enabled only in `EscalationUnconfirmed`, which the snooze cycle never enters. The state counts change, and the README records them.
+The defect copy changes in the same way. The expected lines and the defect's lasso (9 steps, a prefix of three and a cycle of six) do not change: the new completions are not fair, and `Confirm` is enabled only in `EscalationUnconfirmed`, which the snooze cycle never enters. The state counts change, and the README records them. When the code existed: `Incident` has 40 states (35 before), and the defect's lasso is 9 steps, as predicted.
 
 ## Conclusion
 

@@ -244,7 +244,9 @@ test('subscription-cancel: one attempt, unknown cancellation - 503 then 201 send
   const a = await admitted();
   const script = {
     'https://marketing.example/v1/offers': 201,
-    'https://billing.example/v1/subscriptions/cancel': [503, 201],
+    // Corrected after the code existed: the script answers by call count across the runtime, so the second subscription's
+    // one request is the second call; both get 503, and the 201 after them is never asked for.
+    'https://billing.example/v1/subscriptions/cancel': [503, 503, 201],
   };
   const { sent, transports } = recordedServices(script);
   const { rt, clock } = await loadExample(a, { transports });
@@ -333,7 +335,8 @@ test('subscription-cancel: one attempt, unknown offer - 503 then 201 sends exact
 
   const a = await admitted();
   const script = {
-    'https://marketing.example/v1/offers': [503, 201],
+    // Corrected after the code existed, as above: both subscriptions' one offer request gets 503.
+    'https://marketing.example/v1/offers': [503, 503, 201],
     'https://billing.example/v1/subscriptions/cancel': 201,
   };
   const { sent, transports } = recordedServices(script);

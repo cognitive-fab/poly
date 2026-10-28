@@ -1,6 +1,6 @@
 # Expense approval
 
-An employee submits an expense claim: an amount and a receipt. A typed decision reads the receipt and gives a category. A manager approves or declines, and an approved claim is paid through an irreversible, keyed payment. A payment above 200 euros waits for a second person, who approves it with a signed record. Everything here runs on recorded answers: no model is called and nothing leaves the machine. The spec is `docs/examples/expense-approval.md`.
+An employee submits an expense claim: an amount and a receipt. A typed decision reads the receipt and gives a category. A manager approves or declines, and an approved claim is paid through an irreversible payment attempted once. A payment above 200 euros waits for a second person, who approves it with a signed record. Everything here runs on recorded answers: no model is called and nothing leaves the machine. The spec is `docs/examples/expense-approval.md`.
 
 ## What it shows
 
@@ -8,7 +8,7 @@ An employee submits an expense claim: an amount and a receipt. A typed decision 
 - **Verified claims.** The submitter and the approver are principals from the host's verifier (`claims Employee`, `claims Approver`), never from an action's data.
 - **A property about who.** The invariant `approver-not-submitter` says that an approver is never the submitter. `Approve` and `Decline` both refuse the submitter with `own-claim`.
 - **Two different approvals.** A manager's `Approve` is a dispatch with claims. A payment above 200 euros is proposed to the gate, which escalates it, and only a person's signed record releases it (`approvalFor` and `rt.approve`). The manager's approval of the claim does not stand for it.
-- **A keyed payment.** `payroll.pay` is irreversible and carries the intent's idempotency key. The path property `pay-at-most-once` holds.
+- **A payment attempted once, and a held claim.** `payroll.pay` is irreversible with `retry { attempts 1 }`: the payroll service documents no idempotency key, so a retry whose first answer was lost could pay twice, which v1.3's retry-safety rule reports as `PL4003` (finding 31). A refusal fails the claim. An end the program cannot read holds it (`Held`), and a person who is not the submitter reads the payroll service and says which with `Resolve(paid)`; the program never pays again. The path property `pay-at-most-once` holds.
 - **A seeded defect.** `expense-approval-defect.poly` lets `Approve` skip the submitter check.
 
 ## Run it
@@ -33,7 +33,7 @@ The tests check the program with its policy beside it, as a project. The check e
 | Policy | all seven stages `CLEAN` |
 | Defect copy | `FINDINGS`, exactly `PL3001 INVARIANT_REACHABLE` (`approver-not-submitter`), witness of 3 steps: `Submit` by one principal, `Categorized`, `Approve` by the same principal; 1,711 states |
 | Host handler | compiles under `poly check --host`; a wrong payload field is `PL6836` |
-| End to end | 7 tests: main path, the submitter refused, an amount outside the domain refused, a blurry receipt left in `Other`, a payment above 200 euros escalated and released by a person, and a journal that replays (3 runs, 17 rows, 1 gate session, no divergence) |
+| End to end | 9 tests: admission, main path, the submitter refused, an amount outside the domain refused, a blurry receipt left in `Other`, a payment above 200 euros escalated and released by a person, a payment sent once and held, then resolved either way by a person who is not the submitter, a refused payment, and a journal that replays (3 runs, 17 rows, 1 gate session, no divergence) |
 
 ## What is not checked
 

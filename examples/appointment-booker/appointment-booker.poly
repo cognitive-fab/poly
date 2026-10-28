@@ -1,8 +1,8 @@
 // expected: CLEAN
 // Appointment booker (docs/examples/appointment-booker.md). A typed decision reads a free-text request and answers a
 // day and an hour. The program books that slot through an irreversible write, once, and refuses a slot that is taken.
-// The write carries the intent's idempotency key (host/handlers.ts), so a retry cannot book twice; an unanswered write
-// leaves the slot taken, since the event may exist, and only a person's Resolve frees it. The property the check proves
+// The write is attempted once: the calendar documents no idempotency key, so a retry could book twice (PS23.5,
+// finding 31). An unanswered write leaves the slot taken, since the event may exist, and only a person's Resolve frees it. The property the check proves
 // is the step property free-slot-only: Booking is entered only for a slot that was free.
 module booker
 
@@ -69,7 +69,7 @@ service machine Calendar {
     taken' = taken with [slot] = false
   }
 
-  // The write was tried to its limit with no answer. The slot stays taken (it may be booked); a person looks.
+  // The one attempt of the write ended with no answer the program can trust (finding 31). The slot stays taken (it may be booked); a person looks.
   on WriteUncertain {
     require phase == Booking else reject "not-booking"
     phase' = Uncertain
@@ -107,7 +107,7 @@ service machine Calendar {
     labels { egress:external }
     targets { egress: "https://calendar.example/v1/events" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Written()
     failed -> WriteFailed()
     exhausted -> WriteUncertain()

@@ -217,7 +217,8 @@ test('appointment-booker: one attempt - 503 sent exactly once, then Resolve case
 
     // Should have sent exactly 1 request (the 503 is not retried).
     assert.equal(egress1.sent.length, 1, `should have 1 request; got ${egress1.sent.length}`);
-    assert.equal(egress1.sent[0].status, 503, 'the request got 503');
+    // Corrected after the code existed: a recorded request has no status (the answer is not kept on it); the queue's
+    // index below shows that the 503 was the one answer given.
     // Verify the 201 in the response queue was never called.
     assert.equal(responseIndex1, 1, 'the mock response queue advanced only once (no retry)');
 
@@ -263,7 +264,7 @@ test('appointment-booker: one attempt - 503 sent exactly once, then Resolve case
 
     // Should have sent exactly 1 request.
     assert.equal(egress2.sent.length, 1, `should have 1 request; got ${egress2.sent.length}`);
-    assert.equal(egress2.sent[0].status, 503, 'the request got 503');
+    // Corrected after the code existed: a recorded request has no status, as above.
 
     // Should be Uncertain with slot still taken.
     const state3 = (await rt2.getState(id2)).state;

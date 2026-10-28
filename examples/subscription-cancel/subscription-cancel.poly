@@ -1,11 +1,11 @@
 // expected: CLEAN
 // Subscription cancel (docs/examples/subscription-cancel.md). A subscriber asks to cancel. The service may make one retention
 // offer first; the subscriber may keep the subscription, decline, or say nothing, in which case the offer lapses after a week
-// and the cancellation goes ahead. Cancellation is an irreversible, keyed call to billing. The liveness property request-ends
+// and the cancellation goes ahead. Cancellation is an irreversible call to billing, attempted once (finding 31). The liveness property request-ends
 // says a request always ends, in a cancellation or in the subscriber's own choice to keep; the offer is made at most once.
 module subscription
 
-enum Status { Active, Offering, Offered, Cancelling, Cancelled, Retained, Stuck }
+enum Status { Active, Offering, OfferUnknown, Offered, Cancelling, CancelUnknown, Cancelled, Retained, Stuck }
 
 machine Subscription {
   state {
@@ -18,11 +18,14 @@ machine Subscription {
   action Request()
   action OfferSent()
   action OfferFailed()
+  action OfferUncertain()
   action Keep()
   action Decline()
   action Lapse()
   action Billed()
   action BillFailed()
+  action BillUncertain()
+  action Resolve(done: bool)
 
   on Request {
     require status == Active else reject "not-active"
@@ -77,19 +80,51 @@ machine Subscription {
     status' = Stuck
   }
 
+  // The one attempt of the offer ended with no answer the program can trust: the subscriber may have the offer (finding 31).
+  on OfferUncertain {
+    require status == Offering else reject "not-offering"
+    status' = OfferUnknown
+  }
+
+  // The one attempt of the cancellation ended with no answer the program can trust: the subscription may be cancelled.
+  on BillUncertain {
+    require status == Cancelling else reject "not-cancelling"
+    status' = CancelUnknown
+  }
+
+  // A person's reading of the marketing or the billing service. It never sends the offer or the cancellation again.
+  on Resolve(done) {
+    require status == OfferUnknown || status == CancelUnknown else reject "not-unknown"
+    if status == OfferUnknown {
+      if done {
+        status' = Offered
+        after 168h -> Lapse() as lapse
+      } else {
+        status' = Cancelling
+        emit cancel()
+      }
+    } else {
+      if done {
+        status' = Cancelled
+      } else {
+        status' = Stuck
+      }
+    }
+  }
+
   path property offer-at-most-once: count("retention.offer") <= 1
   path property cancel-at-most-once: count("billing.cancel") <= 1
-  liveness request-ends: status == Offering || status == Offered leads to status == Cancelled || status == Retained || status == Stuck under fair { OfferSent, OfferFailed, Lapse, Billed, BillFailed }
+  liveness request-ends: status == Offering || status == Offered leads to status == Cancelled || status == Retained || status == Stuck under fair { OfferSent, OfferFailed, Lapse, Billed, BillFailed, Resolve }
 
   effect offer() {
     kind "retention.offer"
     labels { egress:external }
     targets { egress: "https://marketing.example/v1/offers" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> OfferSent()
     failed -> OfferFailed()
-    exhausted -> OfferFailed()
+    exhausted -> OfferUncertain()
   }
 
   effect cancel() {
@@ -97,9 +132,9 @@ machine Subscription {
     labels { egress:external }
     targets { egress: "https://billing.example/v1/subscriptions/cancel" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Billed()
     failed -> BillFailed()
-    exhausted -> BillFailed()
+    exhausted -> BillUncertain()
   }
 }

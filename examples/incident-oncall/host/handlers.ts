@@ -1,6 +1,6 @@
 // The handlers of pager.page and pager.escalate (docs/examples/incident-oncall.md). They hold no rule: the gate has let
-// the intent through, and the program has decided the step. Each request carries the intent's idempotency key, the same
-// on every attempt, so a retried page whose answer was lost pages once. The body names the incident by its instance id.
+// the intent through, and the program has decided the step. Each request carries the intent's idempotency key, but
+// no documentation says the service honours it, so the program attempts the effect once (finding 31). The body names the incident by its instance id.
 import type { Effects } from '../.poly/build/oncall.Incident/types.js';
 
 interface Egress {
@@ -21,7 +21,8 @@ async function send(url: string, caps: { egress: Egress }, ctx: Context): Promis
   const headers: Record<string, string> = ctx.idempotencyKey ? { 'idempotency-key': ctx.idempotencyKey } : {};
   const res = await caps.egress.post(url, { incident: ctx.instanceId }, { headers });
   if (res.status === 200 || res.status === 201) return { ok: true };
-  // A 4xx other than 429 is the pager refusing this request; anything else is tried again.
+  // A 4xx other than 429 is the pager refusing this request; anything else is an end the
+  // program cannot read, which its one attempt delivers as exhausted (finding 31).
   if (res.status >= 400 && res.status < 500 && res.status !== 429) throw refuse(`pager answered ${res.status}`);
   throw new Error(`pager answered ${res.status}`);
 }

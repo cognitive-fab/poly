@@ -1,13 +1,13 @@
 # Order fulfilment
 
-An order is fulfilled by a saga of three steps: reserve the stock, charge the customer, ship the goods. A failed charge gives the stock back, and a failed shipment gives the stock back and refunds the charge. The charge, the shipment and the refund are keyed. The example calls no model, so what is recorded is the answers of the payment and carrier services; nothing leaves the machine. The spec is `docs/examples/order-fulfilment.md`.
+An order is fulfilled by a saga of three steps: reserve the stock, charge the customer, ship the goods. A failed charge gives the stock back, and a failed shipment gives the stock back and refunds the charge. The shipment and the refund are attempted once, and an answer the program cannot read goes to a person. The example calls no model, so what is recorded is the answers of the payment and carrier services; nothing leaves the machine. The spec is `docs/examples/order-fulfilment.md`.
 
 ## What it shows
 
-- **A saga with compensations.** `ChargeFailed` releases the stock. `ShipFailed` releases the stock and refunds the charge. A refund that fails leaves the order `Stuck`, still charged, for a person.
+- **A saga with compensations.** `ChargeFailed` releases the stock. `ShipFailed` releases the stock and refunds the charge. A refund that fails leaves the order `Stuck`, still charged, for a person. A shipment or a refund whose one attempt ends with no answer the program can trust goes to `ShipUnknown` or `RefundUnknown`, and a person's `Resolve(done)` says which, running the compensations only for a shipment that did not happen.
 - **An invariant on the compensation.** `cancelled-holds-nothing`: a cancelled order holds no stock and no charge. `done-is-charged` and the path properties `charge-at-most-once` and `refund-needs-charge` hold too.
 - **A configuration.** Two orders share one stock in `two-orders`, with messages in any order within a transit bound of 4. The invariant `never-oversold` says the orders hold no more units than the stock began with, and the stock is never negative by its range.
-- **A keyed charge.** The handlers send the intent's idempotency key, the same on every attempt of one intent and different for different orders.
+- **One attempt for what cannot be undone (finding 31).** The carrier and the payment service document no idempotency key, so the irreversible shipment and refund are `retry { attempts 1 }`: a retry whose first answer was lost could ship or refund twice, which v1.3's retry-safety rule reports as `PL4003`. The charge is `compensable`, which that rule does not cover, and keeps three attempts. The handlers send the intent's idempotency key, the same on every attempt of one intent and different for different orders; no service documents that it honours the key, so nothing relies on it.
 - **A seeded defect.** `order-fulfilment-defect.poly` sends a failed shipment straight to `Cancelled`, with no release and no refund.
 
 ## Run it
@@ -28,17 +28,18 @@ The tests check the program with its policy beside it, as a project.
 
 | Check | Result |
 |---|---|
-| Program with its policy | `CLEAN`; `Stock` 2 states, `Order` 17 states; the configuration `two-orders` 126 global states and 2,107 global steps; about 1 s |
+| Program with its policy | `CLEAN`; `Stock` 2 states, `Order` 21 states; the configuration `two-orders` 180 global states; about 1 s |
 | Policy | all seven stages `CLEAN` |
-| Defect copy | `FINDINGS`, exactly `PL3001 INVARIANT_REACHABLE` (`cancelled-holds-nothing`), a witness of 4 steps: `Place`, `Reserved`, `Charged`, `ShipFailed`; `Order` 15 states, the configuration 72 global states |
+| Defect copy | `FINDINGS`, exactly `PL3001 INVARIANT_REACHABLE` (`cancelled-holds-nothing`), a witness of 4 steps: `Place`, `Reserved`, `Charged`, `ShipFailed`; `Order` 23 states, the configuration 196 global states |
 | Host handlers | compile under `poly check --host`; a wrong body field is `PL6836` |
-| End to end | 8 tests: main path, an order refused for lack of stock, a declined charge, a shipment that fails and is compensated, a refund that fails, keyed retries, and a journal that replays (4 runs, 19 rows, 1 gate session, no divergence) |
+| End to end | 13 tests: admission, main path, an order refused for lack of stock, a declined charge, a refused shipment that is compensated, an unknown shipment resolved either way, a refused refund ending `Stuck`, an unknown refund resolved either way, a `Resolve` refused on an order that is not unknown, the charge's keyed retries, and a journal that replays (4 runs, 19 rows, 1 gate session, no divergence) |
 
 ## What is not checked
 
 - **A larger world.** The configuration has one unit of stock, two orders and a transit bound of 4. `CLEAN` is a statement about that instance; three orders or two units were not tried. Nothing else was reduced.
 - **The leak in the defect.** The configuration still checks `CLEAN` on the defect: one unit and two orders cannot be oversold even when the unit is never given back. The leak is the machine invariant's to find, which it does.
-- **The services.** That a refund reached the customer, or that the carrier dedupes on the key, is the services'. The end-to-end test shows what the program asks for, on recorded answers.
+- **The services.** That a refund reached the customer is the payment service's. No service documents that it dedupes on the key.
+- **The charge.** It is `compensable` and keeps three attempts with an undocumented key, so a lost answer can still charge twice, and an exhausted charge still cancels the order as if nothing was taken. v1.3's retry-safety rule covers irreversible effects only (finding 31). The end-to-end test shows what the program asks for, on recorded answers.
 - **Settlement of the whole saga.** There is no liveness property: that every order ends `Done`, `Cancelled`, `Rejected` or `Stuck` is the deadlock check's (a non-terminal state with no accepting action), not a fairness argument.
 
 ## Conclusion

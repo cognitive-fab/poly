@@ -1,7 +1,7 @@
 // expected: FINDING PL3001
 // Expense approval (docs/examples/expense-approval.md). An employee submits a claim with a receipt; a typed decision
-// categorizes the receipt; a manager approves or declines; an approved claim is paid through an irreversible, keyed
-// payment, which the policy holds for a person's signed approval above 200 euros.
+// categorizes the receipt; a manager approves or declines; an approved claim is paid through an irreversible
+// payment attempted once (finding 31), which the policy holds for a person's signed approval above 200 euros.
 // The amount is in units of 50 euros (0..10): a stored range is not cut at its comparison constants (S458), so a wider
 // domain makes the check too large to finish. The property the check proves: the
 // approver of a claim is never its submitter. Claims come from the host's verifier, never from an action's data.
@@ -34,7 +34,7 @@ machine Expense {
     category  : Category  = Other
   }
 
-  terminal status in { Settled, Declined, Failed, Held }
+  terminal status in { Settled, Declined, Failed }
 
   action Submit(amount: int check 0..10, receipt: Content)
   action Categorized(picked: Category, conf: Conf, margin: Conf)
@@ -44,6 +44,7 @@ machine Expense {
   action Paid()
   action PayFailed()
   action PayHeld()
+  action Resolve(paid: bool)
 
   on Submit(amount, receipt) by s: Employee {
     require status == Draft else reject "not-draft"
@@ -96,6 +97,18 @@ machine Expense {
     status' = Held
   }
 
+  // The one attempt of the payment ended with no answer the program can trust: the claim may be paid. It is held for a
+  // person, who reads the payroll service and says which; the program never pays again (finding 31).
+  on Resolve(paid) by a: Approver {
+    require status == Held else reject "not-held"
+    require a.principal != submitter else reject "own-claim"
+    if paid {
+      status' = Settled
+    } else {
+      status' = Failed
+    }
+  }
+
   invariant approver-not-submitter: approver != none implies approver != submitter
   invariant large-flag: cost > 4 implies large
   path property pay-at-most-once: count("payroll.pay") <= 1
@@ -113,7 +126,7 @@ machine Expense {
     labels { egress:external }
     targets { egress: "https://payroll.example/v1/reimbursements" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Paid()
     failed -> PayFailed()
     exhausted -> PayHeld()

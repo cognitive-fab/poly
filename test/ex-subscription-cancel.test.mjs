@@ -63,9 +63,11 @@ test('the defect is FINDINGS with exactly PL3301 and PL4001, the properties name
   assert.ok(pl3301.property, 'PL3301 property is named');
   assert.equal(pl3301.property, 'request-ends', 'the property is request-ends');
   assert.ok(pl3301.witness, 'PL3301 has a witness');
-  assert.equal(pl3301.witness.length, 5, `PL3301 witness length is 5; got ${pl3301.witness.length}`);
-  assert.equal(pl3301.witness.trace.length, 5, 'PL3301 witness.trace.length === 5');
-  // Verify prefix and cycle structure: Request (1 step), then OfferSent, Decline, OfferSent, Decline (4-step cycle).
+  // Corrected after the code existed (finding 31): the spec predicted 5 steps, and the check prints 6, a cycle through an
+  // unknown offer (Request, OfferSent, Decline, OfferUncertain, Resolve, Decline), which the defect also has.
+  assert.equal(pl3301.witness.length, 6, `PL3301 witness length is 6; got ${pl3301.witness.length}`);
+  assert.equal(pl3301.witness.trace.length, 6, 'PL3301 witness.trace.length === 6');
+  // Verify the prefix: Request first, then the offer's answer.
   const lasso = pl3301.witness.trace.map((s) => s.action);
   assert.equal(lasso[0], 'Request', 'first step is Request (prefix)');
   assert.ok(['OfferSent', 'Decline'].includes(lasso[1]), 'second step is OfferSent or Decline');

@@ -24,7 +24,7 @@ service machine Stock {
   }
 }
 
-enum St { Placed, Reserving, Charging, Shipping, Refunding, Done, Cancelled, Rejected, Stuck }
+enum St { Placed, Reserving, Charging, Shipping, ShipUnknown, Refunding, RefundUnknown, Done, Cancelled, Rejected, Stuck }
 
 machine Order {
   state {
@@ -43,8 +43,11 @@ machine Order {
   action ChargeFailed()
   action Shipped()
   action ShipFailed()
+  action ShipUncertain()
   action Refunded()
   action RefundFailed()
+  action RefundUncertain()
+  action Resolve(done: bool)
 
   on Place(warehouse) {
     require st == Placed else reject "not-placed"
@@ -104,6 +107,41 @@ machine Order {
     st' = Stuck
   }
 
+  // The one attempt of the shipment ended with no answer the program can trust: the goods may have shipped. No
+  // compensation runs until a person says which (finding 31).
+  on ShipUncertain {
+    require st == Shipping else reject "not-shipping"
+    st' = ShipUnknown
+  }
+
+  // The one attempt of the refund ended with no answer the program can trust: the customer may have been refunded.
+  on RefundUncertain {
+    require st == Refunding else reject "not-refunding"
+    st' = RefundUnknown
+  }
+
+  // A person's reading of the carrier or the payment service. It never sends the shipment or the refund again.
+  on Resolve(done) {
+    require st == ShipUnknown || st == RefundUnknown else reject "not-unknown"
+    if st == ShipUnknown {
+      if done {
+        st' = Done
+      } else {
+        st' = Refunding
+        held' = 0
+        send stock <- Release()
+        emit refund()
+      }
+    } else {
+      if done {
+        st' = Cancelled
+        charged' = false
+      } else {
+        st' = Stuck
+      }
+    }
+  }
+
   invariant cancelled-holds-nothing: st == Cancelled implies held == 0 && !charged
   invariant done-is-charged: st == Done implies charged
   path property charge-at-most-once: count("payments.charge") <= 1
@@ -125,10 +163,10 @@ machine Order {
     labels { egress:external }
     targets { egress: "https://carrier.example/v1/shipments" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Shipped()
     failed -> ShipFailed()
-    exhausted -> ShipFailed()
+    exhausted -> ShipUncertain()
   }
 
   effect refund() {
@@ -136,17 +174,17 @@ machine Order {
     labels { egress:external }
     targets { egress: "https://payments.example/v1/refunds" }
     class irreversible
-    retry { attempts 3, base 200ms, timeout 10s }
+    retry { attempts 1, base 200ms, timeout 10s }
     ok -> Refunded()
     failed -> RefundFailed()
-    exhausted -> RefundFailed()
+    exhausted -> RefundUncertain()
   }
 }
 
 configuration two-orders {
   stock    : Stock
   order[2] : Order { stock: stock }
-  inputs   { order[*].Place, order[*].Charged, order[*].ChargeFailed, order[*].Shipped, order[*].ShipFailed, order[*].Refunded, order[*].RefundFailed }
+  inputs   { order[*].Place, order[*].Charged, order[*].ChargeFailed, order[*].Shipped, order[*].ShipFailed, order[*].ShipUncertain, order[*].Refunded, order[*].RefundFailed, order[*].RefundUncertain, order[*].Resolve }
   bounds   { transit 4 }
   invariant never-oversold: sum(order[*].held) <= init(stock.onHand)
 }
