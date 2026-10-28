@@ -133,68 +133,6 @@ test('appointment-booker: refusal - tue-nine-again ends Conflict (no second POST
   }
 });
 
-test('appointment-booker: keyed - first 503 then 201 sends two requests with same key', { timeout: 120_000 }, async () => {
-  const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
-  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
-
-  const a = await admitted();
-  // Use a queue of responses: first 503, then 201.
-  const responses = [
-    { status: 503, headers: {}, body: { error: 'service unavailable' } },
-    { status: 201, headers: {}, body: { ok: true } },
-  ];
-  let responseIndex = 0;
-  const egress = recordingEgress(() => responses[responseIndex++] ?? { status: 200, headers: {}, body: { ok: true } });
-  const { rt, clock } = await loadExample(a, { transports: egress.transports });
-  try {
-    const provider = recordedBooker(answers);
-    provideRecorded(rt, provider);
-    const handlers = rt.handlerExports('src/handlers.ts');
-    rt.handle('calendar.write', handlers.write);
-
-    await rt.create('booker.Calendar', { id: 'cal-3' });
-    const id = 'cal-3';
-
-    // Ask wed-ten, which parses to (1, 1).
-    const textId = await rt.putContent('Wednesday at ten works.');
-    await rt.dispatch(id, 'Ask', { text: textId });
-    // Need to advance clock for retries: the effect retries with base 200ms.
-    for (let i = 0; i < 15; i++) {
-      await rt.advance();
-      await rt.worker.tick();
-      clock.advance(300);
-    }
-
-    // Should have sent 2 requests (first 503, then 201 succeeds).
-    assert.equal(egress.sent.length, 2, `should have 2 requests; got ${egress.sent.length}`);
-    const key1 = egress.sent[0].headers['idempotency-key'];
-    const key2 = egress.sent[1].headers['idempotency-key'];
-    assert.equal(key1, key2, 'both requests have the same idempotency-key');
-
-    // Should be Booked.
-    const state1 = (await rt.getState(id)).state;
-    assert.equal(state1.phase, 'Booked');
-
-    // Reset and ask again: should get a new key.
-    await rt.dispatch(id, 'Reset', {});
-    await settle(rt);
-    egress.sent.length = 0;
-    responseIndex = 0;
-    responses[0] = { status: 201, headers: {}, body: { ok: true } };
-
-    // Ask tue-nine: slot (0, 0).
-    const text2Id = await rt.putContent('Can I get Tuesday at nine?');
-    await rt.dispatch(id, 'Ask', { text: text2Id });
-    await settle(rt);
-
-    assert.equal(egress.sent.length, 1);
-    const key3 = egress.sent[0].headers['idempotency-key'];
-    assert.notEqual(key3, key1, 'new request has a different key');
-  } finally {
-    await rt.close();
-  }
-});
-
 test('appointment-booker: failure - 409 ends Failed and frees the slot', { timeout: 120_000 }, async () => {
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
@@ -248,59 +186,99 @@ test('appointment-booker: failure - 409 ends Failed and frees the slot', { timeo
   }
 });
 
-test('appointment-booker: uncertainty - three 503s end Uncertain with slot still taken; Resolve(found: true) goes Booked', { timeout: 120_000 }, async () => {
+test('appointment-booker: one attempt - 503 sent exactly once, then Resolve cases', { timeout: 120_000 }, async () => {
   const { loadAnswers, recordedBooker, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
 
-  const a = await admitted();
-  // Return 503 three times (hit the retry limit).
-  const responses = [
+  // First instance: 503 ends Uncertain, then Resolve(found: true) ends Booked.
+  const a1 = await admitted();
+  // Set up responses: 503 first, then 201 (but 201 should never be called).
+  const responses1 = [
     { status: 503, headers: {}, body: {} },
-    { status: 503, headers: {}, body: {} },
-    { status: 503, headers: {}, body: {} },
+    { status: 201, headers: {}, body: { ok: true } },
   ];
-  let responseIndex = 0;
-  const egress = recordingEgress(() => responses[responseIndex++] ?? { status: 500, headers: {}, body: {} });
-  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  let responseIndex1 = 0;
+  const egress1 = recordingEgress(() => responses1[responseIndex1++] ?? { status: 200, headers: {}, body: { ok: true } });
+  const { rt: rt1, clock: clock1 } = await loadExample(a1, { transports: egress1.transports });
   try {
-    const provider = recordedBooker(answers);
-    provideRecorded(rt, provider);
-    const handlers = rt.handlerExports('src/handlers.ts');
-    rt.handle('calendar.write', handlers.write);
+    const provider1 = recordedBooker(answers);
+    provideRecorded(rt1, provider1);
+    const handlers1 = rt1.handlerExports('src/handlers.ts');
+    rt1.handle('calendar.write', handlers1.write);
 
-    await rt.create('booker.Calendar', { id: 'cal-5' });
-    const id = 'cal-5';
+    await rt1.create('booker.Calendar', { id: 'cal-5a' });
+    const id1 = 'cal-5a';
 
     // Ask wed-ten: slot (1, 1).
-    const textId = await rt.putContent('Wednesday at ten works.');
-    await rt.dispatch(id, 'Ask', { text: textId });
-    // Advance to let retries happen.
-    for (let i = 0; i < 20; i++) {
-      await rt.advance();
-      await rt.worker.tick();
-      clock.advance(300);
-    }
+    const textId = await rt1.putContent('Wednesday at ten works.');
+    await rt1.dispatch(id1, 'Ask', { text: textId });
+    // Settle: the write has one attempt, so no retry loop needed.
+    await settle(rt1);
 
-    // Should have sent 3 requests.
-    assert.equal(egress.sent.length, 3, `should have 3 requests; got ${egress.sent.length}`);
-    // All with the same key.
-    const key = egress.sent[0].headers['idempotency-key'];
-    assert.ok(egress.sent.every((r) => r.headers['idempotency-key'] === key), 'all requests have the same key');
+    // Should have sent exactly 1 request (the 503 is not retried).
+    assert.equal(egress1.sent.length, 1, `should have 1 request; got ${egress1.sent.length}`);
+    assert.equal(egress1.sent[0].status, 503, 'the request got 503');
+    // Verify the 201 in the response queue was never called.
+    assert.equal(responseIndex1, 1, 'the mock response queue advanced only once (no retry)');
 
-    // Should be Uncertain.
-    const state1 = (await rt.getState(id)).state;
-    assert.equal(state1.phase, 'Uncertain');
+    // Should be Uncertain with slot still taken.
+    const state1 = (await rt1.getState(id1)).state;
+    assert.equal(state1.phase, 'Uncertain', `should be Uncertain; got ${state1.phase}`);
     assert.equal(state1.taken[3], true, 'the slot is still taken in Uncertain state');
 
     // Resolve(found: true) goes to Booked.
-    await rt.dispatch(id, 'Resolve', { found: true });
-    await settle(rt);
+    await rt1.dispatch(id1, 'Resolve', { found: true });
+    await settle(rt1);
 
-    const state2 = (await rt.getState(id)).state;
-    assert.equal(state2.phase, 'Booked');
+    const state2 = (await rt1.getState(id1)).state;
+    assert.equal(state2.phase, 'Booked', `Resolve(found: true) should go to Booked; got ${state2.phase}`);
     assert.equal(state2.taken[3], true, 'the slot remains taken');
   } finally {
-    await rt.close();
+    await rt1.close();
+  }
+
+  // Second instance: 503 ends Uncertain, then Resolve(found: false) ends Failed and frees the slot.
+  const a2 = await admitted();
+  const responses2 = [
+    { status: 503, headers: {}, body: {} },
+    { status: 201, headers: {}, body: { ok: true } },
+  ];
+  let responseIndex2 = 0;
+  const egress2 = recordingEgress(() => responses2[responseIndex2++] ?? { status: 200, headers: {}, body: { ok: true } });
+  const { rt: rt2, clock: clock2 } = await loadExample(a2, { transports: egress2.transports });
+  try {
+    const provider2 = recordedBooker(answers);
+    provideRecorded(rt2, provider2);
+    const handlers2 = rt2.handlerExports('src/handlers.ts');
+    rt2.handle('calendar.write', handlers2.write);
+
+    await rt2.create('booker.Calendar', { id: 'cal-5b' });
+    const id2 = 'cal-5b';
+
+    // Ask wed-ten: slot (1, 1).
+    const textId2 = await rt2.putContent('Wednesday at ten works.');
+    await rt2.dispatch(id2, 'Ask', { text: textId2 });
+    // Settle: one attempt.
+    await settle(rt2);
+
+    // Should have sent exactly 1 request.
+    assert.equal(egress2.sent.length, 1, `should have 1 request; got ${egress2.sent.length}`);
+    assert.equal(egress2.sent[0].status, 503, 'the request got 503');
+
+    // Should be Uncertain with slot still taken.
+    const state3 = (await rt2.getState(id2)).state;
+    assert.equal(state3.phase, 'Uncertain', `should be Uncertain; got ${state3.phase}`);
+    assert.equal(state3.taken[3], true, 'the slot is still taken in Uncertain state');
+
+    // Resolve(found: false) goes to Failed and frees the slot.
+    await rt2.dispatch(id2, 'Resolve', { found: false });
+    await settle(rt2);
+
+    const state4 = (await rt2.getState(id2)).state;
+    assert.equal(state4.phase, 'Failed', `Resolve(found: false) should go to Failed; got ${state4.phase}`);
+    assert.equal(state4.taken[3], false, 'the slot is freed after Resolve(found: false)');
+  } finally {
+    await rt2.close();
   }
 });
 

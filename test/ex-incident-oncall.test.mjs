@@ -59,8 +59,8 @@ test('the defect is FINDINGS with exactly PL3301, the property named page-is-ans
   assert.equal(pl3301.name, 'LIVENESS_LASSO', 'the finding is a liveness lasso');
   assert.ok(pl3301.property, 'the property is named');
   assert.equal(pl3301.property, 'page-is-answered', 'the property is page-is-answered');
-  // The witness: 9 steps, a prefix of 3 and a cycle of 6. The spec predicted 7 (a cycle of Snooze and Wake twice); once PageSent and
-  // PageFailed were taken in every status, weak fairness also holds them in the cycle (docs/examples/incident-oncall.md, amendments).
+  // The witness: 9 steps, a prefix of 3 and a cycle of 6 (G1, PS23.4, finding 31).
+  // The snooze cycle never enters EscalationUnconfirmed, so Confirm is not fair here.
   assert.ok(pl3301.witness, 'the diagnostic has a witness');
   assert.equal(pl3301.witness.length, 9, `witness length is 9; got ${pl3301.witness.length}`);
   assert.equal(pl3301.witness.trace.length, 9, 'witness.trace.length === 9');
@@ -72,7 +72,7 @@ test('the defect is FINDINGS with exactly PL3301, the property named page-is-ans
   // The cycle is the snooze loop: it holds Snooze and Wake, and no Ack, Timeout or escalation.
   const cycle = actions.slice(3);
   assert.ok(cycle.includes('Snooze') && cycle.includes('Wake'), `the cycle holds Snooze and Wake: ${cycle.join(', ')}`);
-  assert.ok(!cycle.some((a) => ['Ack', 'Timeout', 'Escalated'].includes(a)), 'the cycle never answers the page');
+  assert.ok(!cycle.some((a) => ['Ack', 'Timeout', 'Escalated', 'Confirm'].includes(a)), 'the cycle never answers the page');
 });
 
 test('poly check --host with root examples/incident-oncall is CLEAN', { timeout: 120_000 }, async () => {

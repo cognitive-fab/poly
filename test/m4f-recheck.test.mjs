@@ -16,8 +16,6 @@ import { ROOT } from './helpers.mjs';
 const VACUOUS = {
   'conformance/m2/embed/orders.ts': { Order: [{ property: 'cancel-is-final', antecedent: 'pre.status == Cancelled' }] },
   'examples/orders/orders.poly': { Order: [{ property: 'cancel-is-final', antecedent: 'pre.status == Cancelled' }] },
-  // order-fulfilment's seeded defect never refunds, so the property that a refund follows a charge has nothing to restrict (batch 3).
-  'examples/order-fulfilment/order-fulfilment-defect.poly': { Order: [{ property: 'refund-needs-charge', antecedent: 'before("payments.charge", "payments.refund"): no payments.refund is emitted' }] },
   'examples/field-studies/raft/raft.poly': { Node: [{ property: 'shutdown-is-a-true-terminal-state', antecedent: 'pre.role == Shutdown' }] },
 };
 

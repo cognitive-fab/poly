@@ -34,7 +34,7 @@ test('the program, checked with its policy, is CLEAN with its instance printed a
   const inst = machines[0].instance;
   assert.ok(inst, 'instance is present');
   assert.ok(inst.domains && Array.isArray(inst.domains), 'instance has domains array');
-  assert.equal(inst.states, 7, 'instance has 7 states');
+  assert.equal(inst.states, 9, 'instance has 9 states');
   // Verify the liveness stage ran and passed.
   const stages = machines[0].stages ?? [];
   const livenessStage = stages.find((s) => s.stage === 'liveness');

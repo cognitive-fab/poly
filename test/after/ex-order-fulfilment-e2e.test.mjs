@@ -178,13 +178,13 @@ test('order-fulfilment: charge failure (402) cancels with no ship, no refund', {
   }
 });
 
-test('order-fulfilment: compensation - ship fails 3 times (exhausted), triggers refund', { timeout: 120_000 }, async () => {
+test('order-fulfilment: compensation - shipment refused (402), triggers refund', { timeout: 120_000 }, async () => {
   const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
 
   const a = await admitted();
   const script = {
     'https://payments.example/v1/charges': 201,
-    'https://carrier.example/v1/shipments': [503, 503, 503],
+    'https://carrier.example/v1/shipments': 402,
     'https://payments.example/v1/refunds': 201,
   };
   const { sent, transports } = recordedServices(script);
@@ -195,7 +195,7 @@ test('order-fulfilment: compensation - ship fails 3 times (exhausted), triggers 
     rt.handle('carrier.ship', handlers.ship);
     rt.handle('payments.refund', handlers.refund);
 
-    // Create stock.
+    // Create stock (PS23.4: one attempt means the carrier refuses with 402).
     const stock = await rt.create('fulfilment.Stock', { id: 'stock-4' });
     const stockId = stock.id;
 
@@ -207,48 +207,102 @@ test('order-fulfilment: compensation - ship fails 3 times (exhausted), triggers 
     await rt.dispatch(orderId, 'Place', { warehouse: stockId });
     await settle(rt);
 
-    // Charge succeeds, ship will fail.
+    // Charge succeeds, ship is refused with 402, triggering ShipFailed and compensations.
     await settle(rt);
 
     let state;
 
-    // Attempt ship multiple times (3 failures = exhausted).
-    for (let i = 0; i < 3; i++) {
-      clock.advance(200); // Base backoff is 200ms.
-      await settle(rt);
-    }
-
-    // The compensations ran: the refund went out and the stock came back.
-
     state = (await rt.getState(orderId)).state;
     assert.equal(state.st, 'Cancelled', 'order is Cancelled after refund succeeds');
-    assert.equal(state.held, 0, 'held remains 0');
-    assert.equal(state.charged, false, 'charged cleared (refund succeeded)');
+    assert.equal(state.held, 0, 'held cleared by ShipFailed');
+    assert.equal(state.charged, false, 'charged cleared by Refunded');
 
     // Stock should be back to 1.
     let stockState = (await rt.getState(stockId)).state;
-    assert.equal(stockState.onHand, 1, 'stock is released');
+    assert.equal(stockState.onHand, 1, 'stock is released by ShipFailed compensation');
 
-    // Check requests: one charge, three ship attempts, one refund.
+    // Check requests: one charge, one ship attempt (refused), one refund.
     const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
     const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
     const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
     assert.equal(chargeReqs.length, 1, 'one charge');
-    assert.equal(shipReqs.length, 3, 'three ship attempts (exhausted)');
+    assert.equal(shipReqs.length, 1, 'one ship attempt (no retry, PS23.4)');
     assert.equal(refundReqs.length, 1, 'one refund');
   } finally {
     await rt.close();
   }
 });
 
-test('order-fulfilment: refund failure leaves order in Stuck (still charged)', { timeout: 120_000 }, async () => {
+test('order-fulfilment: one attempt, unknown shipment: sent 500, ends ShipUnknown with Resolve(done: true) -> Done', { timeout: 120_000 }, async () => {
   const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
 
   const a = await admitted();
   const script = {
     'https://payments.example/v1/charges': 201,
-    'https://carrier.example/v1/shipments': [503, 503, 503],
-    'https://payments.example/v1/refunds': 503,
+    'https://carrier.example/v1/shipments': 500,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payments.charge', handlers.charge);
+    rt.handle('carrier.ship', handlers.ship);
+    rt.handle('payments.refund', handlers.refund);
+
+    // Create stock (PS23.4: one attempt, exhausted 500 becomes ShipUncertain).
+    const stock = await rt.create('fulfilment.Stock', { id: 'stock-5' });
+    const stockId = stock.id;
+
+    // Create order.
+    const order = await rt.create('fulfilment.Order', { id: 'order-5' });
+    const orderId = order.id;
+
+    // Place order.
+    await rt.dispatch(orderId, 'Place', { warehouse: stockId });
+    await settle(rt);
+
+    // Charge succeeds, ship gets 500 (transient error, exhausted = ShipUncertain).
+    await settle(rt);
+
+    let state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'ShipUnknown', 'order is ShipUnknown after exhausted shipment');
+    assert.equal(state.held, 1, 'held still 1 (not released yet)');
+    assert.equal(state.charged, true, 'charged still true');
+
+    // Stock should still be 0.
+    let stockState = (await rt.getState(stockId)).state;
+    assert.equal(stockState.onHand, 0, 'stock still reserved');
+
+    // Resolve with done: true.
+    const resolveResult = await rt.dispatch(orderId, 'Resolve', { done: true });
+    assert.equal(resolveResult.stepKind, 'accepted', 'Resolve(done: true) is accepted');
+    await settle(rt);
+
+    state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'Done', 'order is Done after Resolve(done: true)');
+    assert.equal(state.held, 1, 'held still 1 (Resolve does not release)');
+    assert.equal(state.charged, true, 'charged still true');
+
+    // Check requests: one charge, one ship (no refund because Resolve done).
+    const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
+    const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
+    const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
+    assert.equal(chargeReqs.length, 1, 'one charge');
+    assert.equal(shipReqs.length, 1, 'one ship attempt');
+    assert.equal(refundReqs.length, 0, 'no refund on Resolve(done: true)');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('order-fulfilment: one attempt, unknown shipment: Resolve(done: false) runs compensations', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://payments.example/v1/charges': 201,
+    'https://carrier.example/v1/shipments': 500,
+    'https://payments.example/v1/refunds': 201,
   };
   const { sent, transports } = recordedServices(script);
   const { rt, clock } = await loadExample(a, { transports });
@@ -259,44 +313,240 @@ test('order-fulfilment: refund failure leaves order in Stuck (still charged)', {
     rt.handle('payments.refund', handlers.refund);
 
     // Create stock.
-    const stock = await rt.create('fulfilment.Stock', { id: 'stock-5' });
+    const stock = await rt.create('fulfilment.Stock', { id: 'stock-5b' });
     const stockId = stock.id;
 
     // Create order.
-    const order = await rt.create('fulfilment.Order', { id: 'order-5' });
+    const order = await rt.create('fulfilment.Order', { id: 'order-5b' });
     const orderId = order.id;
 
-    // Place and run through to ship failure.
+    // Place order.
     await rt.dispatch(orderId, 'Place', { warehouse: stockId });
     await settle(rt);
+
+    // Charge succeeds, ship gets 500 (exhausted = ShipUncertain).
     await settle(rt);
 
-    // Exhaust ship retries.
-    for (let i = 0; i < 3; i++) {
-      clock.advance(200);
-      await settle(rt);
-    }
-
     let state = (await rt.getState(orderId)).state;
-    assert.equal(state.st, 'Refunding', 'order is Refunding');
+    assert.equal(state.st, 'ShipUnknown', 'order is ShipUnknown');
 
-    // Refund will fail with 503. Allow retries to exhaust.
-    for (let i = 0; i < 3; i++) {
-      clock.advance(200);
-      await settle(rt);
-    }
+    // Resolve with done: false, which runs compensations.
+    const resolveResult = await rt.dispatch(orderId, 'Resolve', { done: false });
+    assert.equal(resolveResult.stepKind, 'accepted', 'Resolve(done: false) is accepted');
+    await settle(rt);
 
     state = (await rt.getState(orderId)).state;
-    assert.equal(state.st, 'Stuck', 'order is Stuck after refund exhausted');
-    assert.equal(state.charged, true, 'charged remains true (money never refunded)');
+    assert.equal(state.st, 'Cancelled', 'order is Cancelled after Resolve(done: false) completes compensation');
+    assert.equal(state.held, 0, 'held cleared by compensation');
+    assert.equal(state.charged, false, 'charged cleared by refund');
 
-    // Check requests: one charge, three ship, three refund attempts.
+    // Stock should be back to 1.
+    let stockState = (await rt.getState(stockId)).state;
+    assert.equal(stockState.onHand, 1, 'stock released by compensation');
+
+    // Check requests: one charge, one ship, one refund (from compensation).
     const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
     const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
     const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
     assert.equal(chargeReqs.length, 1, 'one charge');
-    assert.equal(shipReqs.length, 3, 'three ship attempts');
-    assert.equal(refundReqs.length, 3, 'three refund attempts (exhausted)');
+    assert.equal(shipReqs.length, 1, 'one ship attempt');
+    assert.equal(refundReqs.length, 1, 'one refund (from Resolve(done: false) compensation)');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('order-fulfilment: one attempt, refund refused (402), ends Stuck (still charged)', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://payments.example/v1/charges': 201,
+    'https://carrier.example/v1/shipments': 402,
+    'https://payments.example/v1/refunds': 402,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payments.charge', handlers.charge);
+    rt.handle('carrier.ship', handlers.ship);
+    rt.handle('payments.refund', handlers.refund);
+
+    // Create stock.
+    const stock = await rt.create('fulfilment.Stock', { id: 'stock-6' });
+    const stockId = stock.id;
+
+    // Create order.
+    const order = await rt.create('fulfilment.Order', { id: 'order-6' });
+    const orderId = order.id;
+
+    // Place order.
+    await rt.dispatch(orderId, 'Place', { warehouse: stockId });
+    await settle(rt);
+
+    // Charge succeeds, ship is refused (402), triggers RefundFailed because refund also refused.
+    await settle(rt);
+
+    let state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'Stuck', 'order is Stuck after refund refused (402)');
+    assert.equal(state.charged, true, 'charged still true (refund failed)');
+
+    // Check requests: one charge, one ship (refused), one refund attempt (refused).
+    const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
+    const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
+    const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
+    assert.equal(chargeReqs.length, 1, 'one charge');
+    assert.equal(shipReqs.length, 1, 'one ship (refused)');
+    assert.equal(refundReqs.length, 1, 'one refund attempt (refused with 402, no retry)');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('order-fulfilment: one attempt, unknown refund: sent 500, ends RefundUnknown with Resolve(done: true) -> Cancelled', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://payments.example/v1/charges': 201,
+    'https://carrier.example/v1/shipments': 402,
+    'https://payments.example/v1/refunds': 500,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payments.charge', handlers.charge);
+    rt.handle('carrier.ship', handlers.ship);
+    rt.handle('payments.refund', handlers.refund);
+
+    // Create stock.
+    const stock = await rt.create('fulfilment.Stock', { id: 'stock-7' });
+    const stockId = stock.id;
+
+    // Create order.
+    const order = await rt.create('fulfilment.Order', { id: 'order-7' });
+    const orderId = order.id;
+
+    // Place order.
+    await rt.dispatch(orderId, 'Place', { warehouse: stockId });
+    await settle(rt);
+
+    // Charge succeeds, ship is refused (402), refund gets 500 (exhausted = RefundUncertain).
+    await settle(rt);
+
+    let state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'RefundUnknown', 'order is RefundUnknown after exhausted refund');
+    assert.equal(state.charged, true, 'charged still true (refund uncertain)');
+
+    // Resolve with done: true (assume refund succeeded).
+    const resolveResult = await rt.dispatch(orderId, 'Resolve', { done: true });
+    assert.equal(resolveResult.stepKind, 'accepted', 'Resolve(done: true) is accepted');
+    await settle(rt);
+
+    state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'Cancelled', 'order is Cancelled after Resolve(done: true)');
+    assert.equal(state.charged, false, 'charged cleared by Resolve(done: true)');
+
+    // Check requests: one charge, one ship (refused), one refund attempt (uncertain).
+    const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
+    const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
+    const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
+    assert.equal(chargeReqs.length, 1, 'one charge');
+    assert.equal(shipReqs.length, 1, 'one ship (refused)');
+    assert.equal(refundReqs.length, 1, 'one refund attempt (exhausted with 500)');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('order-fulfilment: one attempt, unknown refund: Resolve(done: false) ends Stuck', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://payments.example/v1/charges': 201,
+    'https://carrier.example/v1/shipments': 402,
+    'https://payments.example/v1/refunds': 500,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payments.charge', handlers.charge);
+    rt.handle('carrier.ship', handlers.ship);
+    rt.handle('payments.refund', handlers.refund);
+
+    // Create stock.
+    const stock = await rt.create('fulfilment.Stock', { id: 'stock-7b' });
+    const stockId = stock.id;
+
+    // Create order.
+    const order = await rt.create('fulfilment.Order', { id: 'order-7b' });
+    const orderId = order.id;
+
+    // Place order.
+    await rt.dispatch(orderId, 'Place', { warehouse: stockId });
+    await settle(rt);
+
+    // Charge succeeds, ship is refused (402), refund gets 500 (exhausted = RefundUncertain).
+    await settle(rt);
+
+    let state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'RefundUnknown', 'order is RefundUnknown');
+
+    // Resolve with done: false (assume refund did not happen).
+    const resolveResult = await rt.dispatch(orderId, 'Resolve', { done: false });
+    assert.equal(resolveResult.stepKind, 'accepted', 'Resolve(done: false) is accepted');
+    await settle(rt);
+
+    state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'Stuck', 'order is Stuck after Resolve(done: false)');
+    assert.equal(state.charged, true, 'charged still true (refund presumed not sent)');
+
+    // Check requests: one charge, one ship (refused), one refund attempt.
+    const chargeReqs = sent.filter((s) => s.url === 'https://payments.example/v1/charges');
+    const shipReqs = sent.filter((s) => s.url === 'https://carrier.example/v1/shipments');
+    const refundReqs = sent.filter((s) => s.url === 'https://payments.example/v1/refunds');
+    assert.equal(chargeReqs.length, 1, 'one charge');
+    assert.equal(shipReqs.length, 1, 'one ship (refused)');
+    assert.equal(refundReqs.length, 1, 'one refund attempt');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('order-fulfilment: Resolve on a non-unknown order is rejected not-unknown', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {};
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payments.charge', handlers.charge);
+    rt.handle('carrier.ship', handlers.ship);
+    rt.handle('payments.refund', handlers.refund);
+
+    // Create order but do not place it (still in Placed state).
+    const order = await rt.create('fulfilment.Order', { id: 'order-8' });
+    const orderId = order.id;
+
+    // Attempt Resolve on a Placed order (not in unknown state).
+    const result = await rt.dispatch(orderId, 'Resolve', { done: true });
+
+    // The action should be rejected with reason not-unknown.
+    assert.equal(result.stepKind, 'rejected', 'the dispatch is rejected');
+    assert.equal(result.rejectReason, 'not-unknown', 'the reason is not-unknown');
+
+    // No request should be sent for a rejected action.
+    assert.equal(sent.length, 0, 'no request sent on rejected Resolve');
+
+    // Check state: should still be Placed.
+    let state = (await rt.getState(orderId)).state;
+    assert.equal(state.st, 'Placed', 'order is still Placed after rejected Resolve');
   } finally {
     await rt.close();
   }

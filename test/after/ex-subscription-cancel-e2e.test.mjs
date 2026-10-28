@@ -1,6 +1,7 @@
 // Subscription-cancel end-to-end test over recorded traffic.
 // Tests the machine through its handlers and recorded services with no network calls.
-// Rule 7a: Written from spec alone.
+// Rule 7a: Written from spec alone. Finding 31 (v1.4 amendment): completions are never
+// dispatched by hand; the recorded services' statuses run through the runtime's effects logic.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -60,10 +61,12 @@ test('subscription-cancel: main path - Request, offer sent, Decline, cancel sent
     state = (await rt.getState(subId)).state;
     assert.equal(state.status, 'Cancelled', 'status should be Cancelled after Decline');
 
-    // Check requests: one offer, one cancel.
+    // Check requests: one offer, one cancel with a key.
     const cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel');
     assert.equal(offers.length, 1, 'one offer request total');
     assert.equal(cancels.length, 1, 'one cancel request total');
+    const cancelKey = cancels[0].headers['idempotency-key'];
+    assert.ok(cancelKey && typeof cancelKey === 'string' && cancelKey.length > 0, 'the cancellation is sent with a non-empty idempotency key');
   } finally {
     await rt.close();
   }
@@ -176,14 +179,7 @@ test('subscription-cancel: refusal - second Request on Offered is rejected "not-
     await settle(rt);
 
     let state = (await rt.getState(subId)).state;
-    assert.equal(state.status, 'Offered');
-
-    // OfferSent to move to Offered.
-    await rt.dispatch(subId, 'OfferSent', {});
-    await settle(rt);
-
-    state = (await rt.getState(subId)).state;
-    assert.equal(state.status, 'Offered', 'status should be Offered');
+    assert.equal(state.status, 'Offered', 'Request and settle bring the subscription to Offered');
 
     // Try another Request on Offered: should be rejected "not-active".
     const requestResult = await rt.dispatch(subId, 'Request', {});
@@ -242,7 +238,7 @@ test('subscription-cancel: failed offer (422) still cancels with no second offer
   }
 });
 
-test('subscription-cancel: keyed - retried cancel has same idempotency-key, different subscriptions have different keys', { timeout: 120_000 }, async () => {
+test('subscription-cancel: one attempt, unknown cancellation - 503 then 201 sends exactly one request, ends CancelUnknown, Resolve(done:true) ends Cancelled', { timeout: 120_000 }, async () => {
   const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
 
   const a = await admitted();
@@ -257,44 +253,218 @@ test('subscription-cancel: keyed - retried cancel has same idempotency-key, diff
     rt.handle('retention.offer', handlers.offer);
     rt.handle('billing.cancel', handlers.cancel);
 
-    // First subscription.
-    const sub1 = await rt.create('subscription.Subscription', { id: 'sub-keyed-1' });
+    // First subscription: reaches CancelUnknown and resolves done: true.
+    const sub1 = await rt.create('subscription.Subscription', { id: 'sub-cancel-unknown-1' });
     const sub1Id = sub1.id;
 
-    // Request and decline.
     await rt.dispatch(sub1Id, 'Request', {});
     await settle(rt);
     await rt.dispatch(sub1Id, 'Decline', {});
     await settle(rt);
 
-    // Cancel attempt fails with 503.
+    // Cancel attempt fails with 503 (one attempt only).
+    // After settle with 503, advance clock past the 10s timeout to ensure the effect is exhausted.
+    clock.advance(60_000);
     await settle(rt);
 
-    // Retry after backoff.
-    clock.advance(200);
-    await settle(rt);
+    // Should be in CancelUnknown state.
+    let state = (await rt.getState(sub1Id)).state;
+    assert.equal(state.status, 'CancelUnknown', 'status should be CancelUnknown after exhausted cancel');
 
-    // Get the two cancel requests for sub 1 and check they have the same idempotency key.
+    // Verify exactly one request to billing (no retry despite 503).
     const sub1Cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub1Id);
-    assert.equal(sub1Cancels.length, 2, 'subscription 1 has two cancel requests (retry)');
-    const key1 = sub1Cancels[0].headers['idempotency-key'];
-    const key1Retry = sub1Cancels[1].headers['idempotency-key'];
-    assert.equal(key1, key1Retry, 'same idempotency key for retried cancel');
+    assert.equal(sub1Cancels.length, 1, 'exactly one cancel request to billing (one attempt, not retried)');
 
-    // Second subscription.
-    const sub2 = await rt.create('subscription.Subscription', { id: 'sub-keyed-2' });
+    // Resolve with done: true, moving to Cancelled.
+    await rt.dispatch(sub1Id, 'Resolve', { done: true });
+    await settle(rt);
+
+    state = (await rt.getState(sub1Id)).state;
+    assert.equal(state.status, 'Cancelled', 'Resolve(done: true) from CancelUnknown ends Cancelled');
+
+    // Verify no second request to billing.
+    const sub1CancelsAfter = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub1Id);
+    assert.equal(sub1CancelsAfter.length, 1, 'no second request to billing after Resolve');
+
+    // Second subscription: reaches CancelUnknown and resolves done: false.
+    const sub2 = await rt.create('subscription.Subscription', { id: 'sub-cancel-unknown-2' });
     const sub2Id = sub2.id;
 
     await rt.dispatch(sub2Id, 'Request', {});
     await settle(rt);
     await rt.dispatch(sub2Id, 'Decline', {});
     await settle(rt);
+
+    clock.advance(60_000);
     await settle(rt);
 
-    // Get cancel requests for sub 2.
+    state = (await rt.getState(sub2Id)).state;
+    assert.equal(state.status, 'CancelUnknown', 'sub2 reaches CancelUnknown');
+
+    // Resolve with done: false, moving to Stuck.
+    await rt.dispatch(sub2Id, 'Resolve', { done: false });
+    await settle(rt);
+
+    state = (await rt.getState(sub2Id)).state;
+    assert.equal(state.status, 'Stuck', 'Resolve(done: false) from CancelUnknown ends Stuck');
+
+    // Third subscription: Offered, attempt Resolve on wrong state.
+    const sub3 = await rt.create('subscription.Subscription', { id: 'sub-cancel-unknown-3' });
+    const sub3Id = sub3.id;
+
+    await rt.dispatch(sub3Id, 'Request', {});
+    await settle(rt);
+
+    state = (await rt.getState(sub3Id)).state;
+    assert.equal(state.status, 'Offered', 'sub3 is Offered');
+
+    // Try Resolve on Offered: should be rejected "not-unknown".
+    const resolveResult = await rt.dispatch(sub3Id, 'Resolve', { done: true });
+    await settle(rt);
+    assert.equal(resolveResult.stepKind, 'rejected', 'Resolve on Offered should be rejected');
+    assert.equal(resolveResult.rejectReason, 'not-unknown', 'reason is not-unknown');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('subscription-cancel: one attempt, unknown offer - 503 then 201 sends exactly one request to marketing, ends OfferUnknown, Resolve(done:true) arms lapse and cancels', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://marketing.example/v1/offers': [503, 201],
+    'https://billing.example/v1/subscriptions/cancel': 201,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('retention.offer', handlers.offer);
+    rt.handle('billing.cancel', handlers.cancel);
+
+    // First subscription: reaches OfferUnknown and resolves done: true.
+    const sub1 = await rt.create('subscription.Subscription', { id: 'sub-offer-unknown-1' });
+    const sub1Id = sub1.id;
+
+    await rt.dispatch(sub1Id, 'Request', {});
+    await settle(rt);
+
+    // Offer attempt fails with 503 (one attempt only).
+    clock.advance(60_000);
+    await settle(rt);
+
+    // Should be in OfferUnknown state with no request to billing.
+    let state = (await rt.getState(sub1Id)).state;
+    assert.equal(state.status, 'OfferUnknown', 'status should be OfferUnknown after exhausted offer');
+
+    // Verify exactly one request to marketing (no retry).
+    const sub1Offers = sent.filter((s) => s.url === 'https://marketing.example/v1/offers' && s.body.subscription === sub1Id);
+    assert.equal(sub1Offers.length, 1, 'exactly one offer request to marketing (one attempt)');
+
+    // Verify no request to billing yet.
+    const sub1Cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub1Id);
+    assert.equal(sub1Cancels.length, 0, 'no request to billing while offer is unknown');
+
+    // Resolve with done: true, moving to Offered (with lapse timer armed).
+    await rt.dispatch(sub1Id, 'Resolve', { done: true });
+    await settle(rt);
+
+    state = (await rt.getState(sub1Id)).state;
+    assert.equal(state.status, 'Offered', 'Resolve(done: true) from OfferUnknown moves to Offered');
+
+    // Advance 168 hours for the lapse timer to fire.
+    clock.advance(168 * 60 * 60 * 1000);
+    await settle(rt);
+
+    state = (await rt.getState(sub1Id)).state;
+    assert.equal(state.status, 'Cancelled', 'lapse timer fires and subscription is Cancelled');
+
+    // Now should have one request to billing.
+    const sub1CancelsAfter = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub1Id);
+    assert.equal(sub1CancelsAfter.length, 1, 'one cancel request to billing after lapse');
+
+    // Still only one offer request.
+    const sub1OffersAfter = sent.filter((s) => s.url === 'https://marketing.example/v1/offers' && s.body.subscription === sub1Id);
+    assert.equal(sub1OffersAfter.length, 1, 'still one offer request total');
+
+    // Second subscription: reaches OfferUnknown and resolves done: false.
+    const sub2 = await rt.create('subscription.Subscription', { id: 'sub-offer-unknown-2' });
+    const sub2Id = sub2.id;
+
+    await rt.dispatch(sub2Id, 'Request', {});
+    await settle(rt);
+
+    clock.advance(60_000);
+    await settle(rt);
+
+    state = (await rt.getState(sub2Id)).state;
+    assert.equal(state.status, 'OfferUnknown', 'sub2 reaches OfferUnknown');
+
+    // Resolve with done: false, moving to Cancelling (and emitting cancel).
+    await rt.dispatch(sub2Id, 'Resolve', { done: false });
+    await settle(rt);
+
+    state = (await rt.getState(sub2Id)).state;
+    assert.equal(state.status, 'Cancelled', 'Resolve(done: false) from OfferUnknown cancels at once');
+
+    // Should have exactly one request to billing for sub2.
     const sub2Cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub2Id);
-    assert.ok(sub2Cancels.length > 0, 'subscription 2 has cancel request');
+    assert.equal(sub2Cancels.length, 1, 'one cancel request to billing for sub2');
+
+    // Should have no second offer for sub2.
+    const sub2Offers = sent.filter((s) => s.url === 'https://marketing.example/v1/offers' && s.body.subscription === sub2Id);
+    assert.equal(sub2Offers.length, 1, 'one offer attempt, not retried');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('subscription-cancel: two subscriptions send different idempotency-key values', { timeout: 120_000 }, async () => {
+  const { recordedServices } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+
+  const a = await admitted();
+  const script = {
+    'https://marketing.example/v1/offers': 201,
+    'https://billing.example/v1/subscriptions/cancel': 201,
+  };
+  const { sent, transports } = recordedServices(script);
+  const { rt, clock } = await loadExample(a, { transports });
+  try {
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('retention.offer', handlers.offer);
+    rt.handle('billing.cancel', handlers.cancel);
+
+    // First subscription.
+    const sub1 = await rt.create('subscription.Subscription', { id: 'sub-keys-1' });
+    const sub1Id = sub1.id;
+
+    await rt.dispatch(sub1Id, 'Request', {});
+    await settle(rt);
+    await rt.dispatch(sub1Id, 'Decline', {});
+    await settle(rt);
+
+    // Second subscription.
+    const sub2 = await rt.create('subscription.Subscription', { id: 'sub-keys-2' });
+    const sub2Id = sub2.id;
+
+    await rt.dispatch(sub2Id, 'Request', {});
+    await settle(rt);
+    await rt.dispatch(sub2Id, 'Decline', {});
+    await settle(rt);
+
+    // Get cancel requests for each.
+    const sub1Cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub1Id);
+    const sub2Cancels = sent.filter((s) => s.url === 'https://billing.example/v1/subscriptions/cancel' && s.body.subscription === sub2Id);
+
+    assert.equal(sub1Cancels.length, 1, 'subscription 1 has exactly one cancel request');
+    assert.equal(sub2Cancels.length, 1, 'subscription 2 has exactly one cancel request');
+
+    const key1 = sub1Cancels[0].headers['idempotency-key'];
     const key2 = sub2Cancels[0].headers['idempotency-key'];
+
+    assert.ok(key1 && typeof key1 === 'string' && key1.length > 0, 'subscription 1 key is a non-empty string');
+    assert.ok(key2 && typeof key2 === 'string' && key2.length > 0, 'subscription 2 key is a non-empty string');
     assert.notEqual(key1, key2, 'different subscriptions have different idempotency keys');
   } finally {
     await rt.close();

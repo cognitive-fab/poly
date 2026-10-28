@@ -392,15 +392,20 @@ test('incident-oncall: journal replays with no divergence', { timeout: 120_000 }
   }
 });
 
-// Written by the implementer after the code existed, for a review finding (the writer's spec had no such case): an
-// acknowledgement can arrive before the page's answer. The late PageSent is taken, changes nothing, and is not a rejected
-// step, so the machine does not wait on a completion that a handler refused (PS6.4, S463).
-test('incident-oncall: an Ack before the page is answered leaves the late PageSent accepted, and the incident Acked', { timeout: 120_000 }, async () => {
+// Amendment finding 13: a late completion is accepted. PageSent arrives while Ack changes the state to Acked (PS6.4, S463).
+// With one attempt (G1, PS23.4, finding 31), the page POST goes out once. While it is in-flight, Ack is dispatched.
+// The response arrives later as PageSent, accepted in any status but acting only from Paging; since the state changed to Acked,
+// the completion changes nothing but sets answered to true. No retry or clock advance triggers the response.
+test('incident-oncall: a late page completion is accepted in any status, sets answered, and acts only from Paging', { timeout: 120_000 }, async () => {
   const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
   const a = await admitted();
-  let pages = 0;
-  const egress = recordingEgress((req) => ({ status: req.url.endsWith('/pages') && ++pages === 1 ? 503 : 201, headers: {}, body: {} }));
+  let heldResolve = null;
+  const heldPromise = new Promise((r) => { heldResolve = r; });
+  const egress = recordingEgress((req) => {
+    if (req.url.endsWith('/pages')) return heldPromise;
+    return { status: 201, headers: {}, body: {} };
+  });
   const { rt, clock } = await loadExample(a, { transports: egress.transports });
   try {
     provideRecorded(rt, recordedIncidents(answers));
@@ -408,20 +413,211 @@ test('incident-oncall: an Ack before the page is answered leaves the late PageSe
     rt.handle('pager.page', handlers.page);
     rt.handle('pager.escalate', handlers.escalate);
     await rt.create('oncall.Incident', { id: 'inc-late' });
-    await rt.dispatch('inc-late', 'Report', { summary: await rt.putContent('Primary database is down, all writes are failing.') });
-    await settle(rt);
-    assert.equal((await rt.getState('inc-late')).state.status, 'Paging', 'the first page attempt was answered 503, so the page is still out');
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch('inc-late', 'Report', { summary: reportId });
+    const settleP = settle(rt);
+    let found = false;
+    for (let i = 0; i < 100 && !found; i++) {
+      await new Promise(r => setTimeout(r, 10));
+      if (egress.sent.some((s) => s.url.endsWith('/pages'))) found = true;
+    }
+    assert.ok(found, 'page request appears within bounded wait');
     const ack = await rt.dispatch('inc-late', 'Ack', {});
-    assert.equal(ack.stepKind, 'accepted');
-    clock.advance(1000);
+    assert.equal(ack.stepKind, 'accepted', 'Ack is accepted before the page response arrives');
+    heldResolve({ status: 201, headers: {}, body: {} });
+    await settleP;
     await settle(rt);
     const journal = await rt.getJournal('inc-late');
-    const late = journal.find((j) => j.action === 'PageSent');
-    assert.ok(late, 'the retried page was answered and PageSent was dispatched');
-    assert.deepEqual(journal.filter((j) => j.action === 'PageSent').map((j) => j.stepKind ?? j.verdict ?? 'accepted'), ['accepted']);
+    const sent = journal.filter((j) => j.action === 'PageSent');
+    assert.equal(sent.length, 1, 'exactly one PageSent in journal');
+    assert.equal(sent[0].stepKind ?? sent[0].verdict ?? 'accepted', 'accepted', 'late PageSent is accepted');
     const state = (await rt.getState('inc-late')).state;
-    assert.deepEqual([state.status, state.answered], ['Acked', true]);
-    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 2, 'two attempts, one page');
+    assert.deepEqual([state.status, state.answered], ['Acked', true], 'status is Acked, answered is true');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 1, 'exactly one page request');
+  } finally {
+    await rt.close();
+  }
+});
+
+// Finding 31: one attempt, exhausted leads to a completion a person settles (G1, PS23.4, PS23.5).
+// Unconfirmed page, acked.
+test('incident-oncall: one attempt, unconfirmed page: page 503 then 201, db-down ends Unconfirmed, Ack ends Acked, advance 10 min no escalation', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  let pages = 0;
+  const egress = recordingEgress((req) => {
+    if (req.url.endsWith('/pages')) {
+      pages++;
+      if (pages === 1) return { status: 503, headers: {}, body: {} };
+    }
+    return { status: 201, headers: {}, body: {} };
+  });
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-unconf-page-ack' });
+    const id = 'inc-unconf-page-ack';
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch(id, 'Report', { summary: reportId });
+    await settle(rt);
+    let state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Unconfirmed', 'page 503 goes to PageUncertain and then Unconfirmed');
+    assert.equal(state.answered, true, 'answered is set by PageUncertain');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 1, 'one page POST sent');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 0, 'no escalation yet');
+    await rt.dispatch(id, 'Ack', {});
+    await settle(rt);
+    state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Acked', 'Ack ends Acked from Unconfirmed');
+    clock.advance(10 * 60 * 1000);
+    await settle(rt);
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 1, 'still one page POST after 10 minutes');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 0, 'no escalation after 10 minutes with Ack');
+  } finally {
+    await rt.close();
+  }
+});
+
+// Unconfirmed page, escalated by the timer.
+test('incident-oncall: one attempt, unconfirmed page: page 503, no ack, advance 5 min escalates', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  const egress = recordingEgress((req) => {
+    if (req.url.endsWith('/pages')) return { status: 503, headers: {}, body: {} };
+    return { status: 201, headers: {}, body: {} };
+  });
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-unconf-page-timeout' });
+    const id = 'inc-unconf-page-timeout';
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch(id, 'Report', { summary: reportId });
+    await settle(rt);
+    let state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Unconfirmed', 'page 503 goes to Unconfirmed');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 1, 'one page POST sent');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 0, 'no escalation yet');
+    clock.advance(5 * 60 * 1000);
+    await settle(rt);
+    state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Escalated', 'ack timer fires from Unconfirmed, goes to Escalating and then Escalated');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/pages')).length, 1, 'one page POST in all');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 1, 'one escalation POST after timeout');
+  } finally {
+    await rt.close();
+  }
+});
+
+// Finding 31: one attempt, an unconfirmed escalation a person's Confirm settles.
+// Unconfirmed escalation, confirmed reached.
+test('incident-oncall: one attempt, unconfirmed escalation: page 409, escalation 503 then 201, ends EscalationUnconfirmed, Confirm(reached: true) ends Escalated', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  let escalations = 0;
+  const egress = recordingEgress((req) => {
+    if (req.url.endsWith('/pages')) return { status: 409, headers: {}, body: {} };
+    if (req.url.endsWith('/escalations')) {
+      escalations++;
+      if (escalations === 1) return { status: 503, headers: {}, body: {} };
+    }
+    return { status: 201, headers: {}, body: {} };
+  });
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-unconf-esc-yes' });
+    const id = 'inc-unconf-esc-yes';
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch(id, 'Report', { summary: reportId });
+    await settle(rt);
+    let state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'EscalationUnconfirmed', 'page 409 goes PageFailed, escalation 503 goes to EscalateUncertain and then EscalationUnconfirmed');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 1, 'one escalation POST sent');
+    const confirm = await rt.dispatch(id, 'Confirm', { reached: true });
+    await settle(rt);
+    assert.equal(confirm.stepKind, 'accepted', 'Confirm is accepted');
+    state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Escalated', 'Confirm(reached: true) ends Escalated');
+    clock.advance(5 * 60 * 1000);
+    await settle(rt);
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 1, 'still one escalation request after Confirm and clock advance');
+  } finally {
+    await rt.close();
+  }
+});
+
+// Unconfirmed escalation, confirmed not reached.
+test('incident-oncall: one attempt, unconfirmed escalation: page 409, escalation 503, Confirm(reached: false) ends Unreached', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  const egress = recordingEgress((req) => {
+    if (req.url.endsWith('/pages')) return { status: 409, headers: {}, body: {} };
+    if (req.url.endsWith('/escalations')) return { status: 503, headers: {}, body: {} };
+    return { status: 201, headers: {}, body: {} };
+  });
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-unconf-esc-no' });
+    const id = 'inc-unconf-esc-no';
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch(id, 'Report', { summary: reportId });
+    await settle(rt);
+    let state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'EscalationUnconfirmed', 'page 409 and escalation 503 go to EscalationUnconfirmed');
+    const confirm = await rt.dispatch(id, 'Confirm', { reached: false });
+    await settle(rt);
+    assert.equal(confirm.stepKind, 'accepted', 'Confirm is accepted');
+    state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Unreached', 'Confirm(reached: false) ends Unreached');
+    assert.equal(egress.sent.filter((s) => s.url.endsWith('/escalations')).length, 1, 'one escalation request sent (Confirm emits nothing)');
+  } finally {
+    await rt.close();
+  }
+});
+
+// Confirm on an Acked incident (not unconfirmed) is rejected not-unconfirmed.
+test('incident-oncall: one attempt, Confirm on an Acked incident is rejected not-unconfirmed', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedIncidents, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+  const a = await admitted();
+  const egress = recordingEgress();
+  const { rt, clock } = await loadExample(a, { transports: egress.transports });
+  try {
+    provideRecorded(rt, recordedIncidents(answers));
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('pager.page', handlers.page);
+    rt.handle('pager.escalate', handlers.escalate);
+    await rt.create('oncall.Incident', { id: 'inc-confirm-acked' });
+    const id = 'inc-confirm-acked';
+    const reportId = await rt.putContent('Primary database is down, all writes are failing.');
+    await rt.dispatch(id, 'Report', { summary: reportId });
+    await settle(rt);
+    await rt.dispatch(id, 'Ack', {});
+    await settle(rt);
+    let state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Acked', 'incident is Acked');
+    const confirm = await rt.dispatch(id, 'Confirm', { reached: true });
+    await settle(rt);
+    assert.equal(confirm.stepKind, 'rejected', 'Confirm is rejected');
+    assert.equal(confirm.rejectReason, 'not-unconfirmed', 'reason is not-unconfirmed (Acked is not terminal, but not unconfirmed either)');
   } finally {
     await rt.close();
   }

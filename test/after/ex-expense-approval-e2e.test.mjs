@@ -249,6 +249,160 @@ test('expense-approval: escalation - large payment (350) is escalated; person ap
   }
 });
 
+test('expense-approval: one attempt and held claim; Resolve action resolves held claims', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedExpenses, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+
+  const a = await admitted();
+
+  // Set up egress to answer 503 for the first two POSTs (held claims), then 201 for the third (successful claim).
+  let postCount = 0;
+  const egress = recordingEgress((req) => {
+    postCount++;
+    const status = (postCount <= 2) ? 503 : 201;
+    return { status, headers: {}, body: status === 201 ? { ok: true } : {} };
+  });
+
+  const { rt, clock } = await loadExample(a, { transports: egress.transports, verifier: (c) => (c ? { principal: c.principal } : null) });
+  try {
+    const provider = recordedExpenses(answers);
+    provideRecorded(rt, provider);
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payroll.pay', handlers.pay);
+
+    // First held claim (finding 31): one attempt, 503 -> Held.
+    await rt.create('expenses.Expense', { id: 'held-1' });
+    const id1 = 'held-1';
+
+    const receiptId = await rt.putContent('Taxi from the airport, 150 euros.');
+    await rt.dispatch(id1, 'Submit', { amount: 3, receipt: receiptId }, { credentials: { principal: 'alice' } });
+    await settle(rt);
+
+    await rt.dispatch(id1, 'Approve', {}, { credentials: { principal: 'bob' } });
+    await settle(rt);
+
+    // Exactly one POST sent, with 503 response.
+    assert.equal(egress.sent.length, 1, 'exactly one POST sent');
+    const req1 = egress.sent[0];
+    assert.equal(req1.method, 'POST');
+    assert.equal(req1.url, 'https://payroll.example/v1/reimbursements');
+    assert.deepEqual(req1.body, { euros: 150 });
+
+    // Claim is Held.
+    let state = (await rt.getState(id1)).state;
+    assert.equal(state.status, 'Held', `expected Held; got ${state.status}`);
+
+    // Resolve(paid: true) by alice is rejected own-claim (submitter cannot resolve own claim).
+    const rejAlice = await rt.dispatch(id1, 'Resolve', { paid: true }, { credentials: { principal: 'alice' } });
+    await settle(rt);
+    assert.equal(rejAlice.stepKind, 'rejected', 'Resolve by submitter is rejected');
+    assert.equal(rejAlice.rejectReason, 'own-claim', 'reason is own-claim');
+    assert.equal(egress.sent.length, 1, 'no additional POST for rejected Resolve');
+
+    // Resolve(paid: true) by bob ends Settled with no second POST.
+    const resolveAlice1 = await rt.dispatch(id1, 'Resolve', { paid: true }, { credentials: { principal: 'bob' } });
+    await settle(rt);
+    assert.equal(resolveAlice1.stepKind, 'accepted', `Resolve accepted; got ${resolveAlice1.stepKind}`);
+
+    state = (await rt.getState(id1)).state;
+    assert.equal(state.status, 'Settled', `expected Settled after Resolve(paid: true); got ${state.status}`);
+    assert.equal(egress.sent.length, 1, 'no second POST for Resolve emission');
+
+    // Second held claim: another claim that ends Held.
+    await rt.create('expenses.Expense', { id: 'held-2' });
+    const id2 = 'held-2';
+
+    const receiptId2 = await rt.putContent('Taxi from the airport, 150 euros.');
+    await rt.dispatch(id2, 'Submit', { amount: 3, receipt: receiptId2 }, { credentials: { principal: 'alice' } });
+    await settle(rt);
+
+    await rt.dispatch(id2, 'Approve', {}, { credentials: { principal: 'bob' } });
+    await settle(rt);
+
+    // Second POST sent, also gets 503.
+    assert.equal(egress.sent.length, 2, 'second POST for second claim');
+    state = (await rt.getState(id2)).state;
+    assert.equal(state.status, 'Held', `expected Held on second claim; got ${state.status}`);
+
+    // Resolve(paid: false) by bob ends Failed with no second POST.
+    const resolveFalse = await rt.dispatch(id2, 'Resolve', { paid: false }, { credentials: { principal: 'bob' } });
+    await settle(rt);
+    assert.equal(resolveFalse.stepKind, 'accepted', `Resolve(paid: false) accepted; got ${resolveFalse.stepKind}`);
+
+    state = (await rt.getState(id2)).state;
+    assert.equal(state.status, 'Failed', `expected Failed after Resolve(paid: false); got ${state.status}`);
+    assert.equal(egress.sent.length, 2, 'no third POST for Resolve emission');
+
+    // Resolve on a claim that is not held is rejected not-held.
+    // Use a claim that is Submitted (not terminal, not Held): submitted and categorized but not approved.
+    await rt.create('expenses.Expense', { id: 'submitted-1' });
+    const id3 = 'submitted-1';
+
+    const receiptId3 = await rt.putContent('Taxi from the airport, 150 euros.');
+    await rt.dispatch(id3, 'Submit', { amount: 3, receipt: receiptId3 }, { credentials: { principal: 'alice' } });
+    await settle(rt);
+
+    // Claim is Submitted (categorized, not yet approved), not Held.
+    state = (await rt.getState(id3)).state;
+    assert.equal(state.status, 'Submitted', `expected Submitted; got ${state.status}`);
+
+    // Resolve on Submitted claim is rejected not-held (claim is not Held).
+    const rejNotHeld = await rt.dispatch(id3, 'Resolve', { paid: true }, { credentials: { principal: 'bob' } });
+    await settle(rt);
+    assert.equal(rejNotHeld.stepKind, 'rejected', 'Resolve on non-held claim is rejected');
+    assert.equal(rejNotHeld.rejectReason, 'not-held', 'reason is not-held');
+    assert.equal(egress.sent.length, 2, 'no additional POST for not-held rejection');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('expense-approval: refused payment - service answers 422, claim ends Failed after one POST', { timeout: 120_000 }, async () => {
+  const { loadAnswers, recordedExpenses, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
+  const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
+
+  const a = await admitted();
+
+  // Service answers 422 (permanent error) on the payment.
+  const egress = recordingEgress(() => ({ status: 422, headers: {}, body: {} }));
+
+  const { rt, clock } = await loadExample(a, { transports: egress.transports, verifier: (c) => (c ? { principal: c.principal } : null) });
+  try {
+    const provider = recordedExpenses(answers);
+    provideRecorded(rt, provider);
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('payroll.pay', handlers.pay);
+
+    await rt.create('expenses.Expense', { id: 'refused' });
+    const id = 'refused';
+
+    // Alice submits 3 units (taxi).
+    const receiptId = await rt.putContent('Taxi from the airport, 150 euros.');
+    await rt.dispatch(id, 'Submit', { amount: 3, receipt: receiptId }, { credentials: { principal: 'alice' } });
+    await settle(rt);
+
+    // Bob approves.
+    await rt.dispatch(id, 'Approve', {}, { credentials: { principal: 'bob' } });
+    await settle(rt);
+
+    // One POST sent, with 422 response (permanent error, not retried).
+    assert.equal(egress.sent.length, 1, 'one POST sent for 422 error');
+    const req = egress.sent[0];
+    assert.equal(req.method, 'POST');
+    assert.equal(req.url, 'https://payroll.example/v1/reimbursements');
+    assert.deepEqual(req.body, { euros: 150 });
+
+    // Claim is Failed (payroll service refused the payment).
+    const state = (await rt.getState(id)).state;
+    assert.equal(state.status, 'Failed', `expected Failed after 422; got ${state.status}`);
+
+    // No additional POSTs sent.
+    assert.equal(egress.sent.length, 1, 'no retry or second POST');
+  } finally {
+    await rt.close();
+  }
+});
+
 test('expense-approval: journal replays with no divergence', { timeout: 120_000 }, async () => {
   const { loadAnswers, recordedExpenses, provideRecorded } = await import(pathToFileURL(join(EX_DIR, 'host', 'recorded.mjs')).href);
   const answers = loadAnswers(join(EX_DIR, 'recorded', 'answers.json'));
