@@ -1,0 +1,120 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "poly",
+  "scopeName": "source.poly",
+  "patterns": [
+    {
+      "include": "#comment.line.double-slash.poly"
+    },
+    {
+      "include": "#comment-block"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#duration"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#primed"
+    },
+    {
+      "include": "#keywords-leading"
+    },
+    {
+      "include": "#keywords-anywhere"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#type-name"
+    },
+    {
+      "include": "#operator"
+    }
+  ],
+  "repository": {
+    "comment.line.double-slash.poly": {
+      "name": "comment.line.double-slash.poly",
+      "begin": "//",
+      "end": "$",
+      "patterns": [
+        {
+          "include": "#constant.other.reference.poly"
+        }
+      ]
+    },
+    "comment-block": {
+      "name": "comment.block.poly",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        {
+          "include": "#constant.other.reference.poly"
+        }
+      ]
+    },
+    "constant.other.reference.poly": {
+      "name": "constant.other.reference.poly",
+      "match": "\\b(?:PS|PT|PF|PA|PD|PL|AC|AD|DAC|DB|DF|S)\\d+(?:\\.\\d+)*[a-z]?\\b"
+    },
+    "string": {
+      "name": "string.quoted.double.poly",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.poly",
+          "match": "\\\\[ntr\"\\\\]"
+        },
+        {
+          "name": "invalid.illegal.escape.poly",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "duration": {
+      "name": "constant.numeric.duration.poly",
+      "match": "\\b\\d+(?:ms|s|m|h|d)\\b"
+    },
+    "number": {
+      "name": "constant.numeric.poly",
+      "match": "\\b\\d+(?:\\.\\d{1,3}(?!\\.))?\\b"
+    },
+    "primed": {
+      "name": "variable.other.primed.poly",
+      "match": "(?<![\\w$.])[a-z_$][\\w$]*'"
+    },
+    "keywords-leading": {
+      "name": "keyword.control.poly",
+      "match": "^\\s*(?:action|adapter|attribution|audience|bounds|channel|cites|claims|configuration|credential|decision|effect|end|enum|freshness|from|guard|initial|inputs|key|keys|kind|labels|liveness|machine|memory|module|obligation|ok|one|order|owner|path|policy|principal|reason|route|scope|service|source|state|states|step|target|thread|tool|type|use|var|verified|version|workflow)(?![\\w$']|-\\w)"
+    },
+    "keywords-anywhere": {
+      "name": "keyword.other.poly",
+      "match": "(?<![\\w$.'-])(?:about|adjudicate|after|all|allow|and|as|attempts|band|base|budget|by|calibration|cancel|cap|check|class|complete|compose|decide|deny|derived|detached|disclosed|documents|else|emit|envelope|escalate|eventually|exhausted|exists|failed|fair|for|forall|header|idempotent|if|in|inbound|input|instances|internal|invariant|leads|let|limit|match|matches|max|migrate|nature|never|new|observed|on|or|owned|parent|per|pkce|prices|property|provider|recalled|records|reject|remember|require|requires|retrieve|retry|rule|runs|send|signal|skip|spawn|spawned|stale|starts|strict|terminal|timeout|to|tokens|transit|under|unknown|warn|when|where|while|why|window|with)(?![\\w$']|-\\w)(?!\\()"
+    },
+    "types": {
+      "name": "support.type.poly",
+      "match": "(?<![\\w$.'-])(?:bool|int|map|string)(?![\\w$']|-\\w)"
+    },
+    "constants": {
+      "name": "constant.language.poly",
+      "match": "(?<![\\w$.'-])(?:compensable|false|irreversible|none|reversible|true)(?![\\w$']|-\\w)"
+    },
+    "type-name": {
+      "name": "entity.name.type.poly",
+      "match": "\\b[A-Z][\\w$]*\\b"
+    },
+    "operator": {
+      "name": "keyword.operator.poly",
+      "match": "=>|->|<-|\\.\\.|==|!=|<=|>=|&&|\\|\\||[=<>!+*/%|-]"
+    }
+  }
+}

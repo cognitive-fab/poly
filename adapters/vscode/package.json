@@ -1,0 +1,39 @@
+{
+  "name": "poly",
+  "displayName": "poly",
+  "description": "Colours poly modules (.poly and .policy.poly). Configuration only: no code and no server (PT14, the VS Code adapter).",
+  "version": "1.4.0",
+  "publisher": "cognitive-fab",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cognitive-fab/poly.git"
+  },
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "poly",
+        "aliases": [
+          "poly"
+        ],
+        "extensions": [
+          ".poly"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "poly",
+        "scopeName": "source.poly",
+        "path": "./syntaxes/poly.tmLanguage.json"
+      }
+    ]
+  }
+}
