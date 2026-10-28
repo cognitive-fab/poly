@@ -248,7 +248,8 @@ export async function policyReports(module: Module, program: Module[], root: str
     // A channel's conversation, a route's and a budget's machines are generated from their declarations, one module each.
     for (const m of program) for (const d of m.decls) if (d.kind === 'Channel' || d.kind === 'Route' || d.kind === 'Budget' || d.kind === 'Credential') scopes.add(`${m.name}.${d.name}`);
     const governs = [...scopes].some((m) => scopeGoverns(scope, m)) || program.some((m) => m.decls.some((d) => d.kind === 'Configuration' && d.instances.some((i) => i.scope === scope)));
-    if (governable && !governs) mine.push(diag('PL6504', { module: module.name, node: ps[0].id, line: ps[0].span ? ps[0].span.line + 1 : undefined }, `the scope "${scope}" names no module of the project, no glob that matches one and no instance's scope in a configuration, so its policies govern nothing (PT8.4)`));
+    if (scope.includes('*')) mine.push(diag('PL6505', { module: module.name, node: ps[0].id, line: ps[0].span ? ps[0].span.line + 1 : undefined }, `the scope "${scope}" is a glob, and a glob over module names is not a scope: name the module, or a scope a configuration instance assigns (PT8.4)`));
+    else if (governable && !governs) mine.push(diag('PL6504', { module: module.name, node: ps[0].id, line: ps[0].span ? ps[0].span.line + 1 : undefined }, `the scope "${scope}" names no module of the project, no glob that matches one and no instance's scope in a configuration, so its policies govern nothing (PT8.4)`));
     const r: PolicyReport = { scope, policies: ps.map((p) => p.name), stages: [], notRun: [], vacuous: [], diagnostics: [...mine], verdict: 'CLEAN', reads: [...new Set(ps.flatMap((p) => typed.reads.get(p.name) ?? []))].sort() };
     out.push(r);
     const refused = mine.some((d) => d.severity === 'error');
@@ -313,16 +314,18 @@ export async function policyReports(module: Module, program: Module[], root: str
       const px = await loadPolyaxion();
       const admission = await px.admitPolicy(doc, {});
       const errors = (admission.findings ?? []).filter((f: { level: string; message: string }) => f.level === 'error' && !/not lawfully dischargeable \(m2\)/.test(f.message));
+      let refusedByEngine = errors.length > 0;
       for (const f of errors) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion refuses the policies of scope ${scope} at admission: ${f.obligation ? `${f.obligation}: ` : ''}${f.message} (PT8.4)`));
       if (!admission.servable && !errors.length && !consistency.findings.length) {
         // Review B9: the engine's own m2 check explores one machine at a time and counts an escalation as a deny, so
         // it can refuse a scope PS8.6 finds dischargeable; the gate cannot serve it either way, so it stays PL6001.
+        refusedByEngine = true;
         const m2 = (admission.findings ?? []).filter((f: { message: string }) => /not lawfully dischargeable \(m2\)/.test(f.message));
         r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, m2.length
           ? `Polyaxion does not serve the policies of scope ${scope}: its m2 check finds ${m2.map((f: { obligation?: string }) => f.obligation ?? 'a mandate').join(', ')} not lawfully dischargeable, which PS8.6 finds dischargeable (the engine counts an escalation as a deny on the way; engine change E8) (PT8.4)`
           : `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
       }
-      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: errors.length ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
+      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: refusedByEngine ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
       const engine = policyEngine(px, px.compileToTriple(doc).plan);
       const tv = validatePolicy({ scope, policies: ps }, refFacts, engine);
       if (tv.mismatch) {
