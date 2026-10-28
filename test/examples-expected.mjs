@@ -49,9 +49,11 @@ export function policyOf(file) {
 /**
  * The check of an example as the gate takes it: the program alone, or, when a policy sits beside it, the project of the
  * two with the policy signed as a person signs it, the program's maps and prices copied beside them. The report has the
- * shape `mismatch` reads, with the policies' diagnostics in `diagnostics`.
+ * shape `mismatch` reads, with the policies' diagnostics in `diagnostics`. The project directory names the process too:
+ * the sweep and an example's own light test check the same file in parallel, and on v1.4 one removed the other's
+ * project while it was being checked (ENOENT on src/handlers.ts).
  */
-export async function checkExample(file, root, name = relative(ROOT, file).replace(/[^a-z0-9]+/gi, '-')) {
+export async function checkExample(file, root, name = `${relative(ROOT, file).replace(/[^a-z0-9]+/gi, '-')}-${process.pid}`) {
   const policy = policyOf(file);
   if (!policy) return checkFile(file, { root });
   const key = makeKey(name);
