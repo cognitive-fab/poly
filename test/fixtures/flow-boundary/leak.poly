@@ -93,6 +93,9 @@ machine Relay {
     targets { egress: "https://mail.example/v1/send" }
     audience customer
     class irreversible
+    // Finding 31: the mail service documents no idempotency key, so the send is attempted once (G1, PS23.4); with the
+    // default retry v1.3's rule adds PL4003 beside the flow finding this fixture is about.
+    retry { attempts 1 }
     ok -> Sent()
     failed -> SendFailed()
   }
