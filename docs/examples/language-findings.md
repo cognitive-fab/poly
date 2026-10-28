@@ -209,12 +209,12 @@ The stopping rule (a liveness or saga check over 8 GB, or with no verdict) did n
 - **Workaround.** `admitExample` copies the handlers file only when it exists; the host code is `host/inquiry.ts`; `Wire` and `Cancel` are in the program.
 - **Proposed fix.** See finding 10 for the wiring. A worker that was never asked is "idle", and `terminal` could be allowed to name an initial state when a machine's whole life is waiting for a task.
 
-### 24. A glob scope matches modules but cannot be lowered
+### 24. A glob scope matches modules but cannot be lowered (fixed: refused with PL6505)
 
 - **Symptom.** `scopeGoverns` accepts a scope with `*` (`fb_*`) and the region check uses it, but lowering the policy gives it the id `fb_*`, which Polyaxion's schema refuses (`policy.id must match /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/`): the project's verdict is `ERROR`. Found while testing finding 20.
 - **Appeared in.** test/policy-scope-unmatched.test.mjs.
 - **Workaround.** None in the examples; their scopes are module names.
-- **Proposed fix.** Slug the id as the artefact path already is (`policySlug`), or refuse a glob scope with a diagnostic of its own.
+- **Fixed (rule 7a).** PT8.4 now says a glob is not a scope, `test/policy-scope-unmatched.test.mjs` holds it, and `PL6505 POLICY_SCOPE_GLOB` refuses it at the scope line, before lowering, with a message that names the scope and says it is a glob. Glob scopes are proposed for v2.0 (P12).
 
 ## Batch 5: subscription-cancel, flash-controller
 
@@ -247,6 +247,12 @@ Both checks were tiny (7 and 76 states, about a second each); nothing came near 
 - **Appeared in.** order-fulfilment.
 - **Workaround.** The entry was added.
 - **Proposed fix.** The table could be generated from the expected-verdict lines and a recorded run, so that a new teaching variant does not need a hand edit in a test about something else.
+
+### 29. A stage read CLEAN beside an error diagnostic (PL6001) (fixed)
+
+- **Symptom.** When Polyaxion did not serve a scope only because of its m2 check (which counts an escalation as a deny, engine change E8), the code pushed `PL6001` and recorded the `policy-admission` stage with the verdict `CLEAN`. The scope's verdict folded to `REFUSED` from the diagnostic, so nothing was ever wrongly admitted, but a reader of the stage line saw `CLEAN`.
+- **Appeared in.** a polywatch review of the batch 5 change; the code is from M5a.
+- **Fixed (rule 7a).** PT8.4 says a stage reads `CLEAN` only when it holds no error diagnostic; `test/policy-consistency.test.mjs` holds it for the m2 case; the stage is `REFUSED` whenever it pushes `PL6001`.
 
 ## Conclusion
 

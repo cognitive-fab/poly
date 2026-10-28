@@ -71,6 +71,20 @@ test('PS8.6: a mandate whose discharging proposal is escalated is dischargeable'
   if (peer.ok) assert.match(s.diagnostics.find((x) => x.code === 'PL6001')?.message ?? '', /escalation as a deny.*E8/);
 });
 
+// PT8.4 (ruled after batch 5): a stage reads CLEAN only when it holds no error diagnostic. When the engine does not serve a scope only
+// because its m2 check counts an escalation as a deny (engine change E8), PL6001 is pushed, and the policy-admission stage is REFUSED
+// with it, as it is when the engine refuses the scope with an error finding.
+test('PT8.4: the policy-admission stage is REFUSED whenever PL6001 is pushed, the engine\'s m2 refusal included', { skip }, async () => {
+  const esc = `  obligation reserve-asks "A person approves every reserve." rule {\n    when effect.kind == "stock.reserve"\n    require false else escalate\n  }\n`;
+  const s = (await checkProject(projectOf('consistency-esc-stage', { 'orders.poly': ORDERS(), 'p.policy.poly': pol('escstage', esc) }))).files.flatMap((f) => f.policies)[0];
+  assert.ok(s.diagnostics.some((x) => x.code === 'PL6001'), JSON.stringify(s.diagnostics.map((x) => x.message)));
+  const admission = s.stages.find((x) => x.stage === 'policy-admission');
+  assert.deepEqual([admission.status, admission.verdict], ['ran', 'REFUSED']);
+  assert.equal(s.verdict, 'REFUSED');
+  // The general rule over the same report: no stage reads CLEAN beside an error diagnostic of the stage it names.
+  assert.ok(!s.stages.some((x) => x.verdict === 'CLEAN' && s.diagnostics.some((d) => d.code === 'PL6001' && x.stage === 'policy-admission')));
+});
+
 // Review B4: the check covers the whole decision table, not its first rows.
 test('PS8.6: a trap past the first 400 rows of the decision table is found', async () => {
   const prog = `module meter\n\nmachine Meter {\n  state { n : 0..255 = 0 }\n  action Set(v: 0..255)\n  action A()\n  action B()\n  on Set(v) { n' = v }\n  on A { emit a(1) }\n  on B { emit b(1) }\n  effect a(k: 0..1) {\n    kind "meter.a"\n    labels { write:store }\n  }\n  effect b(k: 0..1) {\n    kind "meter.b"\n    labels { write:store }\n  }\n}\n`;
