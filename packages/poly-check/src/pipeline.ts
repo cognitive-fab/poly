@@ -1141,6 +1141,9 @@ export function projectKindConflicts(reports: CheckReport[]): void {
 /** Folds a report again after a project-level diagnostic; an ERROR or a NONDETERMINISM stands (review finding P4). */
 function refold(report: CheckReport): void {
   if (report.verdict === 'ERROR' || report.verdict === 'NONDETERMINISM') return;
+  // PT12.3 (finding 30): parse-type reads REFUSED when the file's report holds an error, and the project's own errors
+  // (PL1002, PL6803) arrive after the file's stages ran; read the stage again so it never stays CLEAN beside them.
+  if (report.diagnostics.some((d) => d.severity === 'error')) for (const m of report.machines) for (const s of m.stages) if (s.stage === 'parse-type' && s.status === 'ran') s.verdict = 'REFUSED';
   finish(report);
 }
 

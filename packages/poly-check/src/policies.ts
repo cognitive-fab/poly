@@ -267,7 +267,11 @@ export async function policyReports(module: Module, program: Module[], root: str
     writeFileSync(join(root, rel), text);
     r.artefact = { path: rel, digest: 'sha256:' + createHash('sha256').update(text, 'utf8').digest('hex') };
     const doc = JSON.parse(text) as PolicyDoc;
-    r.stages.push({ stage: 'policy-lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', note: `${doc.obligations.length} obligation(s) in ${rel}` });
+    // PT12.3 (finding 30): a scope with only never statements lowers to a document with nothing for the gate to enforce. The
+    // error is this stage's, so the stage is REFUSED with it; before, the scope held PL1201 and this stage read CLEAN.
+    const empty = doc.obligations.length ? [] : [diag('PL1201', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `the policies of scope ${scope} have no obligation for the gate to enforce: a never statement proves, it does not enforce (PT8.2)`)];
+    r.diagnostics.push(...empty);
+    r.stages.push({ stage: 'policy-lower', status: 'ran', engine: '@poly/lower', verdict: empty.length ? 'REFUSED' : 'CLEAN', note: `${doc.obligations.length} obligation(s) in ${rel}` });
 
     // Stage 5b (PT8.5, PS8.6, S148): an undischargeable mandate is PL6501 with its minimal conflicting subset, by
     // poly-ref's check over the policy machines together (review B3, B4, B9); a bounded check is not clean (B11).
@@ -276,7 +280,9 @@ export async function policyReports(module: Module, program: Module[], root: str
     for (const m of consistency.bounded) r.notRun.push({ property: m, reason: 'the discharge check stopped at its bound (PS8.6)' });
     r.stages.push({ stage: 'consistency', status: 'ran', engine: 'poly-ref', verdict: consistency.findings.length ? 'FINDINGS' : consistency.bounded.length ? 'INCONCLUSIVE' : 'CLEAN', note: `${consistency.mandates} mandate(s); ${consistency.checks} discharge check(s)` });
 
-    // PS8.4 (review B8): in a scope whose obligations read labels or class, an unlabelled effect is refused.
+    // PS8.4 (review B8): in a scope whose obligations read labels or class, an unlabelled effect is refused. PT12.3 (finding
+    // 30): the refusal is the policy-admission stage's, which is REFUSED with it below even when the engine admits.
+    const unlabelled: Diagnostic[] = [];
     const readsLabels = (x: any): boolean => !!x && typeof x === 'object' && ((x.kind === 'Member' && x.object?.kind === 'Name' && x.object.name === 'effect' && (x.prop === 'labels' || x.prop === 'class')) || Object.values(x).some((v) => (Array.isArray(v) ? v.some(readsLabels) : readsLabels(v))));
     if (ps.some((p) => p.items.some((i) => i.kind !== 'Never' && readsLabels(i)))) {
       for (const m of program) {
@@ -286,11 +292,12 @@ export async function policyReports(module: Module, program: Module[], root: str
           for (const it of d.items) {
             if (it.kind !== 'EffectDecl' || it.items.some((x) => x.kind === 'EffLabels')) continue;
             const kind = (it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined)?.value ?? it.name;
-            r.diagnostics.push(diag('PL6302', { module: m.name, node: it.id, line: it.span?.line }, `effect ${kind} of ${m.name}.${d.name} has no labels, and the obligations of scope ${scope} read labels or class; it is refused at admission (PS8.4)`));
+            unlabelled.push(diag('PL6302', { module: m.name, node: it.id, line: it.span?.line }, `effect ${kind} of ${m.name}.${d.name} has no labels, and the obligations of scope ${scope} read labels or class; it is refused at admission (PS8.4)`));
           }
         }
       }
     }
+    r.diagnostics.push(...unlabelled);
 
     // S156, PD5.2.3: in a scope that requires attribution, a compensable or irreversible effect from an origin with no
     // claims is a finding, with the path from the unattributed action to the effect.
@@ -304,7 +311,7 @@ export async function policyReports(module: Module, program: Module[], root: str
     // A scope with only never statements gives the gate nothing to enforce, and the engine takes no empty document.
     const peer = polyaxionPeer();
     if (!doc.obligations.length) {
-      r.diagnostics.push(diag('PL1201', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `the policies of scope ${scope} have no obligation for the gate to enforce: a never statement proves, it does not enforce (PT8.2)`));
+      // policy-lower recorded PL1201 (PT12.3, finding 30).
       r.stages.push({ stage: 'policy-admission', status: 'not-run', engine: '', reason: 'the scope has no obligation' });
       r.stages.push({ stage: 'policy-tv', status: 'not-run', engine: '', reason: 'the scope has no obligation' });
     } else if (!peer.ok) {
@@ -325,7 +332,7 @@ export async function policyReports(module: Module, program: Module[], root: str
           ? `Polyaxion does not serve the policies of scope ${scope}: its m2 check finds ${m2.map((f: { obligation?: string }) => f.obligation ?? 'a mandate').join(', ')} not lawfully dischargeable, which PS8.6 finds dischargeable (the engine counts an escalation as a deny on the way; engine change E8) (PT8.4)`
           : `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
       }
-      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: refusedByEngine ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
+      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: refusedByEngine || unlabelled.length ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
       const engine = policyEngine(px, px.compileToTriple(doc).plan);
       const tv = validatePolicy({ scope, policies: ps }, refFacts, engine);
       if (tv.mismatch) {
