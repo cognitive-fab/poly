@@ -27,7 +27,7 @@ The tests are `test/ex-expense-approval.test.mjs` (light) and `test/after/ex-exp
 
 One `machine Expense` in module `expenses`, one instance per claim. Claims types: `claims Employee { principal: Principal }` and `claims Approver { principal: Principal }`. Enums: `Category { Travel, Meals, Equipment, Other }` and `Status { Draft, Categorizing, Submitted, Paying, Settled, Declined, Failed, Held }`.
 
-State: `status` (`Draft`), `submitter : Principal` (none), `approver : Principal` (none), `amount : 0..500` (0), `large : bool` (false), `category : Category` (`Other`). `terminal status in { Settled, Declined, Failed, Held }`.
+State: `status` (`Draft`), `submitter : Principal` (none), `approver : Principal` (none), `amount : 0..500` (0), `large : bool` (false), `category : Category` (`Other`). `terminal status in { Settled, Declined, Failed }`. `Held` is not terminal: it waits for a person (finding 31).
 
 Actions and handlers:
 
@@ -36,7 +36,8 @@ Actions and handlers:
 - `Uncategorized()`: the decision failed. Rejects `"not-categorizing"` unless `Categorizing`. Goes to `Submitted` with `Other`.
 - `Approve() by a: Approver`: rejects `"not-submitted"` unless `Submitted`; rejects `"own-claim"` when `a.principal == submitter`. Records `approver`, goes to `Paying` and emits `pay(amount: amount)`.
 - `Decline() by a: Approver`: rejects `"not-submitted"` unless `Submitted`; rejects `"own-claim"` when `a.principal == submitter`. Goes to `Declined`.
-- `Paid()`, `PayFailed()`, `PayHeld()`: each rejects `"not-paying"` unless `Paying`, and goes to `Settled`, `Failed` and `Held` respectively.
+- `Paid()`, `PayFailed()`, `PayHeld()`: each rejects `"not-paying"` unless `Paying`, and goes to `Settled`, `Failed` and `Held` respectively. `PayFailed` is a refusal the payroll service made (nothing was paid). `PayHeld` is the one attempt ending with no answer the program can trust: the claim may have been paid, so it is held for a person.
+- `Resolve(paid: bool) by a: Approver`: a person's reading of the payroll service for a held claim. Rejects `"not-held"` unless `Held`; rejects `"own-claim"` when `a.principal == submitter`. When `paid`, goes to `Settled`; otherwise goes to `Failed`. It emits nothing: the person reports what happened, and the program does not pay again.
 
 ## Decision
 
@@ -44,11 +45,13 @@ Actions and handlers:
 
 ## Effect
 
-`effect pay(amount: 0..500)`: kind `"payroll.pay"`, labels `egress:external`, target `egress` the exact URL `https://payroll.example/v1/reimbursements`, class `irreversible`, retry `attempts 3, base 200ms, timeout 10s`. Outcomes: `ok` to `Paid`, `failed` to `PayFailed`, `exhausted` to `PayHeld`. The handler sends the intent's idempotency key (`ctx.idempotencyKey`) as the header `idempotency-key`.
+`effect pay(amount: 0..500)`: kind `"payroll.pay"`, labels `egress:external`, target `egress` the exact URL `https://payroll.example/v1/reimbursements`, class `irreversible`, retry `attempts 1, base 200ms, timeout 10s`. Outcomes: `ok` to `Paid`, `failed` to `PayFailed`, `exhausted` to `PayHeld`.
+
+**Attempted once (G1, PS23.4; finding 31).** The payroll service documents no idempotency key, so the payment is not retried: a retry whose first answer was lost could pay the claim twice, which the check reports as `PL4003 UNGUARDED_RETRY` (PS23.5). The handler still sends the intent's idempotency key (`ctx.idempotencyKey`) as the header `idempotency-key`; nothing documents that the service honours it, so the program does not rely on it.
 
 ## Host handler
 
-`host/handlers.ts` exports `pay(payload, caps, ctx)`, with a type-only import from `../.poly/build/expenses.Expense/types.js`. It posts `{ amount }` through `caps.egress.post` to the payroll URL with the header `idempotency-key`. Status 200 or 201 returns `{ ok: true }`. A status from 400 to 499 other than 429 throws an error with `permanent: true`. Any other status, or a transport error, throws an ordinary error and is retried.
+`host/handlers.ts` exports `pay(payload, caps, ctx)`, with a type-only import from `../.poly/build/expenses.Expense/types.js`. It posts `{ amount }` through `caps.egress.post` to the payroll URL with the header `idempotency-key`. Status 200 or 201 returns `{ ok: true }`. A status from 400 to 499 other than 429 throws an error with `permanent: true`. Any other status, or a transport error, throws an ordinary error; the payment has one attempt, so it ends `exhausted` and is not sent again.
 
 ## Recorded provider
 
@@ -91,6 +94,8 @@ End-to-end test (`test/after/ex-expense-approval-e2e.test.mjs`), over recorded t
 - main path: `alice` submits 120 with the `taxi` receipt; the category is `Travel`; `bob` approves; one POST carrying a key; the claim is `Settled`;
 - refusal: `alice` approving her own claim is rejected `own-claim` with no POST; an amount of 600 is rejected `outside-check-domain` before the handler; `blurry` leaves the category `Other`;
 - escalation: `carol` submits 350 with `laptop`; `dave` approves; the payment is proposed and **escalated**, with no POST; a person's signed approval releases it, then one POST; the claim is `Settled`;
+- one attempt and a held claim: with the payroll service scripted to answer 503 then 201, `alice` submits 120 and `bob` approves; exactly one POST is sent and the claim is `Held`; `Resolve(paid: true)` by `alice` is rejected `own-claim`; `Resolve(paid: true)` by `bob` ends `Settled` with no second POST; on a second held claim, `Resolve(paid: false)` by `bob` ends `Failed` with no second POST; a `Resolve` on a claim that is not held is rejected `not-held`;
+- a refused payment: the payroll service answering 422 ends `Failed` after one POST;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
 ## Amendments made when the code existed
@@ -101,6 +106,10 @@ End-to-end test (`test/after/ex-expense-approval-e2e.test.mjs`), over recorded t
 - The program declares `audience { public < staff }` (S302, as in the booker), and the policy holds a second obligation, `categorize-while-categorizing`, naming `decision.categorize` (PL7001, as in the booker).
 - The recorded answers are read from `examples/expense-approval/recorded/answers.json`. Test assertions about amounts and the POST body were changed to match after the code existed.
 
+## Amendment on v1.3.1 (finding 31)
+
+v1.4 is built on v1.3.1, whose retry-safety rule (PS23.5) reports an irreversible effect that may be attempted more than once with no documented key as `PL4003`. The payment was `attempts 3`, with a key the handler sent and no service documentation behind it, so the program and its defect copy were `FINDINGS` with `PL4003` beside their expected lines. The owner ruled: a target that documents an idempotency key is declared with its window; otherwise the effect is attempted once and an uncertain outcome goes to a person. The payroll service documents no key, so the payment is `attempts 1`. Its uncertain outcome already went to `Held`, but `Held` was terminal, so nobody could act on it: it is now a state a person leaves with `Resolve(paid)`, signed with an approver's claims and never the submitter's. The defect copy changes in the same way. The expected lines, the defect's witness (3 steps) and the properties do not change; the state count does, and the README records it.
+
 ## Conclusion
 
 The property is one comparison on the approving step, and the check finds its absence in three steps. What the check cannot see is who the principals are; the example shows that the verifier supplies them, and that a manager's approval of a claim and a person's approval of a payment are two different records.
@@ -110,3 +119,4 @@ The property is one comparison on the approving step, and the check finds its ab
 - **Submitter / approver:** the principals, from verified claims, that submitted and approved a claim.
 - **Escalation:** the gate's decision that a person must approve an intent before it runs.
 - **Strict domain:** an amount outside 0..500 is refused at dispatch.
+- **Held:** a claim whose one payment attempt ended with no answer the program can trust; a person says whether it was paid.

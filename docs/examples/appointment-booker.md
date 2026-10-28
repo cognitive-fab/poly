@@ -4,7 +4,7 @@ Batch 1, example 1. Written before any test or code (rule 7a). The tests are wri
 
 ## Purpose
 
-A small clinic books appointments from free text. A typed decision reads a request such as "Tuesday at nine" and answers a day and an hour. The program books that slot on the calendar, once, through an irreversible and keyed write, and refuses a slot that is already taken. The point of the example is the property: **no slot is ever booked twice**.
+A small clinic books appointments from free text. A typed decision reads a request such as "Tuesday at nine" and answers a day and an hour. The program books that slot on the calendar, once, through an irreversible write attempted once, and refuses a slot that is already taken. The point of the example is the property: **no slot is ever booked twice**.
 
 ## Files
 
@@ -38,7 +38,7 @@ Actions and handlers:
 - `Unparsed()`: the decision failed. Rejects `"not-parsing"` unless `Parsing`. Goes to `Unclear`.
 - `Written()`: rejects `"not-booking"` unless `Booking`. Goes to `Booked`.
 - `WriteFailed()`: rejects `"not-booking"` unless `Booking`. Goes to `Failed` and frees the slot.
-- `WriteUncertain()`: the write was tried to its limit with no answer. Rejects `"not-booking"` unless `Booking`. Goes to `Uncertain`. The slot **stays taken**, because the write may have happened.
+- `WriteUncertain()`: the one attempt of the write ended with no answer the program can trust (a timeout, or a status that is not a refusal). Rejects `"not-booking"` unless `Booking`. Goes to `Uncertain`. The slot **stays taken**, because the write may have happened.
 - `Resolve(found: bool)`: rejects `"not-uncertain"` unless `Uncertain`. When the owner found the event, goes to `Booked`; otherwise goes to `Failed` and frees the slot.
 - `Reset()`: rejects `"not-settled"` unless the phase is `Booked`, `Conflict`, `Unclear` or `Failed`. Goes to `Idle`.
 
@@ -48,13 +48,13 @@ Actions and handlers:
 
 ## Effect
 
-`effect write(slot: 0..3)`: kind `"calendar.write"`, labels `egress:external`, target `egress` the exact URL `https://calendar.example/v1/events`, class `irreversible`, retry `attempts 3, base 200ms, timeout 10s`. Outcomes: `ok` to `Written`, `failed` to `WriteFailed`, `exhausted` to `WriteUncertain`.
+`effect write(slot: 0..3)`: kind `"calendar.write"`, labels `egress:external`, target `egress` the exact URL `https://calendar.example/v1/events`, class `irreversible`, retry `attempts 1, base 200ms, timeout 10s`. Outcomes: `ok` to `Written`, `failed` to `WriteFailed`, `exhausted` to `WriteUncertain`.
 
-**Keyed.** The write is irreversible, so the handler sends the intent's idempotency key (`ctx.idempotencyKey`) as the request header `idempotency-key`. Every attempt of one intent sends the same key, and two intents send different keys.
+**Attempted once (G1, PS23.4; finding 31).** The calendar service documents no idempotency key, so the write is not retried: a retry whose first answer was lost could book the slot twice, and the check reports such a write as `PL4003 UNGUARDED_RETRY` (PS23.5). With one attempt, `failed` is a refusal the service made (the slot was not booked) and `exhausted` is an end the program cannot read (the slot may be booked), which goes to a person through `Uncertain` and `Resolve`. The handler still sends the intent's idempotency key (`ctx.idempotencyKey`) as the header `idempotency-key`; nothing documents that the service honours it, so the program does not rely on it.
 
 ## Host handler
 
-`host/handlers.ts` exports `write(payload, caps, ctx)`. It imports its types with a type-only import from `../.poly/build/booker.Calendar/types.js`. It posts, through `caps.egress.post`, to `https://calendar.example/v1/events` the body `{ day, hour }` (the slot as `Math.floor(slot / 2)` and `slot % 2`) with the header `idempotency-key`. Status 200 or 201 returns `{ ok: true }`. A status from 400 to 499 other than 429 throws an error with `permanent: true`, so the effect fails at once. Any other status, or a thrown transport error, throws an ordinary error and the effect is retried.
+`host/handlers.ts` exports `write(payload, caps, ctx)`. It imports its types with a type-only import from `../.poly/build/booker.Calendar/types.js`. It posts, through `caps.egress.post`, to `https://calendar.example/v1/events` the body `{ day, hour }` (the slot as `Math.floor(slot / 2)` and `slot % 2`) with the header `idempotency-key`. Status 200 or 201 returns `{ ok: true }`. A status from 400 to 499 other than 429 throws an error with `permanent: true`, so the effect fails at once. Any other status, or a thrown transport error, throws an ordinary error; the effect has one attempt, so it ends `exhausted` and is not sent again.
 
 ## Recorded provider
 
@@ -99,8 +99,8 @@ End-to-end test (`test/after/ex-appointment-booker-e2e.test.mjs`), over recorded
 
 - main path: `Ask` with `tue-nine` ends `Booked`, with exactly one POST carrying a key; `Reset` returns to `Idle`;
 - refusal: `tue-nine-again` ends `Conflict` with no second POST; `vague` ends `Unclear` with no POST;
-- keyed: a first attempt answered 503 and a second 201 sends two requests with the same key, and the next booking sends another key;
-- failure and uncertainty: a 409 ends `Failed` and frees the slot (the same request books afterwards); three 503s end `Uncertain` with the slot still taken, and `Resolve(found: true)` ends `Booked`;
+- one attempt: a write answered 503 is sent exactly once (a later 201 in the script is never asked for), and the booking ends `Uncertain` with the slot still taken;
+- failure and uncertainty: a 409 ends `Failed` and frees the slot (the same request books afterwards); after a 503, `Resolve(found: true)` ends `Booked`, and on another calendar `Resolve(found: false)` ends `Failed` and frees the slot;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`).
 
 The example has no escalation to a person.
@@ -111,12 +111,16 @@ The example has no escalation to a person.
 - The policy holds a second obligation, `parse-while-parsing`, a rule that denies `decision.parse` unless the calendar is `Parsing`. Without a rule that names the decision, polycheck reports `PL7001` (a private-text egress region with no gate crossed).
 - The recorded answers are read from `examples/appointment-booker/recorded/answers.json`, as the file table says. The test writer's first version read a fixture elsewhere and used `rt.state`; the implementer corrected those, the refusal test (which asked for a taken slot on a fresh calendar) and two over-strict assertions after the code existed.
 
+## Amendment on v1.3.1 (finding 31)
+
+v1.4 is built on v1.3.1, whose retry-safety rule (PS23.5) reports an irreversible effect that may be attempted more than once with no documented key as `PL4003`. The write was `attempts 3`, with a key the handler sent and no service documentation behind it, so the program and its defect copy were `FINDINGS` with `PL4003` beside their expected lines. The owner ruled: a target that documents an idempotency key is declared with its window; otherwise the effect is attempted once and an uncertain outcome goes to a person. The calendar service documents no key, so the write is `attempts 1`. The program already sent an unanswered write to a person (`Uncertain`, `Resolve`), so no state or action changes. The tests change where they asserted a retry. The expected lines, the defect's witness (6 steps) and the properties do not change.
+
 ## Conclusion
 
-The property is small and exact: one comparison in `Parsed` is all that stands between the calendar and a double booking, and the check finds its absence in six steps. The keyed write and the held slot on an unanswered write are what the check cannot see, so the end-to-end test shows them.
+The property is small and exact: one comparison in `Parsed` is all that stands between the calendar and a double booking, and the check finds its absence in six steps. A write attempted once, and the held slot on an unanswered write, are outside that property, so the retry-safety rule and the end-to-end test cover them.
 
 ## Glossary
 
 - **Slot:** one of four times, `day * 2 + hour`.
-- **Keyed write:** an irreversible effect whose request carries the intent's idempotency key, so a retry cannot book twice.
-- **Uncertain:** the write was tried to its limit with no answer; the slot stays taken until a person resolves it.
+- **Attempted once:** an irreversible effect with `retry { attempts 1 }`: an end the program cannot read is never followed by a second request (G1, PS23.4).
+- **Uncertain:** the one attempt of the write ended with no answer the program can trust; the slot stays taken until a person resolves it.

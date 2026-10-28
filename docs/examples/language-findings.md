@@ -254,6 +254,33 @@ Both checks were tiny (7 and 76 states, about a second each); nothing came near 
 - **Appeared in.** a polywatch review of the batch 5 change; the code is from M5a.
 - **Fixed (rule 7a).** PT8.4 says a stage reads `CLEAN` only when it holds no error diagnostic; `test/policy-consistency.test.mjs` holds it for the m2 case; the stage is `REFUSED` whenever it pushes `PL6001`.
 
+## v1.4 rebuilt on v1.3.1
+
+The ten examples were written on a branch cut from v1.1.0, which never had v1.2 or v1.3. v1.4 is their work cherry-picked onto v1.3.1 (origin/main `2095b24d`) and measured again there.
+
+### 31. The v1.3 retry-safety rule caught five of the ten new examples
+
+- **Symptom.** On v1.3.1, ten of the twenty example sources the sweep reads no longer had the verdict their first line states: the clean program and the seeded defect of appointment-booker, expense-approval, incident-oncall, order-fulfilment and subscription-cancel. Each gained `PL4003 UNGUARDED_RETRY` (PS23.5), once per effect: eight irreversible effects declared `retry { attempts 3 }` with no `idempotent` declaration. Their handlers sent the intent's key as `idempotency-key`, and the specs called the effects keyed, but no target documents that it honours a key, and none of the recorded services reads the header. A key that nothing documents is the assumption K17 names, and v1.3.0's double refund is what it costs. The other five examples have no irreversible effect with more than one attempt.
+- **Appeared in.** the first run of the examples on the v1.4 branch: the sweep `test/examples-expected.test.mjs` and the five light tests, each failure naming `PL4003`.
+- **Ruling (owner).** Decide effect by effect. A target that documents an idempotency key is declared with its window (G2). Otherwise the effect is attempted once (G1) and an uncertain outcome goes to a person.
+- **Decision, effect by effect.** Every target is a made-up `*.example` service, and no spec names a real provider or a documented window, so all eight are attempted once. Writing a documented key into a spec to reach G2 would invent K17's evidence. With one attempt, `failed` is a refusal the target made, and `exhausted` is an end the program cannot read.
+
+  | Example | Effect | Before, on `exhausted` | After, on `exhausted` |
+  |---|---|---|---|
+  | appointment-booker | `write` | `Uncertain`, a person's `Resolve(found)` | the same (only `attempts 1`) |
+  | expense-approval | `pay` | `Held`, terminal: nobody could act | `Held`, left by a person's `Resolve(paid)` with an approver's claims |
+  | incident-oncall | `page` | escalated at once, as if nobody had been paged | `Unconfirmed`, the ack timer still armed: the engineer acknowledges or the timer escalates to the next person |
+  | incident-oncall | `escalate` | `Unreached`, as if nobody had been reached | `EscalationUnconfirmed`, a person's `Confirm(reached)` |
+  | order-fulfilment | `ship` | the compensations ran, refunding an order that may have shipped | `ShipUnknown`, a person's `Resolve(done)` |
+  | order-fulfilment | `refund` | `Stuck`, as if no refund had been made | `RefundUnknown`, a person's `Resolve(done)` |
+  | subscription-cancel | `offer` | cancelled as if no offer had been made | `OfferUnknown`, a person's `Resolve(done)` |
+  | subscription-cancel | `cancel` | `Stuck`, as if billing had refused | `CancelUnknown`, a person's `Resolve(done)` |
+
+- **What the rule found beyond the retry.** In three of the five programs (incident-oncall, order-fulfilment, subscription-cancel), an `exhausted` completion went to the same handler as a refusal, which reads a lost answer as a definite failure: the order that may have shipped was refunded. In a fourth (expense-approval), it ended in a terminal state nobody could leave. The rule's finding was about the second attempt; fixing it made the first attempt's uncertainty visible.
+- **Liveness.** Where a person settles an uncertain outcome inside a liveness property (incident-oncall's escalation, subscription-cancel's offer and cancellation), the person's action joins the fair set, as an assumption printed with the property, like the timers. The uncertain completions are not fair.
+- **Left open.** order-fulfilment's charge is `compensable`, which PS23.5 does not cover, and keeps three attempts with an undocumented key. A lost answer there can still charge twice, and an exhausted charge still cancels as if nothing was taken. The README says so. Extending the rule to compensable effects is a question for proposal 3 (retry safety as an effect type).
+- **Fixed (rule 7a).** The five specs were amended first, then the tests, by a separate writer, then the programs, their defect copies and the READMEs. The expected lines, the defect witnesses and the properties' names are unchanged.
+
 ## Conclusion
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.
