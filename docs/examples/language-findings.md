@@ -296,6 +296,8 @@ The ten examples were written on a branch cut from v1.1.0, which never had v1.2 
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.
 
+After five batches and the move onto v1.3.1 there are thirty-one. The later ones add three kinds. Some are defects of the toolchain that the examples or an audit exposed, each fixed under rule 7a with a test that failed first: a scope that governed nothing (20), a glob scope (24), the sweep a refused source broke (26), a stage reading CLEAN beside an error (29, and the audit of all nineteen stages, 30). Some are the language costing more than it should, logged with a proposal (15, 17, 21). And one is a rule doing its work: v1.3's retry-safety rule caught five of the ten examples and a fixture that trusted a key no service documents (31), and fixing it showed where a lost answer had been read as a refusal.
+
 ## Glossary
 
 - **Cut point:** a constant a parameter is compared with; the check explores the values on each side of it instead of every value (S458).
