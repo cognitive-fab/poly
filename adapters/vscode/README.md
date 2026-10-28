@@ -4,21 +4,20 @@ This adapter colours poly modules in VS Code: `.poly` files, and so `.policy.pol
 
 ## Install
 
-Copy this folder into VS Code's extensions folder, under the name `cognitive-fab.poly-1.4.0`, then run **Developer: Reload Window**.
-
-In Windows PowerShell, from the repository root:
-
-```powershell
-Copy-Item -Recurse adapters\vscode "$env:USERPROFILE\.vscode\extensions\cognitive-fab.poly-1.4.0"
-```
-
-In a POSIX shell (macOS, Linux, Git Bash):
+Package the folder as a `.vsix` and install that with VS Code's command line, then run **Developer: Reload Window**. From the repository root, in Windows PowerShell or a POSIX shell:
 
 ```sh
-cp -r adapters/vscode ~/.vscode/extensions/cognitive-fab.poly-1.4.0
+cd adapters/vscode
+npx @vscode/vsce package --no-dependencies --skip-license --out ../../poly-1.4.0.vsix
+cd ../..
+code --install-extension poly-1.4.0.vsix --force
 ```
 
-To update it, remove that folder and copy it again. To remove it, delete the folder and reload. A `.vsix` is not needed for a local install; `npx @vscode/vsce package` in this folder makes one if it is ever shared.
+`--no-dependencies` keeps `vsce` from asking npm for a dependency tree the adapter does not have (without it, the package held no files); `--skip-license` because the repository has no licence file. The `.vsix` can be deleted afterwards. `code --list-extensions --show-versions` lists `cognitive-fab.poly@1.4.0` once it is installed.
+
+Copying this folder into the extensions folder (`.vscode/extensions`) is not enough. VS Code records each extension it installs in that folder's `extensions.json`, and marks a folder it did not install as removed: its log says `Marked extension as removed cognitive-fab.poly-1.4.0`, and the files stay grey.
+
+To update it, package and install again. To remove it, `code --uninstall-extension cognitive-fab.poly`.
 
 ## What it colours
 
@@ -65,3 +64,4 @@ The adapter gives poly colour in VS Code with nothing to build and nothing to ru
 - **Scope:** a dotted name such as `keyword.control.poly` that a colour theme maps to a colour.
 - **Contextual keyword:** a word that is a keyword only where the grammar expects one, and a name elsewhere.
 - **Leading word:** a keyword this grammar colours only as the first word of a line.
+- **.vsix:** a packaged VS Code extension, a zip file that `code --install-extension` installs and registers.
