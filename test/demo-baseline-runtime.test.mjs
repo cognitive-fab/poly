@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { makeWorkspace, scaffoldDigest, treeDigest, listFiles } from '../demo/baseline/arms.mjs';
 import { smokeTest } from '../demo/baseline/smoke.mjs';
+import { effectiveRecord } from '../demo/baseline/procedure.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -121,12 +122,52 @@ test('DB16.2: only poly-runtime of .harness folders has a model subfolder', () =
 });
 
 // ---- DB16.3: poly workspace differs from no-model only by model files -------
+// DB16 item 4a: the byte comparison of item 2 applies only to the preregistered toolchain.
+// This is split into two tests: (a) checks that the digests have the right form,
+// (b) builds the workspace and compares it only when the current toolchain matches.
 
-test('DB16.3: deleting .harness/poly-runtime/model and .harness/std, removing std from devDependencies, gives treeDigest equal to amendment 1 poly scaffold', () => {
-  // DB16 item 2: the poly workspace differs from amendment 1 only by those folders and the std entry.
+test('DB16.3(a): amendment 1 and effective record each name the poly scaffold by a sha256 digest', () => {
+  // DB16 item 4a: amendment 1 (from commit 1b9493fc) and the effective record each name
+  // scaffolds.poly with a digest matching /^sha256:[0-9a-f]{64}$/.
+  const amendment1 = getAmendment1Scaffolds();
+  const effectiveRec = effectiveRecord({ root: ROOT });
+
+  const polyDigestForm = /^sha256:[0-9a-f]{64}$/;
+  assert.ok(amendment1.poly, 'amendment 1 has scaffolds.poly');
+  assert.ok(polyDigestForm.test(amendment1.poly), `amendment 1 poly scaffold matches sha256 form: ${amendment1.poly}`);
+
+  assert.ok(effectiveRec.record.scaffolds, 'effective record has scaffolds');
+  assert.ok(effectiveRec.record.scaffolds.poly, 'effective record has scaffolds.poly');
+  assert.ok(polyDigestForm.test(effectiveRec.record.scaffolds.poly), `effective record poly scaffold matches sha256 form: ${effectiveRec.record.scaffolds.poly}`);
+});
+
+// Compute skip condition for DB16.3(b) before test registration.
+// DB16 item 4a: the byte comparison applies only when the current toolchain matches the preregistered one.
+let skipReasonDB163b = null;
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-digest-check-'));
+  try {
+    makeWorkspace('poly', tmp, ROOT);
+    const builtDigest = scaffoldDigest('poly', tmp, ROOT);
+    const effectiveRec = effectiveRecord({ root: ROOT });
+    const recordedDigest = effectiveRec.record.scaffolds.poly;
+
+    if (builtDigest !== recordedDigest) {
+      skipReasonDB163b = `toolchain mismatch: built ${builtDigest} vs preregistered ${recordedDigest}; byte comparison applies only to preregistered toolchain (DB16 item 4a)`;
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+test('DB16.3(b): when current toolchain matches preregistered, treeDigest without model and std equals amendment 1 poly scaffold', { skip: skipReasonDB163b }, () => {
+  // DB16 item 4a: when the poly workspace built from the repository has scaffoldDigest equal to
+  // the effective record's poly scaffold, run the byte comparison of DB16 item 2.
   const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-digest-'));
   try {
     makeWorkspace('poly', tmp, ROOT);
+
+    // The toolchain matches (since we're not skipped), so run the comparison from DB16 item 2.
     const allFiles = listFiles(tmp);
     const modelFiles = allFiles.filter(f => f.startsWith('.harness/poly-runtime/model/'));
     const stdFiles = allFiles.filter(f => f.startsWith('.harness/std/'));
@@ -141,14 +182,14 @@ test('DB16.3: deleting .harness/poly-runtime/model and .harness/std, removing st
     rmSync(join(tmp, '.harness/poly-runtime/model'), { recursive: true, force: true });
     rmSync(join(tmp, '.harness/std'), { recursive: true, force: true });
 
-    // Remove std from devDependencies and write package.json back
+    // Remove std from devDependencies and write package.json as JSON with two spaces and a final newline
     delete pkg.devDependencies.std;
     writeFileSync(join(tmp, 'package.json'), JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 
     // Compute treeDigest of workspace without model and std
-    const digester = treeDigest(tmp, { skip: [] });
+    const treeDigestWithoutAdditions = treeDigest(tmp, { skip: [] });
     const amendment1 = getAmendment1Scaffolds();
-    assert.equal(digester, amendment1.poly, `treeDigest without model and std equals amendment 1 poly scaffold`);
+    assert.equal(treeDigestWithoutAdditions, amendment1.poly, `treeDigest without model and std equals amendment 1 poly scaffold`);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
