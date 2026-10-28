@@ -32,7 +32,7 @@ The examples carry 143 tests (light and end to end). `examples/README.md` has th
 ## PL6504, PL6505 and PL6001
 
 - **`PL6504 POLICY_SCOPE_UNMATCHED` (language finding 20).** A policy whose scope matches no module, no machine id of the program (a channel's conversation, a route and a budget are modules of their own) and no configuration instance's `scope` governs nothing, and used to check `CLEAN` with every region "unreachable". In a project that holds a machine it is now an error: verdict `REFUSED`, at the policy's scope line, and the policy's later stages are not run. PT8.4 says it; `test/policy-scope-unmatched.test.mjs` holds it.
-- **`PL6505 POLICY_SCOPE_GLOB` (finding 24).** A scope with `*` was matched by the region check and then failed lowering with the engine's schema message (verdict `ERROR`). It is refused with its own code and a message that says a glob is not a scope. Glob scopes are proposed for v2.0 (P12).
+- **`PL6505 POLICY_SCOPE_GLOB` (finding 24).** A scope with `*` was matched by the region check and then failed lowering with the engine's schema message (verdict `ERROR`). It is refused with its own code and a message that says a glob is not a scope. Glob scopes are proposed for v2.0 (proposal 27).
 - **`PL6001` and the stage verdict.** When Polyaxion did not serve a scope only because of its m2 check, the `policy-admission` stage read `CLEAN` beside the `PL6001` diagnostic. A stage reads `CLEAN` only when it holds no error diagnostic: the stage is now `REFUSED` in that case too.
 
 ## What the full run found
@@ -61,16 +61,16 @@ Two shared helpers changed for the new examples: `checkExample` names its projec
 
 `docs/proposals/v2.0.md`, each a request for a ruling and none a change:
 
-- **P1** a way to declare a decision gated; **P2** a check-time diagnostic when a decision lacks an audience; **P3** the cut-point reduction for stored values compared with constants.
-- **P4** the fail-safe direction of an effect ("page when unsure"); **P5** one confidence scale; **P6** a step-by-step settle in the test API; **P7** an ignored completion.
-- **P8** a static check that a workflow's orders fit its run cap; **P9** an audience ceiling on a decision; **P10** the static flow from a source into a decision's inputs, against that ceiling.
-- **P11** an unknown usage key is a failed call, not a charge at the highest price; **P12** glob scopes for a policy.
+- **16** a way to declare a decision gated; **17** a check-time diagnostic when a decision lacks an audience; **18** the cut-point reduction for stored values compared with constants.
+- **19** the fail-safe direction of an effect ("page when unsure"); **20** one confidence scale; **21** a step-by-step settle in the test API; **22** an ignored completion.
+- **23** a static check that a workflow's orders fit its run cap; **24** an audience ceiling on a decision; **25** the static flow from a source into a decision's inputs, against that ceiling.
+- **26** an unknown usage key is a failed call, not a charge at the highest price; **27** glob scopes for a policy.
 
 ## Known limits
 
 - **The domains were reduced where the check could not finish.** The expense amount is in units of 50 euros, `0..10`: a stored `0..500` compared with two thresholds exhausted the default 4 GB heap (3.3 GB in use, no verdict). Whether 8 GB would have finished it was not tried. The booker has 4 slots, the order configuration one unit of stock and two orders, the research configuration two workers and a transit bound of 4. Each README says so under what is not checked, and none of the others came near a memory limit.
 - **A larger heap is advice, not a feature.** A re-execution of `poly check` with 8 GB was specified, built and reverted: it would make the command line start a process, which the import-boundary check forbids on a check path. No exception was made; the READMEs of the larger examples mention `NODE_OPTIONS=--max-old-space-size=8192`.
-- **The static check stops at data leaving.** It follows a taint to an effect's recipient, a message and a region; it does not follow a source into a decision, and a seeded defect that does (the support-drafts one) is `CLEAN` beside the program's own policy, held at run time by the gate. P9 and P10 propose the fix.
+- **The static check stops at data leaving.** It follows a taint to an effect's recipient, a message and a region; it does not follow a source into a decision, and a seeded defect that does (the support-drafts one) is `CLEAN` beside the program's own policy, held at run time by the gate. Proposals 24 and 25 propose the fix.
 - **A finding runs only with a signed acceptance.** The defect copies are admitted in the end-to-end tests as an owner who accepted the finding would run them.
 - **No example calls a model or the network.** Every provider is recorded; a live run is the owner's.
 - **Seven tests fail on this checkout and failed at the commit before the work.** They are environmental: the experiment tree guard, a model-account test and `ANTHROPIC_API_KEY` in the environment, two freeze tests that need `experiments/m3` (now a submodule), a polyrun tombstone test waiting on E1 (reported as a pending test), and a test about being on `main`. They were run at `20779b15` and failed there too. The parallel suite on this release is 3,021 tests with 3,010 passing, five failing and one pending (the polyrun test); `test/examples-expected.test.mjs` passes 42 of 42; the serial after-suite ran 90 tests with one failure, the model-account test, before the last two fixes of this release (PL6505 and the PL6001 stage verdict), which touch the policy front end only and were checked by the parallel suite.
@@ -89,4 +89,4 @@ The examples show one thing from ten sides: the check finds a defect that sits i
 - **Acceptance:** a person's signed record that a finding is accepted; a program with findings runs only with one for each (PT12.5).
 - **Recorded traffic:** the answers of a provider, a service or a device written down in advance, so a run needs none of them.
 - **Rule 7a:** the order of work: the specification first, then tests from someone who has read only it, then the code.
-- **Proposal (P1 to P12):** a request for a ruling on a change to the language or the toolchain, written down and not built.
+- **Proposal (16 to 27 in `docs/proposals/v2.0.md`):** a request for a ruling on a change to the language or the toolchain, written down and not built.

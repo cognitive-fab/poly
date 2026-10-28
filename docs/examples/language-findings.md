@@ -9,21 +9,21 @@ Where the language or its toolchain got in the way while writing the ten example
 - **Symptom.** A decision labelled `egress:external, read:private` makes the check report `PL7001` ("region credential-egress is reached with no gate crossed: decision.parse"), though the program holds no credential. The message says a policy that names the decision would gate it.
 - **Appeared in.** appointment-booker (first check of the program with its policy), then expense-approval.
 - **Workaround.** An obligation that names `decision.<name>`, a phase guard that denies the decision outside the phase that asks for it. The rule is arbitrary: nothing in it is about the content.
-- **Proposed fix.** A way to declare a decision gated, so that the declaration, not an invented rule, is what the region reads (v2.0 proposal P1).
+- **Proposed fix.** A way to declare a decision gated, so that the declaration, not an invented rule, is what the region reads (v2.0 proposal 16).
 
 ### 2. A decision over a stored body fails closed, silently, without an audience
 
 - **Symptom.** The host stores a request with `rt.putContent` and dispatches an action carrying it. The decision's `failed` outcome runs with the reason "text names a body with no taint record (S302)". The program checks `CLEAN`; nothing at check time says the decision cannot succeed.
 - **Appeared in.** appointment-booker, at the first end-to-end run.
 - **Workaround.** `audience { public < patient }` (and `staff` in expense-approval), whose only effect here is that the runtime keeps a taint record.
-- **Proposed fix.** A check-time diagnostic when a decision takes a `Content` and the program declares no audience (v2.0 proposal P2).
+- **Proposed fix.** A check-time diagnostic when a decision takes a `Content` and the program declares no audience (v2.0 proposal 17).
 
 ### 3. A stored range is not cut at its comparison constants
 
 - **Symptom.** `amount: 0..500`, stored by a handler and compared with 0 and 200, makes the check exhaust memory (3.3 GB, over 80 s, no verdict). With `0..10` it takes 25 s and 1,231 states; with `0..3`, 6 s and 370 states. The instance line prints the full range, so the field is explored value by value. Cut points (S458) reduce a parameter, not a value the state keeps.
 - **Appeared in.** expense-approval.
 - **Workaround.** The amount is in units of 50 euros, `0..10`, stated in the README under what is not checked.
-- **Proposed fix.** Extend the cut-point reduction to a stored value that is only compared with constants and copied, with the same read-back and translation-validation conditions as S458 (v2.0 proposal P3).
+- **Proposed fix.** Extend the cut-point reduction to a stored value that is only compared with constants and copied, with the same read-back and translation-validation conditions as S458 (v2.0 proposal 18).
 
 ### 4. A range type and a check clause refuse an outside value differently
 
@@ -100,7 +100,7 @@ No check in this batch came near the 8 GB limit: the largest was 126 global stat
 - **Symptom.** `on PageSent { if status == Paging { status' = Paged } }` is `PL2201` ("can complete with no write, no effect and no rejection", PT4.4): the `if` has a path that does nothing. The alternative, a `require`, makes a late completion a rejected one, which is consumed and never completes again, so the machine's liveness assumption (S126, S463) is open. A page can be acknowledged before its answer, so the case is real; a review found it.
 - **Appeared in.** incident-oncall (a review of the batch 2 commit).
 - **Workaround.** A field `answered`, written on every path, so the handler always writes. It doubles the state count (25 to 35) and carries no meaning the program uses.
-- **Proposed fix.** A statement that says a completion was seen and changes nothing (`ignore`), accepted by PL2201 and recorded by the journal, or an exemption for a completion handler whose guard is an `if` on the status (v2.0 proposal P7).
+- **Proposed fix.** A statement that says a completion was seen and changes nothing (`ignore`), accepted by PL2201 and recorded by the journal, or an exemption for a completion handler whose guard is an `if` on the status (v2.0 proposal 22).
 
 ## Batch 3: pr-reviewer, support-drafts
 
@@ -118,7 +118,7 @@ Both policy-dependent findings the batch was asked to show need nothing beyond t
 - **Symptom.** With a run cap of 0.20 and an order cap of 0.10 a review held two orders, not four, though the agent reported small usage: the settled record reads `reserved 100000, actual 100000`. The reported usage is kept for reconciliation (`reconciled: "under"`) and nothing reads it.
 - **Appeared in.** pr-reviewer (the spec's budget arithmetic was wrong; the test writer saw it).
 - **Workaround.** The run cap is the number of orders on the longest path times the order cap: order cap 0.05, run cap 0.25. A month cap makes the refusal visible.
-- **Proposed fix.** A check-time finding when a workflow's longest path of orders costs more than its run cap (the path is known), and a README sentence in PT24.6 that the spend is the cap (v2.0 proposal P8).
+- **Proposed fix.** A check-time finding when a workflow's longest path of orders costs more than its run cap (the path is known), and a README sentence in PT24.6 that the spend is the cap (v2.0 proposal 23).
 
 ### 16. (Retracted) The check was said to need a large heap
 
@@ -133,7 +133,7 @@ Both policy-dependent findings the batch was asked to show need nothing beyond t
 - **Symptom.** In `support-drafts-defect.poly` the owner's notes are given to the external model's decision. Beside the program's own policy the check says `CLEAN`: the gate denies the notes at run time, and nothing at check time follows the items from the retrieval to the decision. Beside a policy without the audience rule the finding is `PL7001` and `PL6503`, and it is the policy's, not the program's. A change of the decision's provider is invisible to both, because a policy sees a decision's kind and taint, not its provider.
 - **Appeared in.** support-drafts.
 - **Workaround.** The rule, the `never` that proves it, and the end-to-end test that shows the gate saying no. The README states the limit.
-- **Proposed fix.** A declared audience ceiling on a decision (`audience customer`), checked statically against the classes of the sources its `Items` arguments come from, so the defect is a finding of the program (`PL6831`) without a policy (v2.0 proposal P9).
+- **Proposed fix.** A declared audience ceiling on a decision (`audience customer`), checked statically against the classes of the sources its `Items` arguments come from, so the defect is a finding of the program (`PL6831`) without a policy (v2.0 proposal 24).
 
 ### 18. Two effects of one machine cannot retrieve the same source
 
@@ -214,7 +214,7 @@ The stopping rule (a liveness or saga check over 8 GB, or with no verdict) did n
 - **Symptom.** `scopeGoverns` accepts a scope with `*` (`fb_*`) and the region check uses it, but lowering the policy gives it the id `fb_*`, which Polyaxion's schema refuses (`policy.id must match /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/`): the project's verdict is `ERROR`. Found while testing finding 20.
 - **Appeared in.** test/policy-scope-unmatched.test.mjs.
 - **Workaround.** None in the examples; their scopes are module names.
-- **Fixed (rule 7a).** PT8.4 now says a glob is not a scope, `test/policy-scope-unmatched.test.mjs` holds it, and `PL6505 POLICY_SCOPE_GLOB` refuses it at the scope line, before lowering, with a message that names the scope and says it is a glob. Glob scopes are proposed for v2.0 (P12).
+- **Fixed (rule 7a).** PT8.4 now says a glob is not a scope, `test/policy-scope-unmatched.test.mjs` holds it, and `PL6505 POLICY_SCOPE_GLOB` refuses it at the scope line, before lowering, with a message that names the scope and says it is a glob. Glob scopes are proposed for v2.0 (proposal 27).
 
 ## Batch 5: subscription-cancel, flash-controller
 
@@ -225,7 +225,7 @@ Both checks were tiny (7 and 76 states, about a second each); nothing came near 
 - **Symptom.** In batch 5 the subscription writer asserted `Offering` after a settle that had already sent the offer, and dispatched `OfferFailed` by hand; the flash writer used the recorded device as one object, where the spec returns `{ calls, device }`. This is finding 11 again: of five batches, every one had a writer assert a state a run never rests in or dispatch a completion the runtime owns.
 - **Appeared in.** subscription-cancel, flash-controller.
 - **Workaround.** Corrected after the code existed; the brief to each writer states the rule.
-- **Proposed fix.** P6 (a step-by-step settle) and, with it, a refusal that says why: a dispatch of a decision's or an effect's completion by a caller is refused with its rule (K9, K10), and the message could name the way to script the outcome instead (a recorded provider, a fake transport that answers 422).
+- **Proposed fix.** Proposal 21 (a step-by-step settle) and, with it, a refusal that says why: a dispatch of a decision's or an effect's completion by a caller is refused with its rule (K9, K10), and the message could name the way to script the outcome instead (a recorded provider, a fake transport that answers 422).
 
 ### 26. A source that the type stage refuses breaks every sweep over the examples
 
