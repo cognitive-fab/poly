@@ -1688,6 +1688,19 @@ The language server publishes the same diagnostics as `poly check` stages 0 to 2
 
 **Tests.** `test/check-cache.test.mjs` checks every example cold, warm and with `--no-cache` and compares the findings, witnesses and verdicts exactly. Because those three runs read one program, they cannot show a key that misses an input; the same file also warms the cache on a program, edits it (a handler body of one machine, another machine's action, an enum value, a configuration's instances, a line shift above a machine) and compares the warm check of the edited program with its `--no-cache` check. `test/check-goals.test.mjs` and `test/check-defects.test.mjs` cover `--goals` and `--defects`. `test/fixtures/agentapp/` holds a copy of agentapp's program (as text, `agentapp.poly.txt`: one check of it needs more heap than the suite's sweeps of every source have), its seeded defects and its probes as goals (`experiments/` is a submodule of another repository, so the fixture lives here), and `scripts/bench-check-speed.mjs` measures, one process at a time, a check without the cache, a cold one with the goals, a warm one, one after a change to one machine, and one seeded defect, and checks that the first three reports agree.
 
+**Measured (2026-10-29, `scripts/bench-check-speed.mjs`, one process at a time on a 22-CPU, 63 GB Windows machine, v1.4.0 with this section built).** The fixture is agentapp at 5842383: nine machines, ten configurations, 32 goals, 17 seeded defects.
+
+| Step | What it checks | Time |
+|---|---|---|
+| without the cache | every machine and every configuration, `--no-cache` | 1,289 s |
+| cold | the same and the 32 goals, filling an empty cache | 1,219 s |
+| warm | the same again | 2.2 s |
+| one machine changed | a rejection reason of Stock: Stock and the four configurations that run it are checked again | 190.5 s |
+| one defect in Stock | `stock-oversold`, kept in `two-orders` | 5.6 s |
+| one defect in Order | `cancel-keeps-reservation`, no configuration kept | 418.1 s |
+
+The cold and warm reports agree with the one made without the cache. Every goal is reached, in the same exploration as the invariants. Without the cache, the effects stage of Order (387 s), of Incident (318 s) and of Run (35 s) is 740 s of the 1,289; the configurations `define` (178 s) and `order-parts` (162 s) are most of the rest. agentapp's build reported the same effects stages at 1,994 s and 1,411 s while 18 checks ran at once. A defect in Order pays Order's stages again, effects included; that floor is polyrun's `check-effects`, an engine's to lower. On v1.4.0 agentapp's program is `FINDINGS`: `PL4003 UNGUARDED_RETRY` on Run's `publish` (line 864).
+
 ## PT15. Host runtime API (TypeScript)
 
 ```ts
