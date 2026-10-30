@@ -17,8 +17,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { cpus, tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+assertNotExperimentTree(ROOT);
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
 const FIXTURE = join(ROOT, 'test', 'fixtures', 'agentapp');
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
@@ -27,7 +29,11 @@ const defect = arg('--defect', 'stock-oversold');
 const out = arg('--out', null) ?? mkdtempSync(join(tmpdir(), 'poly-bench-'));
 mkdirSync(out, { recursive: true });
 const cache = join(out, 'cache');
-const program = join(FIXTURE, 'agentapp.poly');
+// The fixture is kept as text (agentapp.poly.txt), not as a source of this repository: the suite checks every .poly
+// source with its default heap, and one check of agentapp needs more (agentapp runs it with 6 GB). Each run copies it.
+const program = join(out, 'program', 'agentapp.poly');
+mkdirSync(dirname(program), { recursive: true });
+writeFileSync(program, readFileSync(join(FIXTURE, 'agentapp.poly.txt'), 'utf8'));
 const goals = join(FIXTURE, 'goals.json');
 
 // The one-machine change: a rejection reason of Stock, which changes Stock's handler and nothing else.
