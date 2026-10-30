@@ -55,6 +55,23 @@ test('PT14a: a finding the unpatched program reports too, in the same unit about
   assert.equal(judgeDefect(elsewhere, FOUND, baseKeys(unpatched)), false, 'a finding about something else is the defect\'s');
 });
 
+// Ruled 2026-10-30: the unpatched program is checked in each defect's own configurations. In chat-ruled-out-plain, Chat's
+// never free-when-closed is a finding alone and ruled out by the configuration pair (S178). A defect that keeps no
+// configuration sees it, and so does the unpatched program checked with none; checked with pair, it would not, and the
+// finding would be read as the defect's.
+test('PT14a: each defect is judged against the unpatched program checked in its own configurations', async () => {
+  const dir = scratch();
+  try {
+    const CHAT = join(ROOT, 'test', 'fixtures', 'm9', 'chat-ruled-out-plain.poly');
+    const alone = { name: 'never-sent', expected: 'FINDING PL3001', finding: 'never-sent', keep: [], edits: [{ find: '  never free-when-closed:', replace: '  invariant never-sent: !sent\n  never free-when-closed:' }] };
+    const paired = { ...alone, name: 'never-sent-paired', keep: ['pair'] };
+    const out = await checkDefects(CHAT, [alone, paired], { root: dir, cache: join(dir, 'cache') });
+    assert.deepEqual(out.map((d) => [d.name, d.found]), [['never-sent', true], ['never-sent-paired', true]]);
+    assert.ok(out[0].preexisting.some((d) => d.code === 'PL3002' && d.property === 'free-when-closed'), 'Chat\'s never finding is set aside, from the unpatched check with no configuration');
+    assert.deepEqual(out[1].preexisting, [], 'with pair the finding is ruled out, in the defect\'s check and in its unpatched check');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('PT14a: a defects file that does not fit the source is a usage error before anything is checked', async () => {
   const dir = scratch();
   try {

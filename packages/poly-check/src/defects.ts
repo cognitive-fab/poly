@@ -128,14 +128,19 @@ export async function checkDefects(target: string, specs: DefectSpec[], opts: { 
     return applyDefect(src, d);
   });
   const root = resolve(opts.root ?? process.cwd());
-  // The unpatched program, in every configuration a chosen defect keeps: what it already reports is not a defect's.
-  // Through the cache, this check costs nothing when the program was checked before.
-  const kept = [...new Set(chosen.flatMap((d) => d.keep))];
-  const unpatched = await checkFile(target, { root: join(root, '.poly', 'defects', '.unpatched'), text: src, configs: kept, ...(opts.cache ? { cache: opts.cache } : {}) });
-  if (unpatched.verdict === 'ERROR' || unpatched.verdict === 'NONDETERMINISM') throw new Error(`the unpatched program's check ended in ${unpatched.verdict}: ${unpatched.error ?? ''}`);
-  const base = baseKeys(unpatched);
+  // The unpatched program, once for each distinct keep list, in exactly those configurations: what it already reports is
+  // not a defect's. A check in more configurations than the defect's own could rule out a never finding the defect's
+  // check keeps (ruled 2026-10-30). Through the cache, each costs little once the program was checked before.
+  const listOf = (d: DefectSpec) => [...new Set(d.keep)].sort();
+  const bases = new Map<string, Set<string>>();
+  for (const keep of new Map(chosen.map((d) => [JSON.stringify(listOf(d)), listOf(d)])).values()) {
+    const unpatched = await checkFile(target, { root: join(root, '.poly', 'defects', `.unpatched-${bases.size}`), text: src, configs: keep, ...(opts.cache ? { cache: opts.cache } : {}) });
+    if (unpatched.verdict === 'ERROR' || unpatched.verdict === 'NONDETERMINISM') throw new Error(`the unpatched program's check in [${keep.join(', ')}] ended in ${unpatched.verdict}: ${unpatched.error ?? ''}`);
+    bases.set(JSON.stringify(keep), baseKeys(unpatched));
+  }
   const out: DefectResult[] = [];
   for (const [i, d] of chosen.entries()) {
+    const base = bases.get(JSON.stringify(listOf(d)))!;
     const r = await checkFile(target, { root: join(root, '.poly', 'defects', d.name), text: texts[i], configs: d.keep, ...(opts.cache ? { cache: opts.cache } : {}) });
     const keys = unitKeys(r);
     out.push({ name: d.name, expected: d.expected, ...(d.finding ? { finding: d.finding } : {}), found: judgeDefect(r, d, base), verdict: r.verdict, findings: allDiagnostics(r), preexisting: [...keys].filter(([, k]) => base.has(k)).map(([x]) => x), ...(r.error ? { error: r.error } : {}) });
