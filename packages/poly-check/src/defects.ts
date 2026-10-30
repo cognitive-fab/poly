@@ -30,6 +30,8 @@ export interface DefectResult {
   verdict: CheckReport['verdict'];
   /** Every diagnostic of the patched program's check. */
   findings: Diagnostic[];
+  /** Those of them the unpatched program reports too, which the judgement sets aside. */
+  preexisting: Diagnostic[];
   error?: string;
 }
 
@@ -75,19 +77,37 @@ export function allDiagnostics(r: CheckReport): Diagnostic[] {
   return [...r.diagnostics, ...r.machines.flatMap((m) => m.diagnostics), ...r.configurations.flatMap((c) => c.diagnostics), ...(r.policies ?? []).flatMap((p) => p.diagnostics)];
 }
 
+/** A diagnostic by what it is and where: its code, the unit that reports it, and what it is about. */
+function unitKeys(r: CheckReport): Map<Diagnostic, string> {
+  const about = (d: Diagnostic) => d.property ?? d.field ?? d.at.machine ?? '';
+  return new Map([
+    ...r.diagnostics.map((d) => [d, `${d.code}|file|${about(d)}`] as const),
+    ...r.machines.flatMap((m) => m.diagnostics.map((d) => [d, `${d.code}|machine ${m.machine}|${about(d)}`] as const)),
+    ...r.configurations.flatMap((c) => c.diagnostics.map((d) => [d, `${d.code}|configuration ${c.configuration}|${about(d)}`] as const)),
+    ...(r.policies ?? []).flatMap((p) => p.diagnostics.map((d) => [d, `${d.code}|scope ${p.scope}|${about(d)}`] as const)),
+  ]);
+}
+
+/** The keys of what the unpatched program reports, which a defect's judgement sets aside. */
+export function baseKeys(r: CheckReport): Set<string> {
+  return new Set(unitKeys(r).values());
+}
+
 /**
  * Whether a check found the defect: the expected code on the named property (what the finding is about: its property,
  * field or machine), and nothing else but a bound (PL3901, PL5301), since a fault that makes a counter run away also
- * leaves the range the check was run within. CLEAN expected: the verdict is CLEAN.
+ * leaves the range the check was run within. A finding the unpatched program reports too, in the same unit and about
+ * the same thing, is not the defect's and is set aside. CLEAN expected: the verdict is CLEAN.
  */
-export function judgeDefect(r: CheckReport, d: DefectSpec): boolean {
+export function judgeDefect(r: CheckReport, d: DefectSpec, base: Set<string> = new Set()): boolean {
   if (r.verdict === 'ERROR' || r.verdict === 'NONDETERMINISM') return false;
   if (d.expected === 'CLEAN') return r.verdict === 'CLEAN';
   const code = d.expected.slice('FINDING '.length);
   const named = new RegExp(`(^|[^A-Za-z0-9_-])${escape(d.finding!)}($|[^A-Za-z0-9_-])`);
-  const all = allDiagnostics(r);
+  const keys = unitKeys(r);
+  const all = [...keys.keys()];
   const mine = all.filter((x) => x.code === code && named.test(x.property ?? x.field ?? x.at.machine ?? ''));
-  const other = all.filter((x) => !mine.includes(x) && x.code !== 'PL3901' && x.code !== 'PL5301');
+  const other = all.filter((x) => !mine.includes(x) && x.code !== 'PL3901' && x.code !== 'PL5301' && !base.has(keys.get(x)!));
   return mine.length > 0 && other.length === 0;
 }
 
@@ -107,11 +127,18 @@ export async function checkDefects(target: string, specs: DefectSpec[], opts: { 
     if (missing.length) throw new CheckUsageError(`defect ${d.name} keeps the configuration ${missing.join(', ')}, which the source does not declare`);
     return applyDefect(src, d);
   });
-  const base = resolve(opts.root ?? process.cwd());
+  const root = resolve(opts.root ?? process.cwd());
+  // The unpatched program, in every configuration a chosen defect keeps: what it already reports is not a defect's.
+  // Through the cache, this check costs nothing when the program was checked before.
+  const kept = [...new Set(chosen.flatMap((d) => d.keep))];
+  const unpatched = await checkFile(target, { root: join(root, '.poly', 'defects', '.unpatched'), text: src, configs: kept, ...(opts.cache ? { cache: opts.cache } : {}) });
+  if (unpatched.verdict === 'ERROR' || unpatched.verdict === 'NONDETERMINISM') throw new Error(`the unpatched program's check ended in ${unpatched.verdict}: ${unpatched.error ?? ''}`);
+  const base = baseKeys(unpatched);
   const out: DefectResult[] = [];
   for (const [i, d] of chosen.entries()) {
-    const r = await checkFile(target, { root: join(base, '.poly', 'defects', d.name), text: texts[i], configs: d.keep, ...(opts.cache ? { cache: opts.cache } : {}) });
-    out.push({ name: d.name, expected: d.expected, ...(d.finding ? { finding: d.finding } : {}), found: judgeDefect(r, d), verdict: r.verdict, findings: allDiagnostics(r), ...(r.error ? { error: r.error } : {}) });
+    const r = await checkFile(target, { root: join(root, '.poly', 'defects', d.name), text: texts[i], configs: d.keep, ...(opts.cache ? { cache: opts.cache } : {}) });
+    const keys = unitKeys(r);
+    out.push({ name: d.name, expected: d.expected, ...(d.finding ? { finding: d.finding } : {}), found: judgeDefect(r, d, base), verdict: r.verdict, findings: allDiagnostics(r), preexisting: [...keys].filter(([, k]) => base.has(k)).map(([x]) => x), ...(r.error ? { error: r.error } : {}) });
   }
   return out;
 }

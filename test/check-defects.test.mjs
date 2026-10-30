@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { checkDefects, checkFile, readDefects } from '@poly/check';
+import { baseKeys, checkDefects, checkFile, judgeDefect, readDefects } from '@poly/check';
 import { ROOT } from './helpers.mjs';
 import { comparable } from './check-cache-helpers.mjs';
 
@@ -42,6 +42,17 @@ test('PT14a: a defect\'s check equals a check of its patched copy with no cache,
     assert.equal(warm.machines.find((m) => m.machine === 'Inventory').cache.hit, true, 'the machine the patch leaves alone is read back');
     assert.equal(warm.machines.find((m) => m.machine === 'Order').cache.hit, false, 'the machine it changes is checked');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('PT14a: a finding the unpatched program reports too, in the same unit about the same thing, is set aside', () => {
+  const diag = (code, property) => ({ code, property, at: {} });
+  const report = (machine, config) => ({ verdict: 'FINDINGS', diagnostics: [], policies: [], machines: [{ machine: 'Run', diagnostics: machine }], configurations: [{ configuration: 'two-buyers', diagnostics: config }] });
+  const unpatched = report([diag('PL4003', 'publish')], []);
+  const patched = report([diag('PL4003', 'publish')], [diag('PL5401', 'confirmed-within-stock')]);
+  assert.equal(judgeDefect(patched, FOUND), false, 'without the unpatched program, Run\'s finding is another finding');
+  assert.equal(judgeDefect(patched, FOUND, baseKeys(unpatched)), true, 'with it, Run\'s finding is set aside');
+  const elsewhere = report([diag('PL4003', 'retract')], [diag('PL5401', 'confirmed-within-stock')]);
+  assert.equal(judgeDefect(elsewhere, FOUND, baseKeys(unpatched)), false, 'a finding about something else is the defect\'s');
 });
 
 test('PT14a: a defects file that does not fit the source is a usage error before anything is checked', async () => {

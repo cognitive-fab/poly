@@ -137,12 +137,12 @@ async function defectsOutcome(target: string, file: string, o: { root?: string; 
     lines.push(`${d.found ? 'found      ' : 'NOT FOUND  '} ${d.name.padEnd(34)} ${d.expected === 'CLEAN' ? 'CLEAN' : `${d.expected.slice('FINDING '.length)} ${d.finding}`}`);
     if (d.found) continue;
     if (d.error) lines.push(`  error: ${d.error}`);
-    lines.push(...(d.findings.length ? d.findings.map((x) => `  ${renderDiagnostic(x, target)[0]}`) : ['  (no findings)']));
+    lines.push(...(d.findings.length ? d.findings.map((x) => `  ${renderDiagnostic(x, target)[0]}${d.preexisting.includes(x) ? '   (the unpatched program reports it too: set aside)' : ''}`) : ['  (no findings)']));
   }
   const missed = results.filter((d) => !d.found).length;
   lines.push(missed ? `${missed} seeded defect${missed === 1 ? ' is' : 's are'} not found: a property does not see the fault it was written for.` : `all ${results.length} seeded defect${results.length === 1 ? ' is' : 's are'} found.`);
   const exit = results.some((d) => d.verdict === 'ERROR' || d.verdict === 'NONDETERMINISM') ? EXIT_CODES.ERROR : missed ? EXIT_CODES.FINDINGS : EXIT_CODES.CLEAN;
-  const result = { defects: results.map((d) => ({ ...d, findings: d.findings.map(toJson) })), verdict: missed ? 'FINDINGS' : 'CLEAN', exit };
+  const result = { defects: results.map((d) => ({ ...d, findings: d.findings.map(toJson), preexisting: d.preexisting.map(toJson) })), verdict: missed ? 'FINDINGS' : 'CLEAN', exit };
   const dir = join(resolve(o.root ?? process.cwd()), '.poly');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'defects.json'), JSON.stringify(result, null, 2));

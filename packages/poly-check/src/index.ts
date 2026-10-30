@@ -2,7 +2,7 @@ export { exportWitness, findWitness, lookupWitness, witnessSpec, WitnessExportEr
 export { checkFile, checkProject, configurationReports, projectKindConflicts, engineVersions, mergeFindings, type ProjectReport, type CheckReport, type CheckOptions, type MachineCheck, type ConfigCheck, type GoalRecord, type StageRecord, type InstanceRecord } from './pipeline.js';
 export { render, renderDiagnostic } from './render.js';
 export { CheckUsageError, readGoals, typedGoals, type GoalSpec, type TypedGoal } from './goals.js';
-export { checkDefects, readDefects, applyDefect, judgeDefect, type DefectSpec, type DefectResult } from './defects.js';
+export { checkDefects, readDefects, applyDefect, judgeDefect, baseKeys, type DefectSpec, type DefectResult } from './defects.js';
 export { toolchainDigest, cacheKey, readEntry, writeEntry } from './cache.js';
 export { resolveUses, type Uses } from './uses.js';
 export { resolveProviders } from './providers.js';
