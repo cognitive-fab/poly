@@ -168,7 +168,7 @@ poly check app.poly --no-cache                       # neither reads nor writes 
 
 A **goal** names a path a configuration is meant to cover, written like an invariant that the path breaks: `{ "configuration": "order-short", "name": "split", "expr": "!(order.path == ViaSplit && order.st == Picking)" }`. A `CLEAN` configuration says nothing about a path no input reaches; a reached goal shows the path is there. A **seeded defect** is a list of find-and-replace edits with the finding it must produce. A defect the check no longer finds means a property no longer sees the fault it was written for.
 
-The verdict never depends on the cache: with it, without it, cold or warm, a program gets the same findings. Only the command line reads a cache, and `poly admit` and the test suite never do. A stage read back from the cache says so in its note.
+The verdict never depends on the cache: with it, without it, cold or warm, a program gets the same findings. Only the command line reads a cache: `poly admit` never does, and the test suite turns the command line's default off. A stage read back from the cache says so in its note.
 
 **Checks side by side.** No check package starts a process or a thread, so a host that wants its seeded defects or its configurations checked in parallel starts several `poly check` processes that share one cache. One process checks every machine and fills the cache; then the others each read the machines back and check only what they are given:
 
