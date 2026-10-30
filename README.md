@@ -153,6 +153,34 @@ checkout.poly:33  PL5401 CONFIGURATION_INVARIANT  confirmed-within-stock
 
 No per-machine check can see this. The defect lives in the arrival order between machines.
 
+## Checking a large program
+
+A program of many machines is checked after every change, and a host used to check the same machine many times over: once for each configuration it checked apart, once for each copy that added a probe, once for each copy that seeded a defect. `poly check` now keeps each machine's result and each configuration's result in a cache, under a key of what the result depends on, and reads back whatever nothing changed (technical specification, PT14a).
+
+```
+poly check app.poly                                  # every machine, then every configuration; fills .poly/cache
+poly check app.poly                                  # the same again: everything is read back
+poly check app.poly --config order-flow,order-parts  # these two configurations; the others are listed as not run
+poly check app.poly --goals goals.json               # each goal reached with its path, or PL5410 GOAL_UNREACHED
+poly check app.poly --defects defects.json           # each seeded defect applied in memory: found or NOT FOUND
+poly check app.poly --no-cache                       # neither reads nor writes the cache
+```
+
+A **goal** names a path a configuration is meant to cover, written like an invariant that the path breaks: `{ "configuration": "order-short", "name": "split", "expr": "!(order.path == ViaSplit && order.st == Picking)" }`. A `CLEAN` configuration says nothing about a path no input reaches; a reached goal shows the path is there. A **seeded defect** is a list of find-and-replace edits with the finding it must produce. A defect the check no longer finds means a property no longer sees the fault it was written for.
+
+The verdict never depends on the cache: with it, without it, cold or warm, a program gets the same findings. Only the command line reads a cache, and `poly admit` and the test suite never do. A stage read back from the cache says so in its note.
+
+**Checks side by side.** No check package starts a process or a thread, so a host that wants its seeded defects or its configurations checked in parallel starts several `poly check` processes that share one cache. One process checks every machine and fills the cache; then the others each read the machines back and check only what they are given:
+
+```
+poly check app.poly --cache /shared/cache --root /tmp/all                                      # first, alone
+poly check app.poly --defects defects.json --only a,b --cache /shared/cache --root /tmp/d1 &   # then side by side
+poly check app.poly --defects defects.json --only c,d --cache /shared/cache --root /tmp/d2 &
+poly check app.poly --config order-parts --cache /shared/cache --root /tmp/c1 &
+```
+
+Give each process its own `--root`. Two processes that meet the same new key both check it and write the same entry, and neither reads a half-written one. A check of a large machine can hold several gigabytes, so start as many processes as the memory holds, not as many as there are processors.
+
 ## Documents
 
 | Document | What it covers |
@@ -232,3 +260,6 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **Work order** | An effect of a workflow machine, handed to an agent or a person to claim, run and report. |
 | **World** | A set of machines, responders and drivers that Polytrion runs against a virtual clock. Deferred to v2. |
 | **Lowering** | Compiling a poly construct into the artefact an existing engine reads. |
+| **Cache key** | The SHA-256 of everything a machine's or a configuration's check result depends on: the toolchain's bytes, the lowered artefacts, the machine or configuration in full, the rest of the program, the options. Equal keys read the stored result back (PT14a). |
+| **Goal** | A predicate on a configuration's global states, written like an invariant and expected to fail: a path the configuration is meant to cover (a witness goal). Reached, or `PL5410 GOAL_UNREACHED` (PS13.10). |
+| **Defect patch** | The find-and-replace edits that seed one fault into a program, with the finding the check must then report. `--defects` applies each in memory and says whether it is found (PT14a). |
