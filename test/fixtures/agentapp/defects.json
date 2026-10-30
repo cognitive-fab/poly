@@ -1,0 +1,204 @@
+[
+  {
+    "name": "cancel-keeps-reservation",
+    "note": "A cancelled order keeps its reservation: the cancel gives nothing back.",
+    "expected": "FINDING PL3001",
+    "finding": "cancelled-holds-nothing",
+    "keep": [],
+    "edits": [
+      { "find": "      st' = Cancelled\n      held' = 0\n      held2' = 0\n      agreedX2' = 0\n", "replace": "      st' = Cancelled\n" }
+    ]
+  },
+  {
+    "name": "stock-oversold",
+    "note": "When the stock has fewer units than asked it takes what it has but tells the order it got them all, so two orders hold more than there was.",
+    "expected": "FINDING PL5401",
+    "finding": "never-oversold",
+    "keep": ["two-orders"],
+    "edits": [
+      { "find": "      if substitute {\n        send from <- Substituted(got: onHand)\n      } else {\n        send from <- Reserved(got: onHand)\n      }", "replace": "      if substitute {\n        send from <- Substituted(got: qty)\n      } else {\n        send from <- Reserved(got: qty)\n      }" }
+    ]
+  },
+  {
+    "name": "charge-without-approval",
+    "note": "The approval test is on the wrong operand: a charge above the limit, or to a new customer, goes ahead with nobody's approval.",
+    "expected": "FINDING PL3001",
+    "finding": "charge-needs-approval",
+    "keep": [],
+    "edits": [
+      { "find": "    if needsApproval && !approved {\n", "replace": "    if needsApproval && approved {\n" }
+    ]
+  },
+  {
+    "name": "charge-twice",
+    "note": "The handler that makes the charge asks for it twice.",
+    "expected": "FINDING PL4001",
+    "finding": "charge-at-most-once",
+    "keep": [],
+    "edits": [
+      { "find": "      st' = Charging\n      emit charge()\n    }\n  }\n\n  on InvoiceFailed", "replace": "      st' = Charging\n      emit charge()\n      emit charge()\n    }\n  }\n\n  on InvoiceFailed" }
+    ]
+  },
+  {
+    "name": "unknown-is-retried",
+    "note": "A booking that timed out is asked again at once, with no person's Resolve.",
+    "expected": "FINDING PL3001",
+    "finding": "a-booking-is-asked-once-per-answer",
+    "keep": [],
+    "edits": [
+      { "find": "  on BookUnknown {\n    require st == Booking else reject \"not-booking\"\n    st' = Unknown\n", "replace": "  on BookUnknown {\n    require st == Booking else reject \"not-booking\"\n    st' = Booking\n    bookings' = bookings + 1\n    emit reserveSlot()\n" }
+    ]
+  },
+  {
+    "name": "unknown-moved-on-by-an-answer",
+    "note": "A late answer from the carrier moves an unknown booking on: not a person's Resolve.",
+    "expected": "FINDING PL3002",
+    "finding": "unknown-leaves-only-by-resolve",
+    "keep": [],
+    "edits": [
+      { "find": "  on SlotBooked {\n    require st == Booking else reject \"not-booking\"\n", "replace": "  on SlotBooked {\n    require st == Booking || st == Unknown else reject \"not-booking\"\n" }
+    ]
+  },
+  {
+    "name": "part-at-risk-before-its-parent",
+    "note": "A shortage puts the warehouse at risk directly, not through the main obligation, which stays on track.",
+    "expected": "FINDING PL5401",
+    "finding": "a-part-at-risk-puts-the-main-obligation-at-risk",
+    "keep": ["order-short"],
+    "edits": [
+      { "find": "      st' = Short\n      if main != none && pick != none {\n        pending' = true\n        send main <- ChildDoubt(from: pick, ack: self)\n      }\n    }\n  }\n\n  // The units reserved from the substitute model.", "replace": "      st' = Short\n      if pick != none {\n        send pick <- Warn(ack: none)\n      }\n    }\n  }\n\n  // The units reserved from the substitute model." }
+    ]
+  },
+  {
+    "name": "nobody-asked",
+    "note": "A stalled obligation is no longer worked on and nobody is asked for another path.",
+    "expected": "FINDING PL3001",
+    "finding": "open-has-someone",
+    "keep": [],
+    "edits": [
+      { "find": "      st' = AtRisk\n      working' = false\n      asked' = true\n      told' = true\n      if creditor != none {", "replace": "      st' = AtRisk\n      working' = false\n      told' = true\n      if creditor != none {" }
+    ]
+  },
+  {
+    "name": "substitute-shipped-unagreed",
+    "note": "The warehouse lead's confirmation reserves the substitute at once, before the customer has agreed to it: the shipped mix is not the agreed mix.",
+    "expected": "FINDING PL3001",
+    "finding": "substitute-only-as-agreed",
+    "keep": [],
+    "edits": [
+      { "find": "    if qty > held {\n      st' = Offering\n    } else {", "replace": "    if qty > held {\n      st' = Reserving\n      if spare != none {\n        send spare <- Reserve(from: self, qty: qty - held, substitute: true)\n      }\n    } else {" }
+    ]
+  },
+  {
+    "name": "access-without-the-owner",
+    "note": "A request for access is granted at once: nobody approved it.",
+    "expected": "FINDING PL3001",
+    "finding": "granted-by-the-owner",
+    "keep": [],
+    "edits": [
+      {
+        "find": "  on Request {\n    require st == Idle else reject \"asked-already\"\n    st' = Requested\n  }",
+        "replace": "  on Request {\n    require st == Idle else reject \"asked-already\"\n    st' = Granted\n    if inc != none {\n      send inc <- AccessReady()\n    }\n  }"
+      }
+    ]
+  },
+  {
+    "name": "close-leaves-the-grant",
+    "note": "The incident closes without giving the access back.",
+    "expected": "FINDING PL5401",
+    "finding": "closing-gives-the-access-back",
+    "keep": [
+      "incident-access"
+    ],
+    "edits": [
+      {
+        "find": "    if grant != none {\n      st' = Closing\n      send grant <- Revoke(ack: self)\n    } else {\n      st' = Closed\n    }",
+        "replace": "    st' = Closed"
+      }
+    ]
+  },
+  {
+    "name": "access-never-ends",
+    "note": "The end of the window changes nothing: the access stays granted.",
+    "expected": "FINDING PL3301",
+    "finding": "access-ends-with-its-window",
+    "keep": [],
+    "edits": [
+      {
+        "find": "    require st == Granted else reject \"not-granted\"\n    st' = Expired",
+        "replace": "    require st == Granted else reject \"not-granted\"\n    st' = Granted"
+      }
+    ]
+  },
+  {
+    "name": "page-never-escalates",
+    "note": "A page nobody answers is waited on again, not escalated.",
+    "expected": "FINDING PL3301",
+    "finding": "page-is-answered",
+    "keep": [],
+    "edits": [
+      {
+        "find": "    require st == Paging || st == Paged else reject \"not-waiting\"\n    st' = Escalating\n    emit escalate()\n  }\n\n  on Escalated {",
+        "replace": "    require st == Paging || st == Paged else reject \"not-waiting\"\n    st' = Paged\n  }\n\n  on Escalated {"
+      }
+    ]
+  },
+  {
+    "name": "forecast-releases",
+    "note": "A forecast that says the deadline will be missed releases the obligation, instead of only doubting it.",
+    "expected": "FINDING PL5401",
+    "finding": "a-forecast-only-doubts",
+    "keep": [
+      "incident-access"
+    ],
+    "edits": [
+      {
+        "find": "    if risk != OnTrack && doubts < maxDoubts {\n      doubts' = doubts + 1\n      if main != none {\n        send main <- Doubt()\n      }\n    }",
+        "replace": "    if risk != OnTrack && doubts < maxDoubts {\n      doubts' = doubts + 1\n      if main != none {\n        send main <- Doubt()\n        send main <- Release()\n      }\n    }"
+      }
+    ]
+  },
+  {
+    "name": "fix-verifies-itself",
+    "note": "The service reporting itself back meets the SLA: no person verified the restore.",
+    "expected": "FINDING PL5401",
+    "finding": "the-sla-is-met-only-after-a-person-verified",
+    "keep": [
+      "incident-access"
+    ],
+    "edits": [
+      {
+        "find": "    require st == Fixing else reject \"not-fixing\"\n    st' = Restored\n  }",
+        "replace": "    require st == Fixing else reject \"not-fixing\"\n    st' = Restored\n    if main != none {\n      send main <- Confirm(by: ByPerson)\n    }\n  }"
+      }
+    ]
+  },
+  {
+    "name": "late-update-ignored",
+    "note": "A late customer update does not put the comms obligation at risk.",
+    "expected": "FINDING PL3301",
+    "finding": "a-late-update-puts-comms-at-risk",
+    "keep": [
+      "incident-comms"
+    ],
+    "edits": [
+      {
+        "find": "    lateSeen' = true\n    if comms != none && lates < maxDoubts {\n      lates' = lates + 1\n      send comms <- Doubt()\n    }",
+        "replace": "    lateSeen' = true"
+      }
+    ]
+  },
+  {
+    "name": "close-with-an-update-owed",
+    "note": "The incident closes while a customer update is owed.",
+    "expected": "FINDING PL3001",
+    "finding": "closed-owes-no-update",
+    "keep": [],
+    "edits": [
+      {
+        "find": "    require st == Verified && !updateOwed else reject \"not-closable\"",
+        "replace": "    require st == Verified else reject \"not-closable\""
+      }
+    ]
+  }
+]

@@ -1,0 +1,194 @@
+[
+  {
+    "configuration": "define",
+    "name": "witness-policy-published",
+    "expr": "!(r1.published && r1.grant == ByPolicy)",
+    "path": "JJ's run publishes on his policy, with no approval"
+  },
+  {
+    "configuration": "define",
+    "name": "witness-queued-prd-published",
+    "expr": "!(i2.queued && r2.published)",
+    "path": "Ben's PRD intent is refused by the gate, queued, woken when the MRD is accepted, and published"
+  },
+  {
+    "configuration": "define-ask",
+    "name": "witness-named-person-asked",
+    "expr": "!ben.asked",
+    "path": "a run asks a decision of a named person who is not its owner"
+  },
+  {
+    "configuration": "define-ask",
+    "name": "witness-answered",
+    "expr": "r1.answeredBy == none",
+    "path": "the person asked answers, and the run takes the answer"
+  },
+  {
+    "configuration": "define-reopen",
+    "name": "witness-woken-after-reopen",
+    "expr": "!(i.queued && r.st == Working && d.acceptedBy == ByPerson)",
+    "path": "an intent queued on an accepted document is woken by the reopen and starts"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-obligation-met",
+    "expr": "!(ob.st == Met && r1.published)",
+    "path": "the run publishes, a person accepts the document, and the obligation is met"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-obligation-at-risk-then-met",
+    "expr": "!(ob.rerouted && ob.st == Met)",
+    "path": "the obligation is at risk, another path is chosen, and it is met"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-obligation-missed",
+    "expr": "ob.st != Missed",
+    "path": "the date passes and the obligation is missed"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-obligation-released",
+    "expr": "ob.st != Released",
+    "path": "the obligation is released"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-creditor-told",
+    "expr": "!(ana.told && jj.told)",
+    "path": "an at-risk or missed obligation reaches its creditor and its debtor"
+  },
+  {
+    "configuration": "obligations",
+    "name": "witness-failed-run-is-at-risk",
+    "expr": "!(i1.st == Failed && ob.st == AtRisk)",
+    "path": "a run fails and the obligation is at risk, not silently dropped"
+  },
+  {
+    "configuration": "order-short",
+    "name": "witness-substitute",
+    "expr": "!(order.path == ViaSubstitute && order.held2 > 0 && order.st == Picking)",
+    "path": "a shortage is settled with units of another model, and picking starts"
+  },
+  {
+    "configuration": "order-short",
+    "name": "witness-split",
+    "expr": "!(order.path == ViaSplit && order.st == Picking)",
+    "path": "a shortage is settled by shipping what is held, with the customer agreeing"
+  },
+  {
+    "configuration": "order-short",
+    "name": "witness-move-date",
+    "expr": "!(order.path == ViaMove && order.held >= order.qty && order.st == Picking)",
+    "path": "the date moves, the stock arrives, the rest is reserved and picking starts"
+  },
+  {
+    "configuration": "two-orders",
+    "name": "witness-partial-cancel",
+    "expr": "!(order[0].trimmed && order[0].st != Cancelled)",
+    "path": "some units are cancelled, the surplus reservation goes back, and the order carries on"
+  },
+  {
+    "configuration": "order-short",
+    "name": "witness-parent-at-risk",
+    "expr": "!(pick.st == AtRisk && main.st == AtRisk)",
+    "path": "the warehouse is at risk and so is the main obligation"
+  },
+  {
+    "configuration": "order-flow",
+    "name": "witness-unknown-found",
+    "expr": "!order.found",
+    "path": "the booking times out, a person checks the portal and finds it"
+  },
+  {
+    "configuration": "order-flow",
+    "name": "witness-unknown-not-found",
+    "expr": "order.notFound == 0",
+    "path": "the booking times out, a person finds nothing, and it is asked once more"
+  },
+  {
+    "configuration": "order-flow",
+    "name": "witness-charge-approved",
+    "expr": "!(order.approved && order.charged)",
+    "path": "a charge that needs approval waits for a person, then happens"
+  },
+  {
+    "configuration": "order-flow",
+    "name": "witness-delivery-met",
+    "expr": "main.st != Met",
+    "path": "the customer confirms the receipt and the main obligation is met"
+  },
+  {
+    "configuration": "order-parts",
+    "name": "witness-parts-warehouse-at-risk",
+    "expr": "pick.st != AtRisk",
+    "path": "the warehouse is at risk, in an order that also has a carrier booking"
+  },
+  {
+    "configuration": "order-parts",
+    "name": "witness-parts-booking-at-risk",
+    "expr": "book.st != AtRisk",
+    "path": "the carrier booking is at risk, in an order that also has a warehouse part"
+  },
+  {
+    "configuration": "order-parts",
+    "name": "witness-parts-shortage-then-unknown",
+    "expr": "!(pick.st == Met && book.st == AtRisk && order.notFound == 0)",
+    "path": "a shortage settled and the units picked, then the carrier booking unknown: the two risks one after the other"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-rolled-back",
+    "expr": "!(inc.path == Rollback && inc.st == Fixing)",
+    "path": "the lead rolls back, the owner approves the access, and the fix runs"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-escalated",
+    "expr": "!inc.escalated",
+    "path": "the page goes unanswered and the secondary on-call is paged"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-wait-and-meet",
+    "expr": "!(inc.path == WaitFix && main.st == Met)",
+    "path": "the lead waits for the engineer fix, a person verifies the restore, and the SLA is met"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-wait-and-miss",
+    "expr": "!(inc.path == WaitFix && main.st == Missed)",
+    "path": "the lead waits for the fix and the deadline passes: the SLA is missed"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-access-approved",
+    "expr": "grant.approvedBy != ByPerson",
+    "path": "the owner approves the access"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-access-denied",
+    "expr": "grant.st != Denied",
+    "path": "the owner refuses the access and the lead is sent back to choose"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-access-expired",
+    "expr": "grant.st != Expired",
+    "path": "the access reaches the end of its window by itself"
+  },
+  {
+    "configuration": "incident-access",
+    "name": "witness-access-revoked-at-close",
+    "expr": "!(inc.st == Closed && grant.st == Revoked && grant.used)",
+    "path": "the access is granted, used, and revoked when the incident closes"
+  },
+  {
+    "configuration": "incident-comms",
+    "name": "witness-late-update",
+    "expr": "comms.st != AtRisk",
+    "path": "a customer update is late and the comms obligation is at risk"
+  }
+]

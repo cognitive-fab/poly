@@ -1,0 +1,1846 @@
+// expected: CLEAN
+// agentapp: the enterprise agent layer, first lifecycle: Define (LIFECYCLE.md). An enterprise agent does not answer to
+// one user's chat. A teammate submits an intent on a document; the document's gate decides whether a run may start
+// (the PRD is locked until the MRD is accepted, and one run at a time writes a document); the run works in isolation,
+// reports to the intent, and publishes a version only after a grant. A grant comes from the intent's owner, or from
+// the owner's policy for that action class, read before the run starts. Only a person accepts a document.
+// Personal agents (server/personal.mjs) act through these same machines: they submit, queue, approve and answer as
+// their person's preferences allow, and every one of those steps is checked here, not assumed.
+// Machines hold addresses, not each other's state, and talk only by send, so the configuration checks them with
+// messages arriving in any order.
+module agentapp
+
+enum IntentState { Draft, Claiming, Working, Asking, Delivered, Accepted, Rejected, Refused, Queued, Failed, Cancelled }
+
+enum RunState { Idle, Working, Waiting, Blocked, Suspended, Publishing, Done, Failed, Stopped, Closed }
+
+// Why the runtime stopped a run: it asked for more model calls than its step limit, or spent past its cost budget.
+enum StopReason { Running, StepLimit, CostBudget }
+
+enum DocState { Open, Drafted, Accepted }
+
+// An obligation is what a person owes another: a document, by a date. A plan is one way to meet it and can change; the
+// obligation stays. Open is on track. Met, Missed and Released end it.
+enum ObligationState { Open, AtRisk, Met, Missed, Released }
+
+// Where a grant came from. ByPerson is a person's answer; ByPolicy is the owner's preference for the action class,
+// fixed on the intent before it was submitted.
+enum GrantSource { NoGrant, ByPerson, ByPolicy }
+
+// Intent: what a teammate asked for, and the team's side of the conversation with the agent.
+machine Intent {
+  state {
+    st          : IntentState   = Draft
+    run         : Ref<Run>      = none
+    doc         : Ref<Document> = none
+    approved    : bool          = false
+    heard       : bool          = false
+    // the owner's preferences for this intent's action classes: publish (or post findings) without asking, and
+    // queue a refused intent without asking. SetPolicy is accepted only in Draft, so the run never starts under a
+    // policy other than the one it was submitted with.
+    autoPublish : bool          = false
+    autoQueue   : bool          = false
+    // the last grant this intent sent its run, and whether it has ever been queued (a queued intent is queued once)
+    grant       : GrantSource   = NoGrant
+    queued      : bool          = false
+    // the obligation this intent works toward: every intent belongs to exactly one, wired when it is created. A
+    // configuration that does not model obligations leaves it none, and the intent then reports to nobody.
+    obligation  : Ref<Obligation> = none
+  }
+
+  terminal st in { Accepted, Rejected, Failed, Cancelled }
+
+  action SetPolicy(publish: bool, queue: bool)
+  action Submit()
+  action Cancel()
+  action Claimed()
+  action Refused()
+  action Queue()
+  action Bumped()
+  action Wake()
+  action Dequeue()
+  action Drop()
+  action Progress()
+  action PermissionAsked()
+  action Approve()
+  action Deny()
+  action Finished()
+  action RunFailed()
+  action Accept()
+  action Reject()
+
+  on SetPolicy(publish, queue) {
+    require st == Draft else reject "submitted"
+    autoPublish' = publish
+    autoQueue' = queue
+  }
+
+  // The document's gate decides, not the intent: a locked or busy document refuses the claim.
+  on Submit {
+    require st == Draft else reject "not-draft"
+    st' = Claiming
+    send doc <- Claim(from: self, worker: run)
+  }
+
+  // A cancelled draft closes its run, which would otherwise wait for a start forever (PL5402).
+  on Cancel {
+    require st == Draft else reject "submitted"
+    st' = Cancelled
+    send run <- Close()
+  }
+
+  on Claimed {
+    require st == Claiming else reject "not-claiming"
+    st' = Working
+  }
+
+  // A refusal is not the end: the owner (or the owner's policy) may queue the intent on the document, which wakes it
+  // when the gate opens. Its run stays Idle until then; Drop closes it.
+  on Refused {
+    require st == Claiming else reject "not-claiming"
+    if autoQueue && !queued {
+      st' = Queued
+      queued' = true
+      send doc <- Enqueue(from: self)
+    } else {
+      st' = Refused
+    }
+  }
+
+  on Queue {
+    require st == Refused && !queued else reject "not-queueable"
+    st' = Queued
+    queued' = true
+    send doc <- Enqueue(from: self)
+  }
+
+  // The document's one queue slot was taken: the intent is refused again and may be dropped.
+  on Bumped {
+    require st == Queued else reject "not-queued"
+    st' = Refused
+  }
+
+  // The document woke the queue: claim it again. `started` marks the start for the path property below; a queued
+  // intent is queued once (queued), so it is woken at most once.
+  on Wake {
+    require st == Queued else reject "not-queued"
+    st' = Claiming
+    emit started()
+    send doc <- Claim(from: self, worker: run)
+  }
+
+  // The undo of a queue. A Wake already in transit reaches a cancelled intent and is refused.
+  on Dequeue {
+    require st == Queued else reject "not-queued"
+    st' = Cancelled
+    send doc <- Dequeue(from: self)
+    send run <- Close()
+  }
+
+  on Drop {
+    require st == Refused else reject "not-refused"
+    st' = Cancelled
+    send run <- Close()
+  }
+
+  // A report may arrive before Claimed, or after a permission request sent later, so it never moves the intent back.
+  on Progress {
+    require st == Claiming || st == Working || st == Asking || st == Delivered else reject "not-running"
+    heard' = true
+  }
+
+  // The run asks to publish. The owner's policy grants it at once; otherwise the owner is asked. A run granted by
+  // policy is never sent back (Deny needs Asking), so it asks once; a second request is refused.
+  on PermissionAsked {
+    require st == Claiming || st == Working else reject "not-running"
+    require !autoPublish || grant == NoGrant else reject "already-granted"
+    if autoPublish {
+      st' = Working
+      grant' = ByPolicy
+      send run <- Granted(by: ByPolicy)
+    } else {
+      st' = Asking
+    }
+  }
+
+  on Approve {
+    require st == Asking else reject "not-asking"
+    st' = Working
+    approved' = true
+    grant' = ByPerson
+    send run <- Granted(by: ByPerson)
+  }
+
+  on Deny {
+    require st == Asking else reject "not-asking"
+    st' = Working
+    send run <- Denied()
+  }
+
+  on Finished {
+    require st == Claiming || st == Working else reject "not-working"
+    st' = Delivered
+    if obligation != none {
+      send obligation <- Deliver()
+    }
+  }
+
+  on RunFailed {
+    require st == Claiming || st == Working || st == Asking else reject "not-running"
+    st' = Failed
+    if obligation != none {
+      send obligation <- Stall()
+    }
+  }
+
+  on Accept {
+    require st == Delivered else reject "not-delivered"
+    st' = Accepted
+  }
+
+  on Reject {
+    require st == Delivered else reject "not-delivered"
+    st' = Rejected
+    if obligation != none {
+      send obligation <- Rework()
+    }
+  }
+
+  invariant policy-grant-needs-the-policy: grant == ByPolicy implies autoPublish
+  invariant person-grant-was-approved: grant == ByPerson implies approved
+  path property queued-starts-at-most-once: count("intent.start") <= 1
+
+  // A marker, not an action on the world: the host records it in the activity log. It lets the path property count
+  // wakes.
+  effect started() {
+    kind "intent.start"
+    labels { write:store }
+    class none
+  }
+}
+
+// Document: an MRD or a PRD, and its gate. A service: it lives as long as the project, so it has no terminal state
+// (PS1.7). A gated document (the PRD) takes a claim only while its upstream document is accepted: Unlock arrives
+// when that document is accepted, Relock when it is reopened.
+service machine Document {
+  state {
+    st         : DocState       = Open
+    gated      : bool           = false
+    ready      : bool           = false
+    busy       : bool           = false
+    drafted    : bool           = false
+    // the downstream document has not yet acknowledged the last Unlock or Relock; bounds what is in transit
+    pending    : bool           = false
+    down       : Ref<Document>  = none
+    // one intent waiting for the gate to open (a one-slot queue; a second is bumped)
+    queued     : Ref<Intent>    = none
+    acceptedBy : GrantSource    = NoGrant
+    // the obligation to deliver this document: a person's acceptance of it is what meets that obligation
+    owed       : Ref<Obligation> = none
+  }
+
+  action Unlock(from: Ref<Document>)
+  action Relock(from: Ref<Document>)
+  action Acked()
+  action Claim(from: Ref<Intent>, worker: Ref<Run>)
+  action Enqueue(from: Ref<Intent>)
+  action Dequeue(from: Ref<Intent>)
+  action Published()
+  action Released()
+  action Unpublish(last: bool)
+  action Accept(by: GrantSource)
+  action Reopen()
+
+  // The queue wakes here, on the gated document, when Unlock arrives, and not from the upstream document when it is
+  // accepted. Messages arrive in any order: had the MRD woken the queued PRD intent itself, the intent's Claim could
+  // reach the PRD before the MRD's Unlock did, and the gate would refuse it a second time. Waking on Unlock means the
+  // gate is already open when the Claim is sent.
+  on Unlock(from) {
+    require gated else reject "not-gated"
+    ready' = true
+    send from <- Acked()
+    if queued != none && !busy && st != Accepted {
+      queued' = none
+      send queued <- Wake()
+    }
+  }
+
+  on Relock(from) {
+    require gated else reject "not-gated"
+    ready' = false
+    send from <- Acked()
+  }
+
+  on Acked {
+    require pending else reject "not-pending"
+    pending' = false
+  }
+
+  on Claim(from, worker) {
+    require true else reject "never"
+    if st != Accepted && !busy && (!gated || ready) {
+      busy' = true
+      send worker <- Start(from: from, doc: self)
+      send from <- Claimed()
+    } else {
+      send from <- Refused()
+    }
+  }
+
+  // Queued while the gate is already open: wake it at once. Otherwise hold it in the slot, or bump it if taken.
+  on Enqueue(from) {
+    require true else reject "never"
+    if st != Accepted && !busy && (!gated || ready) {
+      send from <- Wake()
+    } else {
+      if queued == none {
+        queued' = from
+      } else {
+        send from <- Bumped()
+      }
+    }
+  }
+
+  // A Dequeue for an intent the queue already woke (or bumped) finds the slot not holding it, and is refused.
+  on Dequeue(from) {
+    require queued == from else reject "not-queued-here"
+    queued' = none
+  }
+
+  // A version is published by the run that holds the document; an Accepted document is reopened first.
+  on Published {
+    require busy else reject "not-busy"
+    busy' = false
+    drafted' = true
+    st' = Drafted
+    if queued != none && (!gated || ready) {
+      queued' = none
+      send queued <- Wake()
+    }
+  }
+
+  on Released {
+    require busy else reject "not-busy"
+    busy' = false
+    if queued != none && st != Accepted && (!gated || ready) {
+      queued' = none
+      send queued <- Wake()
+    }
+  }
+
+  // The undo of a version published by policy. Taking back the last version leaves nothing to accept.
+  on Unpublish(last) {
+    require st == Drafted && !busy else reject "not-unpublishable"
+    if last {
+      st' = Open
+      drafted' = false
+    } else {
+      drafted' = true
+    }
+  }
+
+  // Only a person accepts, and only a drafted document that no run is writing. A policy never accepts.
+  on Accept(by) {
+    require by == ByPerson else reject "needs-a-person"
+    require st == Drafted && !busy && !pending else reject "not-acceptable"
+    st' = Accepted
+    acceptedBy' = by
+    if down != none {
+      pending' = true
+      send down <- Unlock(from: self)
+    }
+    // the obligation is told once: a later acceptance of a reopened document is for a later obligation
+    if owed != none {
+      send owed <- Confirm(by: by)
+      owed' = none
+    }
+  }
+
+  // An intent queued while the document was accepted waits for it to be reopened: Reopen opens the gate, so it wakes
+  // the queue as Unlock does.
+  on Reopen {
+    require st == Accepted && !pending else reject "not-reopenable"
+    st' = Drafted
+    if down != none {
+      pending' = true
+      send down <- Relock(from: self)
+    }
+    if queued != none && !busy && (!gated || ready) {
+      queued' = none
+      send queued <- Wake()
+    }
+  }
+
+  invariant accepted-was-drafted: st == Accepted implies drafted
+  invariant accepted-by-a-person: st == Accepted implies acceptedBy == ByPerson
+  // A document that would take a claim holds no queued intent: every step that opens the gate (Unlock, Reopen, the
+  // end of a run) wakes the queue. Before Reopen woke it, an intent queued on an accepted document stayed queued
+  // after a reopen; this invariant fails on that program.
+  invariant queue-empty-while-claimable: (st != Accepted && !busy && (!gated || ready)) implies queued == none
+}
+
+// Person: a teammate's address, so a run can ask a decision of a named person and not only of its owner. The question
+// arrives here as a message (the host turns it into a card in the person's inbox); the answer is the person's input
+// on the run, which takes it only from the person it asked.
+service machine Person {
+  state {
+    asked : bool = false
+    // an obligation of this person's was reported at risk or missed
+    told  : bool = false
+  }
+
+  action Asked(from: Ref<Run>)
+  action Told(from: Ref<Obligation>)
+
+  on Asked(from) {
+    require true else reject "never"
+    asked' = true
+  }
+
+  on Told(from) {
+    require true else reject "never"
+    told' = true
+  }
+}
+
+// Obligation: what the debtor owes the creditor, and whether it is being met. The plan that meets it lives in the intents
+// and can change; this machine does not. Messages from the intents and the document arrive in any order, so each
+// handler is total: a report that finds the obligation already ended changes nothing.
+// working: a run is on it. asked: a person has been asked something that moves it (the plan, a path to choose, or
+// the confirmation of a delivery). An obligation that is Open or AtRisk always has one of the two.
+service machine Obligation {
+  state {
+    st         : ObligationState = Open
+    debtor     : Ref<Person>     = none
+    creditor   : Ref<Person>     = none
+    // the debtor is asked to approve the plan first
+    working    : bool            = false
+    asked      : bool            = true
+    delivered  : bool            = false
+    accepted   : bool            = false
+    acceptedBy : GrantSource     = NoGrant
+    // the creditor and the debtor have been told the obligation is at risk or missed
+    told       : bool            = false
+    // it was at risk and went back on track by another path
+    rerouted   : bool            = false
+    // how many times the debtor changed the path, and how many times the configuration lets them. The limit is a
+    // parameter and not a rule of the product: the host sets it high, and a configuration sets it small so the check
+    // stays exhaustive (the transit bound). The checked range is small; the host's is not.
+    reroutes   : int check 0..2  = 0
+    maxReroutes: int check 0..2  = 2
+    // a report reached the obligation after it had ended; it changed nothing (a write, so the no-op is visible)
+    late       : bool            = false
+    // a sub-obligation names the obligation it is part of. It goes at risk only when its parent has: the parent
+    // hears the doubt first (ChildDoubt) and passes it on (Warn), so no state has a child at risk and its parent on track.
+    parent     : Ref<Obligation> = none
+  }
+
+  action Go()
+  action Doubt()
+  action Reroute()
+  action Deliver()
+  action Stall()
+  action Rework()
+  action Confirm(by: GrantSource)
+  action Lapse()
+  action Release()
+  action ChildDoubt(from: Ref<Obligation>, ack: Ref<Order>)
+  action Warn(ack: Ref<Order>)
+  action Back(ack: Ref<Order>)
+  action Cleared(ack: Ref<Order>)
+
+  // The plan was approved: a run starts.
+  on Go {
+    require st == Open && asked && !working && !delivered else reject "not-waiting-for-the-plan"
+    working' = true
+    asked' = false
+  }
+
+  // A reason to expect the date will be missed (the person who must answer is away): at risk, and the debtor and the
+  // creditor are told. The run, if any, keeps its place; the debtor is asked for a path.
+  on Doubt {
+    require st == Open && parent == none && reroutes < maxReroutes else reject "not-on-track"
+    st' = AtRisk
+    asked' = true
+    told' = true
+    if creditor != none {
+      send creditor <- Told(from: self)
+    }
+    if debtor != none {
+      send debtor <- Told(from: self)
+    }
+  }
+
+  // The debtor chose another path: back on track, with a run on it.
+  on Reroute {
+    require st == AtRisk && asked && reroutes < maxReroutes else reject "not-at-risk"
+    st' = Open
+    working' = true
+    asked' = false
+    rerouted' = true
+    reroutes' = reroutes + 1
+  }
+
+  // The run delivered the document: the creditor is asked to confirm it.
+  on Deliver {
+    require true else reject "never"
+    if st == Open || st == AtRisk {
+      working' = false
+      asked' = true
+      delivered' = true
+    } else {
+      late' = true
+    }
+  }
+
+  // The run failed or stopped. Nothing is working on it any more: it is at risk and the debtor is asked for a path.
+  on Stall {
+    require true else reject "never"
+    if st == Open && parent == none {
+      st' = AtRisk
+      working' = false
+      asked' = true
+      told' = true
+      if creditor != none {
+        send creditor <- Told(from: self)
+      }
+      if debtor != none {
+        send debtor <- Told(from: self)
+      }
+    } else {
+      if st == AtRisk {
+        working' = false
+        asked' = true
+      } else {
+        late' = true
+      }
+    }
+  }
+
+  // The delivery was sent back: a new run works on it.
+  on Rework {
+    require true else reject "never"
+    if st == Open || st == AtRisk {
+      working' = true
+      asked' = false
+      delivered' = false
+    } else {
+      late' = true
+    }
+  }
+
+  // The document it owes was accepted. Only a person's acceptance meets an obligation; the document refuses any other
+  // source before this message is sent.
+  on Confirm(by) {
+    require by == ByPerson else reject "needs-a-person"
+    if st == Open || st == AtRisk {
+      st' = Met
+      working' = false
+      asked' = false
+      accepted' = true
+      acceptedBy' = by
+    } else {
+      late' = true
+    }
+  }
+
+  // The date passed with the obligation not met: both parties are told, with the reason from the record.
+  on Lapse {
+    require st == Open || st == AtRisk else reject "ended"
+    st' = Missed
+    told' = true
+    if creditor != none {
+      send creditor <- Told(from: self)
+    }
+    if debtor != none {
+      send debtor <- Told(from: self)
+    }
+  }
+
+  on Release {
+    require st == Open || st == AtRisk else reject "ended"
+    st' = Released
+    working' = false
+    asked' = false
+  }
+
+  // A part of this obligation has a reason to doubt its date. This obligation goes at risk first, the debtor is asked
+  // for a path, and the part is told to follow (Warn). Whoever raised the doubt (ack) hears back once the part has
+  // followed, and only then lets anyone choose a path: a choice made earlier could be overtaken by the warning.
+  // Total: the parent may already be at risk or ended.
+  on ChildDoubt(from, ack) {
+    require true else reject "never"
+    if st == Open {
+      st' = AtRisk
+      asked' = true
+      told' = true
+      if creditor != none {
+        send creditor <- Told(from: self)
+      }
+      if debtor != none {
+        send debtor <- Told(from: self)
+      }
+      send from <- Warn(ack: ack)
+    } else {
+      if st == AtRisk {
+        send from <- Warn(ack: ack)
+      } else {
+        late' = true
+        if ack != none {
+          send ack <- Warned()
+        }
+      }
+    }
+  }
+
+  // A part is back on track: the debtor chose another path and the order says so (Back). The part first, then this
+  // obligation, so no state has a part at risk and its parent on track. Whoever asked (ack) hears when it is all done, and
+  // starts nothing new before: a doubt that overtook the clearing would leave a part at risk under a parent on track.
+  // Total, like the doubt: the part may not be at risk, or may not be rerouted again (the host sets how many times).
+  on Back(ack) {
+    require true else reject "never"
+    if st == AtRisk && reroutes < maxReroutes {
+      st' = Open
+      working' = true
+      asked' = false
+      rerouted' = true
+      reroutes' = reroutes + 1
+      if parent != none {
+        send parent <- Cleared(ack: ack)
+      } else {
+        if ack != none {
+          send ack <- Warned()
+        }
+      }
+    } else {
+      late' = true
+      if ack != none {
+        send ack <- Warned()
+      }
+    }
+  }
+
+  // The part is back on track, so this obligation is, if it has no other reason to be at risk. A parent that cannot be
+  // rerouted again stays at risk.
+  on Cleared(ack) {
+    require true else reject "never"
+    if st == AtRisk && reroutes < maxReroutes {
+      st' = Open
+      working' = true
+      asked' = false
+      rerouted' = true
+      reroutes' = reroutes + 1
+    } else {
+      late' = true
+    }
+    if ack != none {
+      send ack <- Warned()
+    }
+  }
+
+  // The parent is at risk, so this part is too. Only a parent's message puts a part at risk. The answer goes back to
+  // whoever raised the doubt, whatever became of this part.
+  on Warn(ack) {
+    require true else reject "never"
+    if st == Open && parent != none {
+      st' = AtRisk
+      asked' = true
+      told' = true
+      if creditor != none {
+        send creditor <- Told(from: self)
+      }
+      if debtor != none {
+        send debtor <- Told(from: self)
+      }
+    } else {
+      late' = true
+    }
+    if ack != none {
+      send ack <- Warned()
+    }
+  }
+
+  invariant open-has-someone: (st == Open || st == AtRisk) implies (working || asked)
+  invariant met-was-accepted-by-a-person: st == Met implies (accepted && acceptedBy == ByPerson)
+  invariant at-risk-and-missed-were-told: (st == AtRisk || st == Missed) implies told
+  invariant rerouted-came-from-at-risk: rerouted implies told
+}
+
+// Run: one isolated agent run for one intent on one document. Its own work (Step, Ready, Fail) is its input; it
+// reports each step and blocks before it publishes a version until the intent grants it.
+// Model calls are metered here, not in the host: the model gateway asks CallRequested before every call and reports
+// CallCompleted(cost) after it, and the run stops itself (Stopped) when it asks past its step limit or has spent its
+// cost budget. Cost is in micro-dollars. A server restart interrupts a run (Suspended) and does not fail it: Resume
+// returns it to Working, so the document stays held by the same run and the host continues from the run's checkpoint.
+// A run that needs a decision asks a named person (Ask) and waits (Waiting) until that person answers or declines.
+machine Run {
+  state {
+    st         : RunState      = Idle
+    owner      : Ref<Intent>   = none
+    target     : Ref<Document> = none
+    reported   : bool          = false
+    granted    : bool          = false
+    published  : bool          = false
+    grant      : GrantSource   = NoGrant
+    // the person the run is waiting on, and who answered its last question
+    asked      : Ref<Person>   = none
+    answeredBy : Ref<Person>   = none
+    // how many questions the run has asked, and how many it may ask: a run interrupts people a bounded number of
+    // times. Set by the host like the step limit; the checked range is small, the host's may be larger.
+    questions  : int check 0..2 = 0
+    maxAsk     : int check 0..2 = 1
+    // metering, set by the host when the run is created (config per role, defaults in server/limits.mjs). The checked
+    // ranges are small so the check stays exhaustive; the host counts in micro-dollars, far outside them. The
+    // comparisons are linear, so what is checked is their shape, and the cost domain is disclosed (PT3.4) rather than
+    // strict: the runtime accepts a cost outside 0..8 (the host keeps no drift journal).
+    calls      : int check 0..4 = 0
+    limit      : int check 0..4 = 1
+    spent      : int check 0..16 = 0
+    budget     : int check 0..8 = 1
+    stop       : StopReason     = Running
+  }
+
+  terminal st in { Done, Failed, Stopped, Closed }
+
+  action Start(from: Ref<Intent>, doc: Ref<Document>)
+  action Step()
+  action Ready()
+  action Granted(by: GrantSource)
+  action Denied()
+  action Published()
+  action PublishFailed()
+  action Fail()
+  action Close()
+  action Ask(to: Ref<Person>)
+  action Answered(by: Ref<Person>)
+  action Unanswered(by: Ref<Person>)
+  action CallRequested()
+  action CallCompleted(cost: int check 0..8 disclosed)
+  action Interrupted()
+  action Resume()
+
+  on Start(from, doc) {
+    require st == Idle else reject "started"
+    st' = Working
+    owner' = from
+    target' = doc
+  }
+
+  // The first report. Later progress notes are the host's activity log, not machine steps, so transit stays bounded.
+  on Step {
+    require st == Working && !reported else reject "reported"
+    reported' = true
+    send owner <- Progress()
+  }
+
+  on Ready {
+    require st == Working && reported else reject "not-ready"
+    st' = Blocked
+    send owner <- PermissionAsked()
+  }
+
+  // The grant names its source; a run publishes only on a grant that has one.
+  on Granted(by) {
+    require st == Blocked else reject "not-blocked"
+    require by != NoGrant else reject "no-grant"
+    st' = Publishing
+    granted' = true
+    grant' = by
+    emit publish()
+  }
+
+  on Denied {
+    require st == Blocked else reject "not-blocked"
+    st' = Working
+  }
+
+  // A role needs a decision it may not make: the run asks the person who owns it and holds the document meanwhile.
+  on Ask(to) {
+    require st == Working else reject "not-working"
+    require to != none else reject "no-person"
+    require questions < maxAsk else reject "too-many-questions"
+    st' = Waiting
+    questions' = questions + 1
+    asked' = to
+    answeredBy' = none
+    send to <- Asked(from: self)
+  }
+
+  // Only the person asked can answer. Anyone else's answer is refused and the run keeps waiting.
+  on Answered(by) {
+    require st == Waiting else reject "not-waiting"
+    require by == asked else reject "not-asked-of-you"
+    st' = Working
+    answeredBy' = by
+  }
+
+  // The person declined (or the question was cancelled for them): the run continues with the card's default.
+  on Unanswered(by) {
+    require st == Waiting else reject "not-waiting"
+    require by == asked else reject "not-asked-of-you"
+    st' = Working
+  }
+
+  on Published {
+    require st == Publishing else reject "not-publishing"
+    st' = Done
+    published' = true
+    send target <- Published()
+    send owner <- Finished()
+  }
+
+  on PublishFailed {
+    require st == Publishing else reject "not-publishing"
+    st' = Failed
+    send target <- Released()
+    send owner <- RunFailed()
+  }
+
+  on Fail {
+    require st == Working || st == Blocked || st == Waiting else reject "not-running"
+    st' = Failed
+    send target <- Released()
+    send owner <- RunFailed()
+  }
+
+  on Close {
+    require st == Idle else reject "started"
+    st' = Closed
+  }
+
+  // The gateway asks before each model call. A refusal to proceed is the run stopping itself and telling its owner.
+  on CallRequested {
+    require st == Working else reject "not-working"
+    if calls >= limit {
+      st' = Stopped
+      stop' = StepLimit
+      send target <- Released()
+      send owner <- RunFailed()
+    } else {
+      if spent >= budget {
+        st' = Stopped
+        stop' = CostBudget
+        send target <- Released()
+        send owner <- RunFailed()
+      } else {
+        calls' = calls + 1
+      }
+    }
+  }
+
+  // The gateway reports what the call cost. A call that takes the run past its budget stops it.
+  on CallCompleted(cost) {
+    require st == Working else reject "not-working"
+    spent' = spent + cost
+    if spent + cost > budget {
+      st' = Stopped
+      stop' = CostBudget
+      send target <- Released()
+      send owner <- RunFailed()
+    }
+  }
+
+  // The server went away under a working run. The run keeps its document and waits for Resume. A waiting run has
+  // nothing in flight, so a restart leaves it Waiting.
+  on Interrupted {
+    require st == Working else reject "not-working"
+    st' = Suspended
+  }
+
+  on Resume {
+    require st == Suspended else reject "not-suspended"
+    st' = Working
+  }
+
+  invariant published-was-granted: published implies granted
+  invariant publish-needs-a-grant: published implies grant != NoGrant
+  invariant answer-came-from-the-asked: answeredBy == none || answeredBy == asked
+  invariant questions-within-limit: questions <= maxAsk
+  invariant calls-within-limit: calls <= limit
+  invariant spent-within-budget-unless-stopped: spent <= budget || st == Stopped
+  invariant stopped-has-a-reason: st == Stopped implies stop != Running
+  path property publish-at-most-once: count("agent.publish") <= 1
+
+  effect publish() {
+    kind "agent.publish"
+    labels { egress:external }
+    class irreversible
+    ok -> Published()
+    failed -> PublishFailed()
+  }
+}
+
+// ---- Order fulfilment: the same front door for operational work (README, "Orders"). -------------------------------
+// An order is a saga: reserve the stock, pick, book a carrier pickup, hand the goods over, invoice, charge, and the
+// customer confirms the receipt. Each step that took something has the step that gives it back (compensation). The
+// order owes its customer a delivery, and that is an Obligation: the warehouse, the carrier booking and finance are
+// sub-obligations of it. Quantities and money are counted in small ranges so the check is exhaustive; the host counts
+// in units and cents, outside them, and the action parameters that carry them are disclosed (PT3.4) for that reason.
+
+enum OrderState { Placed, Reserving, Short, Offering, Substituting, Picking, Booking, Rebooking, Unknown, Booked, Invoicing, Approving, Charging, Delivering, Done, Cancelled, Stuck }
+
+// How a shortage was settled: the units ordered, the units of another model, a second shipment, a later date.
+enum ShortPath { Direct, ViaSubstitute, ViaSplit, ViaMove }
+
+// Stock: the units of one model in one warehouse. Orders share it. A reservation takes what is there, up to the
+// quantity asked, and says how many it took; a release gives units back; a restock is units arriving.
+service machine Stock {
+  state {
+    onHand      : int check 0..4 = 1
+    // units out on reservations, and units that arrived since the start; the host allows as many arrivals as it likes,
+    // the check allows maxReceived
+    out         : int check 0..4 = 0
+    received    : int check 0..2 = 0
+    maxReceived : int check 0..2 = 2
+  }
+
+  action Reserve(from: Ref<Order>, qty: int check 0..2 disclosed, substitute: bool)
+  action Release(n: int check 0..2 disclosed)
+  action Restock(n: int check 0..2 disclosed)
+
+  on Reserve(from, qty, substitute) {
+    require qty > 0 else reject "nothing-asked"
+    if onHand >= qty {
+      onHand' = onHand - qty
+      out' = out + qty
+      if substitute {
+        send from <- Substituted(got: qty)
+      } else {
+        send from <- Reserved(got: qty)
+      }
+    } else {
+      onHand' = 0
+      out' = out + onHand
+      if substitute {
+        send from <- Substituted(got: onHand)
+      } else {
+        send from <- Reserved(got: onHand)
+      }
+    }
+  }
+
+  // Only units that are out come back: a release of units never reserved is refused.
+  on Release(n) {
+    require n > 0 && n <= out else reject "nothing-reserved"
+    onHand' = onHand + n
+    out' = out - n
+  }
+
+  on Restock(n) {
+    require n > 0 && received + n <= maxReceived else reject "nothing-arrived"
+    onHand' = onHand + n
+    received' = received + n
+  }
+}
+
+machine Order {
+  state {
+    st           : OrderState  = Placed
+    path         : ShortPath   = Direct
+    stock        : Ref<Stock>  = none
+    spare        : Ref<Stock>  = none
+    // the main obligation and its parts: the warehouse owes the units picked, the carrier booking a pickup slot, finance
+    // an invoice and a charge, each once
+    main         : Ref<Obligation> = none
+    pick         : Ref<Obligation> = none
+    book         : Ref<Obligation> = none
+    bill         : Ref<Obligation> = none
+    qty          : int check 0..2 = 0
+    // units reserved from the model ordered and from the substitute. A second shipment (a split) is the host's: it
+    // places a new order for the units left over.
+    held         : int check 0..2 = 0
+    held2        : int check 0..2 = 0
+    // the units of the substitute model the customer agreed to take: the order never holds more of it than that
+    agreedX2     : int check 0..2 = 0
+    // some units were cancelled at the customer's request
+    trimmed      : bool        = false
+    // money: a charge above the limit, or to a new customer, needs a person's approval. The host passes the amount
+    // each time it changes (the order, a split, a cancel) and sets the limit; the machine keeps only the decision
+    limit        : int check 0..2 = 1
+    newCustomer  : bool        = false
+    needsApproval: bool        = false
+    approved     : bool        = false
+    charged      : bool        = false
+    // the carrier booking: how many were made, how many a person said did not happen, how many the host allows, and
+    // whether a person found the last one
+    bookings     : int check 0..2 = 0
+    notFound     : int check 0..2 = 0
+    maxBookings  : int check 0..2 = 2
+    found        : bool        = false
+    // the obligations are settling: a doubt was raised, or a part put back on track, and the answer has not come. Nothing
+    // new starts meanwhile, so no message from one round overtakes the next.
+    pending      : bool        = false
+  }
+
+  terminal st in { Done, Cancelled, Stuck }
+
+  action Place(wanted: int check 2..2 disclosed, total: int check 1..2 disclosed, isNew: bool)
+  action Reserved(got: int check 0..2 disclosed)
+  action Substituted(got: int check 0..2 disclosed)
+  action Substitute()
+  action ConfirmSubstitute(by: GrantSource)
+  action Split()
+  action Move()
+  action Agree(by: GrantSource, total: int check 0..2 disclosed)
+  action Decline(by: GrantSource)
+  action Cancel(n: int check 1..2 disclosed, total: int check 1..2 disclosed)
+  action Picked(by: GrantSource)
+  action SlotBooked()
+  action BookRefused()
+  action BookUnknown()
+  action Resolve(exists: bool, by: GrantSource)
+  action Handover(by: GrantSource)
+  action Invoiced()
+  action InvoiceFailed()
+  action Approve(by: GrantSource)
+  action Charged()
+  action ChargeFailed()
+  action Received(by: GrantSource)
+  action Warned()
+
+  // Ana says go: the warehouse reserves the units, and the main obligation and the picking start.
+  on Place(wanted, total, isNew) {
+    require st == Placed else reject "not-placed"
+    require wanted > 0 else reject "nothing-to-ship"
+    st' = Reserving
+    qty' = wanted
+    newCustomer' = isNew
+    needsApproval' = isNew || total > limit
+    if stock != none {
+      send stock <- Reserve(from: self, qty: wanted, substitute: false)
+    }
+    if main != none {
+      send main <- Go()
+    }
+    if pick != none {
+      send pick <- Go()
+    }
+  }
+
+  // The units reserved from the model ordered (the first time, or after the date moved). Fewer than ordered: the
+  // warehouse is at risk, so the main obligation is, and the sales rep chooses a path.
+  on Reserved(got) {
+    require st == Reserving else reject "not-reserving"
+    require got <= qty - held - held2 else reject "more-than-asked"
+    held' = held + got
+    if held + got + held2 >= qty {
+      st' = Picking
+    } else {
+      st' = Short
+      if main != none && pick != none {
+        pending' = true
+        send main <- ChildDoubt(from: pick, ack: self)
+      }
+    }
+  }
+
+  // The units reserved from the substitute model.
+  on Substituted(got) {
+    require st == Reserving && path == ViaSubstitute else reject "not-substituting"
+    require got <= qty - held else reject "more-than-asked"
+    held2' = got
+    if held + got >= qty {
+      st' = Picking
+      if pick != none {
+        pending' = true
+        send pick <- Back(ack: self)
+      }
+    } else {
+      st' = Short
+      if main != none && pick != none {
+        pending' = true
+        send main <- ChildDoubt(from: pick, ack: self)
+      }
+    }
+  }
+
+  // The obligations have settled (a part followed its parent, or is back on track with it). What waited for that starts now:
+  // the stock is asked again after the date moved, the carrier is asked again after a person found no booking.
+  on Warned {
+    require true else reject "never"
+    pending' = false
+    if st == Reserving && path == ViaMove {
+      if stock != none {
+        send stock <- Reserve(from: self, qty: qty - held - held2, substitute: false)
+      }
+    } else {
+      if st == Rebooking {
+        st' = Booking
+        bookings' = bookings + 1
+        emit reserveSlot()
+      }
+    }
+  }
+
+  // The three paths out of a shortage. Each waits for the people it needs.
+  on Substitute {
+    require st == Short && path == Direct && !pending else reject "not-short"
+    st' = Substituting
+    path' = ViaSubstitute
+  }
+
+  on ConfirmSubstitute(by) {
+    require st == Substituting && by == ByPerson else reject "needs-the-warehouse-lead"
+    // the substitute is part of what the customer is owed, so it is offered to the customer first; it is reserved on their agreement
+    if qty > held {
+      st' = Offering
+    } else {
+      st' = Picking
+      if pick != none {
+        pending' = true
+        send pick <- Back(ack: self)
+      }
+    }
+  }
+
+  on Split {
+    require st == Short && !pending else reject "not-short"
+    st' = Offering
+    path' = ViaSplit
+  }
+
+  on Move {
+    require st == Short && !pending else reject "not-short"
+    st' = Offering
+    path' = ViaMove
+  }
+
+  // The customer agrees to the split or the later date. A split ships what is held now and leaves the rest for a second
+  // shipment; a later date reserves the rest again, once the stock has arrived.
+  on Agree(by, total) {
+    require st == Offering && by == ByPerson else reject "needs-the-customer"
+    needsApproval' = newCustomer || total > limit
+    if path == ViaSplit {
+      qty' = held + held2
+      agreedX2' = held2
+      st' = Picking
+      if pick != none {
+        pending' = true
+        send pick <- Back(ack: self)
+      }
+    } else {
+      st' = Reserving
+      if path == ViaSubstitute {
+        // the customer agreed to the substitute for the units that are short: only that much of it is reserved
+        agreedX2' = qty - held
+        if spare != none {
+          send spare <- Reserve(from: self, qty: qty - held, substitute: true)
+        }
+      } else {
+        if stock != none && pick == none {
+          send stock <- Reserve(from: self, qty: qty - held - held2, substitute: false)
+        }
+        if pick != none {
+          pending' = true
+          send pick <- Back(ack: self)
+        }
+      }
+    }
+  }
+
+  on Decline(by) {
+    require st == Offering && by == ByPerson else reject "needs-the-customer"
+    st' = Short
+    path' = Direct
+  }
+
+  // The customer cancels some units, or all of them. The units reserved beyond what is still ordered go back to the
+  // stock they came from. An order with nothing left is Cancelled and holds nothing.
+  on Cancel(n, total) {
+    require st == Short || st == Offering || st == Substituting || st == Picking || st == Booked else reject "too-late-to-cancel"
+    require n > 0 && n <= qty else reject "nothing-to-cancel"
+    require n == qty || !pending else reject "settling"
+    needsApproval' = newCustomer || total > limit
+    trimmed' = true
+    qty' = qty - n
+    if n == qty {
+      st' = Cancelled
+      held' = 0
+      held2' = 0
+      agreedX2' = 0
+      if held > 0 && stock != none {
+        send stock <- Release(n: held)
+      }
+      if held2 > 0 && spare != none {
+        send spare <- Release(n: held2)
+      }
+      if main != none {
+        send main <- Release()
+      }
+      if pick != none {
+        send pick <- Release()
+      }
+      if book != none {
+        send book <- Release()
+      }
+      if bill != none {
+        send bill <- Release()
+      }
+    } else {
+      if held + held2 > qty - n {
+        if held >= held + held2 - (qty - n) {
+          held' = held - (held + held2 - (qty - n))
+          if stock != none {
+            send stock <- Release(n: held + held2 - (qty - n))
+          }
+        } else {
+          held' = 0
+          held2' = held2 - (held + held2 - (qty - n) - held)
+          agreedX2' = held2 - (held + held2 - (qty - n) - held)
+          if held > 0 && stock != none {
+            send stock <- Release(n: held)
+          }
+          if spare != none {
+            send spare <- Release(n: held + held2 - (qty - n) - held)
+          }
+        }
+      }
+      if (st == Short || st == Offering || st == Substituting) && held + held2 >= qty - n {
+        st' = Picking
+        if pick != none {
+          pending' = true
+          send pick <- Back(ack: self)
+        }
+      }
+    }
+  }
+
+  // JJ's warehouse picked the units: the picking obligation is met by a person, and the carrier is asked, once.
+  on Picked(by) {
+    require st == Picking && by == ByPerson && !pending else reject "needs-the-warehouse-lead"
+    st' = Booking
+    bookings' = bookings + 1
+    if pick != none {
+      send pick <- Confirm(by: by)
+    }
+    emit reserveSlot()
+  }
+
+  on SlotBooked {
+    require st == Booking else reject "not-booking"
+    st' = Booked
+  }
+
+  on BookRefused {
+    require st == Booking else reject "not-booking"
+    st' = Stuck
+    if main != none {
+      pending' = true
+      send main <- ChildDoubt(from: book, ack: self)
+    }
+  }
+
+  // The booking was asked once and nothing came back. It may exist, so it is not asked again: the order waits, the
+  // carrier booking is at risk (and the main obligation), and only a person's Resolve moves it on.
+  on BookUnknown {
+    require st == Booking else reject "not-booking"
+    st' = Unknown
+    if main != none {
+      pending' = true
+      send main <- ChildDoubt(from: book, ack: self)
+    }
+  }
+
+  // A person checked the carrier's portal. Found: the booking stands. Not found: it did not happen, and the person
+  // lets it be asked again (within what the host allows); otherwise the order waits for a person.
+  on Resolve(exists, by) {
+    require st == Unknown && by == ByPerson && !pending else reject "needs-a-person"
+    if exists {
+      st' = Booked
+      found' = true
+      if book != none {
+        pending' = true
+        send book <- Back(ack: self)
+      }
+    } else {
+      notFound' = notFound + 1
+      if bookings < maxBookings {
+        if book != none {
+          st' = Rebooking
+          pending' = true
+          send book <- Back(ack: self)
+        } else {
+          st' = Booking
+          bookings' = bookings + 1
+          emit reserveSlot()
+        }
+      } else {
+        st' = Stuck
+        if main != none {
+          send main <- Stall()
+        }
+      }
+    }
+  }
+
+  // The goods leave with the carrier: a person hands them over. The booking obligation is met, and finance invoices.
+  on Handover(by) {
+    require st == Booked && by == ByPerson && !pending else reject "needs-the-warehouse-lead"
+    st' = Invoicing
+    if book != none {
+      send book <- Confirm(by: by)
+    }
+    if bill != none {
+      send bill <- Go()
+    }
+    emit invoice()
+  }
+
+  // The invoice exists. A charge above the limit, or to a new customer, waits for a person's approval; any other is made.
+  on Invoiced {
+    require st == Invoicing else reject "not-invoicing"
+    if needsApproval && !approved {
+      st' = Approving
+    } else {
+      st' = Charging
+      emit charge()
+    }
+  }
+
+  on InvoiceFailed {
+    require st == Invoicing else reject "not-invoicing"
+    st' = Stuck
+    if main != none {
+      pending' = true
+      send main <- ChildDoubt(from: bill, ack: self)
+    }
+  }
+
+  on Approve(by) {
+    require st == Approving && by == ByPerson else reject "needs-the-approver"
+    approved' = true
+    st' = Charging
+    emit charge()
+  }
+
+  on Charged {
+    require st == Charging else reject "not-charging"
+    charged' = true
+    st' = Delivering
+  }
+
+  // The charge is asked once. If it fails, or its answer does not come, it is not asked again: a person looks.
+  on ChargeFailed {
+    require st == Charging else reject "not-charging"
+    st' = Stuck
+    if main != none {
+      pending' = true
+      send main <- ChildDoubt(from: bill, ack: self)
+    }
+  }
+
+  // The customer confirms the receipt: a person, and the only thing that meets the main obligation.
+  on Received(by) {
+    require st == Delivering && by == ByPerson else reject "needs-the-customer"
+    st' = Done
+    if main != none {
+      send main <- Confirm(by: by)
+    }
+    if bill != none {
+      send bill <- Confirm(by: by)
+    }
+  }
+
+  invariant substitute-only-as-agreed: held2 <= agreedX2
+  invariant cancelled-holds-nothing: st == Cancelled implies (held == 0 && held2 == 0 && !charged)
+  invariant done-is-charged: st == Done implies charged
+  invariant charge-needs-approval: (st == Charging || charged) implies (!needsApproval || approved)
+  invariant a-booking-is-asked-once-per-answer: bookings <= notFound + 1
+  invariant found-means-a-booking-exists: found implies bookings > 0
+  // a booking that timed out is moved on only by a person's Resolve: no late answer, no timer, no retry
+  step property unknown-leaves-only-by-resolve: (pre.st == Unknown && post.st != Unknown) implies action == Resolve
+  path property charge-at-most-once: count("billing.charge") <= 1
+
+  effect reserveSlot() {
+    kind "carrier.book"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 10s }
+    ok -> SlotBooked()
+    failed -> BookRefused()
+    exhausted -> BookUnknown()
+  }
+
+  effect invoice() {
+    kind "billing.invoice"
+    labels { egress:external }
+    class compensable
+    retry { attempts 1, base 200ms, timeout 10s }
+    ok -> Invoiced()
+    failed -> InvoiceFailed()
+    exhausted -> InvoiceFailed()
+  }
+
+  effect charge() {
+    kind "billing.charge"
+    labels { egress:external }
+    class compensable
+    retry { attempts 1, base 200ms, timeout 10s }
+    ok -> Charged()
+    failed -> ChargeFailed()
+    exhausted -> ChargeFailed()
+  }
+}
+
+// ---- Incident: an obligation to restore a service by a deadline (README, "Incidents"). ----------------------------------
+// An incident is a page that must be answered, a path chosen, a fix that may need elevated access, a restore that a
+// person verifies, and a close that gives the access back. What it owes is an Obligation (the SLA) and, apart from it,
+// the customer updates are another (comms). Time is the host's: the demo clock fires Timeout, Expire, UpdateDue and
+// UpdateLate; the check does not compare durations, it checks what may follow what. The forecast (server/forecast.mjs)
+// reaches this machine only as Forecast, which records itself and sends Doubt to the SLA obligation, and nothing else.
+
+enum IncidentState { Opened, Paging, Paged, Escalating, Unreached, Working, NeedsAccess, Fixing, Restored, Verified, Closing, Closed }
+
+// How the service is brought back: roll back the change, wait for the engineer's fix, hand it to the secondary on-call.
+enum FixPath { NoPath, Rollback, WaitFix, Secondary }
+
+// What the forecast says about the deadline.
+enum Outlook { OnTrack, Doubtful, WillMiss }
+
+enum GrantState { Idle, Requested, Granted, Denied, Revoked, Expired }
+
+// AccessGrant: time-limited elevated access to a system, for one incident. Only the owner's approval grants it, and it
+// ends in exactly one of three ways: denied, expired at the end of its window, or revoked (when the incident closes).
+// It is a service machine so that a revoke that arrives after the access has already ended is still answered.
+service machine AccessGrant {
+  state {
+    st         : GrantState    = Idle
+    approvedBy : GrantSource   = NoGrant
+    used       : bool          = false
+    inc        : Ref<Incident> = none
+    // a revoke reached a grant that had already ended; it changed nothing (a write, so the no-op is visible)
+    late       : bool          = false
+  }
+
+  action Request()
+  action Approve(by: GrantSource)
+  action Deny(by: GrantSource)
+  action Use()
+  action Expire()
+  action Revoke(ack: Ref<Incident>)
+
+  on Request {
+    require st == Idle else reject "asked-already"
+    st' = Requested
+  }
+
+  // Only the owner of the data grants access: no policy, no agent.
+  on Approve(by) {
+    require st == Requested && by == ByPerson else reject "needs-the-owner"
+    st' = Granted
+    approvedBy' = by
+    if inc != none {
+      send inc <- AccessReady()
+    }
+  }
+
+  on Deny(by) {
+    require st == Requested && by == ByPerson else reject "needs-the-owner"
+    st' = Denied
+    if inc != none {
+      send inc <- AccessDenied()
+    }
+  }
+
+  on Use {
+    require st == Granted else reject "not-granted"
+    used' = true
+  }
+
+  // The end of the approved window.
+  on Expire {
+    require st == Granted else reject "not-granted"
+    st' = Expired
+  }
+
+  // The incident is closing: the access is given back, whatever its state, and the incident is told. Total, since the
+  // window may have ended first.
+  on Revoke(ack) {
+    require true else reject "never"
+    if st == Granted || st == Requested || st == Idle {
+      st' = Revoked
+    } else {
+      late' = true
+    }
+    if ack != none {
+      send ack <- Revoked()
+    }
+  }
+
+  invariant granted-by-the-owner: st == Granted implies approvedBy == ByPerson
+  liveness access-ends-with-its-window: st == Granted leads to st == Expired || st == Revoked under fair { Expire }
+}
+
+machine Incident {
+  state {
+    st         : IncidentState    = Opened
+    path       : FixPath          = NoPath
+    fc         : Outlook          = OnTrack
+    // the SLA obligation, the customer-update obligation and the access grant
+    main       : Ref<Obligation>  = none
+    comms      : Ref<Obligation>  = none
+    grant      : Ref<AccessGrant> = none
+    // the page was answered (the pager's completions can arrive in any state, see PageSent)
+    answered   : bool             = false
+    escalated  : bool             = false
+    // how many times the owner refused the access
+    denied     : int check 0..2   = 0
+    // a person verified that the service is back
+    verified   : bool             = false
+    // a customer update is owed, and one was ever late
+    updateOwed : bool             = false
+    lateSeen   : bool             = false
+    // how many times the forecast, and a late update, have raised a doubt, and how many the configuration lets them. A
+    // parameter like maxReroutes: the host sets it high, a configuration sets it small so the messages in transit stay
+    // within the bound.
+    doubts     : int check 0..2   = 0
+    lates      : int check 0..2   = 0
+    maxDoubts  : int check 0..2   = 2
+  }
+
+  terminal st in { Closed, Unreached }
+
+  action Go()
+  action PageSent()
+  action PageFailed()
+  action Ack()
+  action Timeout()
+  action Escalated()
+  action EscalateFailed()
+  action Choose(p: FixPath)
+  action AccessReady()
+  action AccessDenied()
+  action FixDone()
+  action Verify(by: GrantSource)
+  action Close()
+  action Revoked()
+  action Forecast(risk: Outlook)
+  action UpdateDue()
+  action UpdatePosted()
+  action UpdateLate()
+
+  // The lead approved the plan: the on-call engineer is paged, once.
+  on Go {
+    require st == Opened else reject "not-opened"
+    st' = Paging
+    emit page()
+  }
+
+  // The pager's answers can arrive after the engineer's acknowledgement, so these two act only while paging.
+  on PageSent {
+    answered' = true
+    if st == Paging {
+      st' = Paged
+    }
+  }
+
+  on PageFailed {
+    answered' = true
+    if st == Paging {
+      st' = Escalating
+      emit escalate()
+    }
+  }
+
+  on Ack {
+    require st == Paging || st == Paged else reject "not-waiting"
+    st' = Working
+  }
+
+  // The page went unanswered for its limit: the secondary is paged, once.
+  on Timeout {
+    require st == Paging || st == Paged else reject "not-waiting"
+    st' = Escalating
+    emit escalate()
+  }
+
+  on Escalated {
+    require st == Escalating else reject "not-escalating"
+    st' = Working
+    escalated' = true
+  }
+
+  on EscalateFailed {
+    require st == Escalating else reject "not-escalating"
+    st' = Unreached
+  }
+
+  // The lead chose how the service comes back. A rollback needs access to the production database: it asks the owner,
+  // and only once (a refusal sends the lead back to choose another way).
+  on Choose(p) {
+    require st == Working && p != NoPath && (p != Rollback || (denied == 0 && grant != none)) else reject "cannot-choose"
+    path' = p
+    if p == Rollback {
+      st' = NeedsAccess
+      send grant <- Request()
+    } else {
+      st' = Fixing
+    }
+  }
+
+  on AccessReady {
+    require st == NeedsAccess else reject "not-waiting-for-access"
+    st' = Fixing
+  }
+
+  on AccessDenied {
+    require st == NeedsAccess else reject "not-waiting-for-access"
+    st' = Working
+    path' = NoPath
+    denied' = denied + 1
+  }
+
+  // The service reports itself back. That is not the restore: a person verifies it.
+  on FixDone {
+    require st == Fixing else reject "not-fixing"
+    st' = Restored
+  }
+
+  // Only a person's verification meets the SLA.
+  on Verify(by) {
+    require st == Restored && by == ByPerson else reject "needs-a-person"
+    st' = Verified
+    verified' = true
+    if main != none {
+      send main <- Confirm(by: by)
+    }
+  }
+
+  // The incident closes when the service is verified and no customer update is owed; the access is given back first.
+  on Close {
+    require st == Verified && !updateOwed else reject "not-closable"
+    if grant != none {
+      st' = Closing
+      send grant <- Revoke(ack: self)
+    } else {
+      st' = Closed
+    }
+  }
+
+  on Revoked {
+    require st == Closing else reject "not-closing"
+    st' = Closed
+  }
+
+  // The forecast: it records what it said and, when it doubts the deadline, sends Doubt. It starts nothing, grants
+  // nothing, and neither ends nor meets an obligation.
+  on Forecast(risk) {
+    require st != Closed && st != Unreached else reject "ended"
+    fc' = risk
+    if risk != OnTrack && doubts < maxDoubts {
+      doubts' = doubts + 1
+      if main != none {
+        send main <- Doubt()
+      }
+    }
+  }
+
+  // A customer update is owed (30 minutes since the last), posted, or late (the next one is due).
+  on UpdateDue {
+    require st != Closed && st != Unreached && !updateOwed else reject "cannot-owe"
+    updateOwed' = true
+  }
+
+  on UpdatePosted {
+    require updateOwed else reject "none-owed"
+    updateOwed' = false
+  }
+
+  on UpdateLate {
+    require updateOwed else reject "none-owed"
+    lateSeen' = true
+    if comms != none && lates < maxDoubts {
+      lates' = lates + 1
+      send comms <- Doubt()
+    }
+  }
+
+  invariant closed-means-verified: st == Closed implies verified
+  invariant closed-owes-no-update: st == Closed implies !updateOwed
+  path property page-at-most-once: count("pager.page") <= 1
+  path property escalate-at-most-once: count("pager.escalate") <= 1
+  liveness page-is-answered: st == Paging leads to st == Working || st == Unreached under fair { Timeout, PageSent, PageFailed, Escalated, EscalateFailed }
+
+  effect page() {
+    kind "pager.page"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 10s }
+    ok -> PageSent()
+    failed -> PageFailed()
+    exhausted -> PageFailed()
+  }
+
+  effect escalate() {
+    kind "pager.escalate"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 10s }
+    ok -> Escalated()
+    failed -> EscalateFailed()
+    exhausted -> EscalateFailed()
+  }
+}
+
+// Three configurations check the machines together. One holding every path at once does not fit an exhaustive check
+// (it ran out of a 6 GB heap), so the question path and the reopen path have their own, and each configuration says
+// what it leaves out. scripts/witness.mjs shows that the paths each one is for are reachable, so a CLEAN verdict is
+// not a CLEAN verdict over a path no input reaches.
+
+// define: grants, the gate, the queue and acceptance. One intent on the MRD and one on the PRD; the PRD is gated on
+// the MRD. The MRD's owner (JJ) has the policy "publish drafts on their own"; the PRD's owner (Ben) asks, and may
+// queue his PRD intent when the gate refuses it. The publish effect's completions are inputs, so both outcomes are
+// explored and every grant invariant is exercised (PT12.3). A document is accepted with any GrantSource the
+// environment offers, so the check shows a policy can never accept. Questions are left to define-ask.
+configuration define {
+  mrd : Document { down: prd }
+  prd : Document { gated: true }
+  r1  : Run
+  r2  : Run
+  i1  : Intent { run: r1, doc: mrd, autoPublish: true }
+  i2  : Intent { run: r2, doc: prd }
+  inputs { i1.Submit, i1.Cancel, i1.Accept, i1.Reject, i2.Submit, i2.Queue, i2.Dequeue, i2.Drop, i2.Approve, i2.Deny, i2.Accept, i2.Reject, r1.Step, r1.Ready, r1.Published, r1.PublishFailed, r2.Step, r2.Ready, r2.Published, r2.PublishFailed, r1.CallRequested, r1.CallCompleted, r1.Interrupted, r1.Resume, mrd.Accept, mrd.Reopen, mrd.Unpublish, prd.Accept }
+  bounds { transit 12 }
+  // publish needs a grant (it was "publish needs approval" before policies), and one invariant per grant source
+  invariant mrd-publish-needs-a-grant: r1.published implies r1.grant != NoGrant
+  invariant prd-publish-needs-a-grant: r2.published implies r2.grant != NoGrant
+  // r1 is granted only by JJ's policy and r2 only by Ben: define-ask checks a person's grant on the MRD run
+  invariant policy-grant-was-the-owners-policy: r1.grant == ByPolicy implies i1.autoPublish
+  invariant person-grant-was-approved: r2.grant == ByPerson implies i2.approved
+  invariant mrd-accepted-by-a-person: mrd.st == Accepted implies mrd.acceptedBy == ByPerson
+  invariant prd-accepted-by-a-person: prd.st == Accepted implies prd.acceptedBy == ByPerson
+}
+
+// define-ask: the question path. One run on the MRD asks a decision of one of two named people (Ana or Ben), who
+// answer or decline in any order; its owner approves the publish. The gate, the queue and metering are left to define.
+configuration define-ask {
+  mrd : Document
+  ana : Person
+  ben : Person
+  r1  : Run { maxAsk: 2 }
+  i1  : Intent { run: r1, doc: mrd }
+  inputs { i1.Submit, i1.Approve, i1.Deny, i1.Accept, r1.Step, r1.Ready, r1.Ask, r1.Answered, r1.Unanswered, r1.Published, r1.PublishFailed, r1.Fail, mrd.Accept }
+  bounds { transit 8 }
+  invariant publish-needs-a-grant: r1.published implies r1.grant != NoGrant
+  invariant person-grant-was-approved: r1.grant == ByPerson implies i1.approved
+  invariant only-the-asked-answers: r1.answeredBy == none || r1.answeredBy == r1.asked
+  invariant only-a-person-accepts: mrd.st == Accepted implies mrd.acceptedBy == ByPerson
+}
+
+// define-reopen: the reopen path. JJ drafts the document by his policy and accepts it; Ben's intent is refused while
+// the document is accepted and queued; the document is reopened, which wakes the queue. No other configuration
+// reopens a document that holds a queued intent.
+configuration define-reopen {
+  d  : Document
+  r0 : Run
+  r  : Run
+  i0 : Intent { run: r0, doc: d, autoPublish: true }
+  i  : Intent { run: r, doc: d }
+  inputs { i0.Submit, i0.Accept, i0.Drop, r0.Step, r0.Ready, r0.Published, d.Accept, d.Reopen, i.Submit, i.Queue, i.Dequeue, i.Drop, r.Fail }
+  bounds { transit 8 }
+  invariant reopened-queue-is-woken: (d.st == Drafted && !d.busy) implies d.queued == none
+  invariant reopen-accepted-by-a-person: d.st == Accepted implies d.acceptedBy == ByPerson
+}
+
+// obligations: an obligation is met only by a person's acceptance of the document it owes, an open one always has a run
+// or a person to answer, and one that is at risk or missed has reached both parties. JJ owes Ana the MRD. The run's
+// failure and the document's acceptance reach the obligation as messages in any order; the debtor's go, the doubt, the
+// new path, the date passing and the release are inputs. The configuration sets maxReroutes to 1, so the check covers
+// one change of path and the messages in transit stay within the bound; the host sets it high and may change it again. Grants, the gate and the queue are left to define.
+configuration obligations {
+  ob  : Obligation { debtor: jj, creditor: ana, maxReroutes: 1 }
+  jj  : Person
+  ana : Person
+  mrd : Document { owed: ob }
+  r1  : Run
+  i1  : Intent { run: r1, doc: mrd, autoPublish: true, obligation: ob }
+  inputs { ob.Go, ob.Doubt, ob.Reroute, ob.Lapse, ob.Release, i1.Submit, i1.Accept, i1.Reject, r1.Step, r1.Ready, r1.Published, r1.PublishFailed, r1.Fail, mrd.Accept, mrd.Reopen }
+  bounds { transit 10 }
+  // The document may be reopened after the obligation is met (a later request), and the Confirm message may arrive after
+  // a reopen, so the check is on the acceptance having happened and being a person's, not on the document staying accepted.
+  invariant met-means-a-person-accepted-the-document: ob.st == Met implies (mrd.drafted && mrd.acceptedBy == ByPerson)
+  invariant a-failed-run-leaves-someone-on-it: (i1.st == Failed && ob.st == Open) implies (ob.working || ob.asked)
+}
+
+// order-stock: two orders share one unit of stock. They cannot hold more than there was, and a cancel gives units back.
+// The orders owe nothing here (no obligations): the stock is the question. Units arriving are an input.
+configuration two-orders {
+  stock    : Stock
+  order[2] : Order { stock: stock }
+  inputs   { order[*].Place, order[*].Cancel, stock.Restock }
+  bounds   { transit 6 }
+  invariant never-oversold: sum(order[*].held) <= init(stock.onHand) + stock.received
+}
+
+// order-short: a shortage and the paths out of it. The warehouse owes the units, as a part of the order's main obligation
+// to the customer. A part at risk puts the main obligation at risk. No party is named (an obligation with none tells nobody),
+// so the Told messages, which obligations checks, are not in transit here.
+configuration order-short {
+  stock : Stock
+  spare : Stock
+  main  : Obligation { maxReroutes: 1 }
+  pick  : Obligation { parent: main, maxReroutes: 1 }
+  order : Order { stock: stock, spare: spare, main: main, pick: pick }
+  inputs { order.Place, order.Substitute, order.ConfirmSubstitute, order.Split, order.Move, order.Agree, order.Cancel, stock.Restock }
+  bounds { transit 7 }
+  invariant a-part-at-risk-puts-the-main-obligation-at-risk: pick.st == AtRisk implies main.st != Open
+}
+
+// order-flow: the carrier booking that may not have happened, the invoice and the charge. The effects' completions are
+// inputs, so every answer (and no answer) is explored.
+configuration order-flow {
+  stock : Stock { onHand: 2 }
+  main  : Obligation { maxReroutes: 1 }
+  book  : Obligation { parent: main, maxReroutes: 1 }
+  bill  : Obligation { parent: main, maxReroutes: 1 }
+  order : Order { stock: stock, main: main, book: book, bill: bill, maxBookings: 2 }
+  inputs { order.Place, order.Picked, order.SlotBooked, order.BookRefused, order.BookUnknown, order.Resolve, order.Handover, order.Invoiced, order.InvoiceFailed, order.Approve, order.Charged, order.ChargeFailed, order.Received }
+  bounds { transit 5 }
+  invariant a-part-at-risk-puts-the-main-obligation-at-risk: (book.st == AtRisk || bill.st == AtRisk) implies main.st != Open
+}
+
+// order-parts: two parts at risk together, the shortage and the carrier timeout overlapping. The shortage (the warehouse) and
+// the booking are in the same order, and the order does not book before the units are picked, so the check asks whether any
+// sequence of inputs puts both at risk at once. The settling step (pending) keeps one round from overtaking the next. The check
+// found the one way they can overlap: a part whose reroutes are used up (the check's cap is 1) stays at risk while its
+// confirmation is still in transit, and the booking goes unknown meanwhile. The host's cap is a million, so the invariant
+// says what the check proves: while a part can still be rerouted, the parts are never at risk together.
+configuration order-parts {
+  stock : Stock
+  spare : Stock
+  main  : Obligation { maxReroutes: 1 }
+  pick  : Obligation { parent: main, maxReroutes: 1 }
+  book  : Obligation { parent: main, maxReroutes: 1 }
+  order : Order { stock: stock, spare: spare, main: main, pick: pick, book: book, maxBookings: 2 }
+  inputs { order.Place, order.Substitute, order.ConfirmSubstitute, order.Move, order.Agree, order.Cancel, order.Picked, order.SlotBooked, order.BookUnknown, order.Resolve, stock.Restock }
+  bounds { transit 9 }
+  invariant the-parts-are-not-at-risk-together-while-one-can-be-rerouted: !(pick.st == AtRisk && book.st == AtRisk && pick.reroutes < pick.maxReroutes)
+  invariant a-part-at-risk-puts-the-main-obligation-at-risk: (pick.st == AtRisk || book.st == AtRisk) implies main.st != Open
+}
+
+// incident-access: the page, the choice of path, the access to the production database, the verified restore and the close.
+// The owner's answers (Approve, Deny), the end of the window (Expire) and the date passing (Lapse) are inputs, and so is
+// every source of an approval, so the check shows that only a person's approval grants. No party is named.
+configuration incident-access {
+  main  : Obligation { maxReroutes: 1 }
+  grant : AccessGrant { inc: inc }
+  inc   : Incident { main: main, grant: grant, maxDoubts: 1 }
+  inputs { inc.Go, inc.PageSent, inc.PageFailed, inc.Ack, inc.Timeout, inc.Escalated, inc.EscalateFailed, inc.Choose, inc.FixDone, inc.Verify, inc.Close, inc.Forecast, grant.Approve, grant.Deny, grant.Use, grant.Expire, main.Lapse }
+  bounds { transit 6 }
+  invariant closing-gives-the-access-back: inc.st == Closed implies (grant.st != Granted && grant.st != Requested)
+  invariant the-sla-is-met-only-after-a-person-verified: main.st == Met implies inc.verified
+  invariant a-forecast-only-doubts: main.st != Released
+}
+
+// incident-comms: the customer updates. A late update puts the comms obligation at risk, on its own, whatever the fix is
+// doing, and the incident does not close while an update is owed.
+configuration incident-comms {
+  main  : Obligation { maxReroutes: 1 }
+  comms : Obligation { maxReroutes: 1 }
+  inc   : Incident { main: main, comms: comms, maxDoubts: 1 }
+  inputs { inc.Go, inc.Ack, inc.Choose, inc.FixDone, inc.Verify, inc.Close, inc.UpdateDue, inc.UpdatePosted, inc.UpdateLate }
+  bounds { transit 6 }
+  invariant comms-at-risk-only-for-a-late-update: comms.st == AtRisk implies inc.lateSeen
+  invariant an-owed-update-keeps-the-incident-open: inc.st == Closed implies !inc.updateOwed
+  liveness a-late-update-puts-comms-at-risk: inc.lateSeen leads to comms.st == AtRisk
+}
