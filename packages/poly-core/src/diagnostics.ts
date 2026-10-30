@@ -126,6 +126,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL5408: { name: 'MESSAGE_OUTSIDE_DOMAIN', stage: 'configuration', severity: 'finding' },
   // PS15.5, S463: a completion of the application's own decision or effect that its handler rejects, which takes the intent off.
   PL5409: { name: 'COMPLETION_REJECTED', stage: 'configuration', severity: 'finding' },
+  // PS13.10, PT14a: a goal of --goals that no explored global state reaches; the checked paths miss the one it names.
+  PL5410: { name: 'GOAL_UNREACHED', stage: 'configuration', severity: 'inconclusive' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
   // S142: an import of a handler file that the certificate cannot name (no such file, outside the project, a URL).

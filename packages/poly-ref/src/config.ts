@@ -164,6 +164,14 @@ export interface ConfigReport {
   neverInstances: { checked: string[]; elsewhere: { instance: string; configuration: string }[] };
   /** PS17.3: the global states the flow rule explored, with their taints; absent when no instance's program declares a source. */
   flowStates?: number;
+  /** PS13.10: each goal asked for, reached with the path to its first breaking state in BFS order, or not reached. */
+  goals: { name: string; reached: boolean; witness?: Witness; stateDigest?: string }[];
+}
+
+/** PS13.10: a goal, a predicate expected to fail in some reachable global state; never a property of the program. */
+export interface ConfigGoal {
+  name: string;
+  expr: A.Expr;
 }
 
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
@@ -526,7 +534,7 @@ function timerTargets(M: RMachine): string[] {
 export const JOINT_CAP = 10_000;
 
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
-export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault } = {}): ConfigReport {
+export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault; goals?: ConfigGoal[] } = {}): ConfigReport {
   const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program, ...(opts.fault ? { fault: opts.fault } : {}) });
   // PS15.5 (S207): the joint configuration holds the channels it names, all live.
   const ofThis = (c: ChannelRoles) => c.name === decl.name || (decl.joint ?? []).includes(c.name);
@@ -614,6 +622,14 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     const i = g.states.findIndex((s) => evaluate(p.expr, envOf(s)) !== true);
     if (i >= 0) findings.push(finding('PL5401', p.id, `configuration invariant ${p.name} is violated in a reachable global state`, pathTo(g, i), { property: p.name, state: g.states[i] }));
   }
+  // PS13.10: each goal over the same global states, judged as an invariant is and kept apart from the findings, so the
+  // configuration's verdict is the same with or without goals.
+  const goals: ConfigReport['goals'] = (opts.goals ?? []).map((q) => {
+    const i = g.states.findIndex((s) => evaluate(q.expr, envOf(s)) !== true);
+    if (i < 0) return { name: q.name, reached: false };
+    const edges = pathTo(g, i);
+    return { name: q.name, reached: true, witness: { id: '', length: edges.length, trace: trace(edges) }, stateDigest: digestOf(g.states[i]) };
+  });
   // PS5.2a (S178): each instance's never statements, on that instance's accepted global steps; the first violating step
   // in BFS order is the witness. Each is listed, violated or not, so that a machine's unconstrained witness can be
   // confirmed or ruled out by the configurations that include the machine.
@@ -788,6 +804,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   }
   return {
     vacuous,
+    goals,
     ...(flowStates !== undefined ? { flowStates } : {}),
     nevers,
     neverInstances: {

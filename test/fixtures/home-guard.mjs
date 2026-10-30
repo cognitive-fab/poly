@@ -25,6 +25,10 @@ function snapshot(dir) {
   return out;
 }
 
+// PT14a: the command line keeps a result cache beside the source by default; every process a test starts inherits this,
+// so the suite never reads a cache it did not name (the release gate runs without the cache).
+process.env.POLY_NO_CACHE = '1';
+
 const guardKey = Symbol.for('poly.home-guard');
 if (!globalThis[guardKey]) {
   globalThis[guardKey] = true;

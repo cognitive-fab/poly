@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // `poly`: the command line (PT14), with the exit codes of PT12.3.
 //
-//   poly check <file.poly | project dir> [--json] [--root <dir>]
+//   poly check <file.poly | project dir> [--json] [--root <dir>] [--config a,b] [--goals <file>] [--cache <dir> | --no-cache]
+//   poly check <file.poly> --defects <file> [--only a,b] [--cache <dir> | --no-cache]
 //   poly witness <id> --trace | --test [--root <dir>] [--out <file>]
 //   poly fix <id> [--root <dir>]
 //   poly admit <project dir>
@@ -9,7 +10,8 @@
 //   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXIT_CODES, ManifestError } from '@poly/core';
 import { WitnessExportError } from './witness.js';
@@ -18,7 +20,8 @@ import { RecordUsageError } from './records.js';
 import { journalCommand, JournalUsageError } from './journal.js';
 import { commandNamed, CommandUsageError } from './commands.js';
 
-const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>] [--host <tsconfig>]
+const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>] [--host <tsconfig>] [--config <a,b>] [--goals <file>] [--cache <dir> | --no-cache]
+       poly check <file.poly> --defects <file> [--only <a,b>] [--root <dir>] [--cache <dir> | --no-cache]
        poly edit-check <module> --old <text> --new <text> | --text <file text> [--project <dir>] [--apply] [--json]
        poly fmt <file.poly> [--write] [--json]
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
@@ -53,7 +56,11 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
            effect, composition and configuration checks; prints the verdict with its checked
-           instance, and writes the report to <root>/.poly/report.json.
+           instance, and writes the report to <root>/.poly/report.json. Results are kept in
+           .poly/cache beside the source and read back when nothing they depend on changed (PT14a).
+           --config a,b checks those configurations only, and lists the others as not run;
+           --goals <file> reports each goal as reached, or PL5410 (PS13.10); --defects <file>
+           applies each seeded defect in memory and says whether the check finds it.
   witness  Writes the witness with that id as {pre, action, data, post} windows (--trace),
            or as a host test that walks it and asserts the violated predicate (--test).
   fix      Applies the fix with that id if its target node still has the digest it was
@@ -61,6 +68,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
 
   --json        print the report as JSON (diagnostics in poly.diagnostic/1 form)
   --root <dir>  where .poly/ lives (default: the project directory, or the working directory)
+  --cache <dir> the result cache (default: .poly/cache beside the source); --no-cache: none
   --out <file>  where \`poly witness\` writes (default: .poly/witness/<id prefix>.<ext>)
 
   admit    Checks the project and, when it is CLEAN, writes .poly/certificate.json, signed
@@ -97,6 +105,19 @@ function option(args: string[], name: string): string | undefined | null {
 }
 
 /**
+ * PT14a: the command line's cache: --cache names it, --no-cache turns it off, and by default it is .poly/cache beside
+ * the source or in the project. POLY_NO_CACHE=1 turns the default off; the test suite's preload sets it, so the suite
+ * never reads a cache it did not name (the release gate runs without the cache).
+ */
+function cacheInput(target: string, args: string[]): { cache?: string; noCache?: true } {
+  if (args.includes('--no-cache')) return { noCache: true };
+  const named = option(args, '--cache');
+  if (named) return { cache: named };
+  if (process.env.POLY_NO_CACHE === '1' || !existsSync(target)) return {};
+  return { cache: join(statSync(target).isDirectory() ? target : dirname(resolve(target)), '.poly', 'cache') };
+}
+
+/**
  * The command line is a projection of the registry (commands.ts, S167): it turns argv into a command's input, runs
  * it, and prints its text, or its JSON with --json. `poly check --json` prints the report itself, as before.
  */
@@ -104,7 +125,11 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   const root = option(args, '--root') ?? undefined;
   const out = option(args, '--out') ?? undefined;
   const [cmd, a, b] = positional;
-  if (cmd === 'check' && positional.length === 2) return { name: 'check', input: { target: a, root, host: option(args, '--host') ?? undefined } };
+  // PT14a: the configurations chosen, the goals, the seeded defects and the cache.
+  if (cmd === 'check' && positional.length === 2) {
+    for (const k of ['--config', '--goals', '--defects', '--only', '--cache']) if (option(args, k) === null) throw new UsageError(`${k} needs a value`);
+    return { name: 'check', input: { target: a, root, host: option(args, '--host') ?? undefined, config: option(args, '--config') ?? undefined, goals: option(args, '--goals') ?? undefined, defects: option(args, '--defects') ?? undefined, only: option(args, '--only') ?? undefined, ...cacheInput(a, args) } };
+  }
   // PT28.4, PT10h: an edit is --old and --new, or --text; it is written only with --apply, after the check.
   if (cmd === 'edit-check' && positional.length === 2) return { name: 'edit-check', input: { module: a, old: option(args, '--old') ?? undefined, new: option(args, '--new') ?? undefined, text: option(args, '--text') ?? undefined, project: option(args, '--project') ?? undefined, apply: args.includes('--apply') } };
   if (cmd === 'fmt' && positional.length === 2) return { name: 'fmt', input: { file: a, write: args.includes('--write') } };
@@ -239,7 +264,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1, args.indexOf('--config') + 1, args.indexOf('--goals') + 1, args.indexOf('--defects') + 1, args.indexOf('--only') + 1, args.indexOf('--cache') + 1].filter((i) => i > 0));
   // PT29.1: options that repeat or are new with export traces, whose values are no positional argument.
   args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output', '--polyness', '--polyness-pin', '--step', '--transcripts', '--runs', '--refine', '--reason', '--event', '--correct', '--decision', '--model', '--verdicts', '--previous'].includes(x)) valued.add(i + 1); });
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));

@@ -36,6 +36,8 @@ import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product
 import { resolveUses, STD } from './uses.js';
 import { resolveProviders } from './providers.js';
 import { resolveRouting, calibrationWarning } from './routing.js';
+import { cacheKey, closure, narrowable, programView, readEntry, writeEntry, type Spawns } from './cache.js';
+import { CheckUsageError, typedGoals, type GoalSpec, type TypedGoal } from './goals.js';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'flow';
 
@@ -74,6 +76,8 @@ export interface MachineCheck {
    * includes the machine ruled out. They are not counted.
    */
   ruledOut?: { property: string; configurations: string[]; witness?: Witness }[];
+  /** PT14a: the result cache's key for the stages from validate() on, and whether they were read from it. */
+  cache?: { key: string; hit: boolean };
 }
 
 /** The model-check stage's own diagnostics, so that its verdict can be recomputed when a finding is ruled out. */
@@ -136,6 +140,18 @@ export interface ConfigCheck {
     bounds: string[];
     kernelAssumptions: string[];
   };
+  /** PS13.10, PT14a: each goal of --goals for this configuration, reached with its witness or not. */
+  goals?: GoalRecord[];
+  /** PT14a: as for a machine. */
+  cache?: { key: string; hit: boolean };
+}
+
+/** PS13.10: a goal's outcome. A goal is not a finding; one not reached is also a PL5410 among the diagnostics. */
+export interface GoalRecord {
+  name: string;
+  path?: string;
+  reached: boolean;
+  witness?: Witness;
 }
 
 export interface CheckReport {
@@ -151,6 +167,10 @@ export interface CheckReport {
   machines: MachineCheck[];
   /** Stage 4b: each configuration of the module (PS13). */
   configurations: ConfigCheck[];
+  /** PT14a: the configurations --config left out, listed as not run; absent when every one was checked. */
+  notSelected?: string[];
+  /** PT14a: the goals whose configuration --config left out, listed as not run. */
+  goalsNotRun?: { configuration: string; name: string }[];
   /** S190: each module whose enums a machine's build uses: the file it was read from, and its AST digest. */
   typeModules?: Record<string, { file: string; digest: string }>;
   /** PT12 (v1, ruled 2026-10-09): each action parameter named after a state field of its machine; never in the verdict. */
@@ -195,6 +215,19 @@ export interface CheckOptions {
   sourceDir?: string;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
+  /**
+   * PT14a: the result cache's directory. Absent, no cache is read or written: poly admit, the language server,
+   * edit-check and the test suite pass none, so a certificate never rests on a cached result.
+   */
+  cache?: string;
+  /** PT14a: the configurations to check; absent, every one. The others are listed under notSelected. */
+  configs?: string[];
+  /** PS13.10, PT14a: the goals of --goals, as the file states them. */
+  goals?: GoalSpec[];
+  /** Set by checkFile (PT14a): whether a cache key may read another machine as its interface. */
+  narrow?: boolean;
+  /** Set by checkFile (PT14a): each machine's attached and detached children, for the keys. */
+  spawns?: Spawns;
   /** PT28.1d, PT10h: a tsconfig naming host code to compile against the generated declarations, after the check. */
   host?: string;
   /**
@@ -308,6 +341,32 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.effectKinds = [...checked.machines.values()].flatMap((f) => [...f.effects.values()].map((e) => ({ kind: effectKind(e), signature: effectSignature(e), effect: `${f.machine.name}.${e.name}`, line: e.span?.line, col: e.span?.col })));
   const refused = report.diagnostics.some((d) => d.severity === 'error');
   const engines = report.engines;
+  // PT14a: --config names configurations the module declares; the others are listed as not run, not folded.
+  const declared = module.decls.filter((d): d is A.Configuration => d.kind === 'Configuration').map((d) => d.name);
+  const unknownConfigs = (opts.configs ?? []).filter((c) => !declared.includes(c));
+  if (unknownConfigs.length) throw new CheckUsageError(`module ${module.name} declares no configuration ${unknownConfigs.join(', ')} (it declares ${declared.join(', ') || 'none'})`);
+  if (opts.configs) {
+    const left = declared.filter((c) => !opts.configs!.includes(c));
+    if (left.length) report.notSelected = left;
+    const goalsLeft = (opts.goals ?? []).filter((g) => left.includes(g.configuration)).map((g) => ({ configuration: g.configuration, name: g.name }));
+    if (goalsLeft.length) report.goalsNotRun = goalsLeft;
+  }
+  // PS13.10, PT14a: each goal parsed and type-checked in its configuration, as stage 0 checks the source.
+  let goals = new Map<string, TypedGoal[]>();
+  if (opts.goals?.length) {
+    if (file.endsWith('.ts')) throw new CheckUsageError('goals are added to a .poly source; an embedded module has none');
+    const unknownGoals = opts.goals.filter((g) => !declared.includes(g.configuration));
+    if (unknownGoals.length) throw new CheckUsageError(`goal ${unknownGoals[0].name} names the configuration ${unknownGoals[0].configuration}, which module ${module.name} does not declare`);
+    if (!refused) goals = typedGoals(src, original, opts.goals, (copy) => {
+      const ex = expandChannels(copy, uses.program);
+      const cr = expandCredentials(copy, uses.program);
+      const ro = expandRoutes(copy, uses.program);
+      const prog = [...uses.program.filter((m) => m !== original), ex.module, ...ex.extra, ...cr.extra, ...ro.extra];
+      return [...ex.diagnostics, ...cr.diagnostics, ...ro.diagnostics, ...checkModule(ex.module, { program: prog, providers, routing }).diagnostics];
+    });
+  }
+  // PT14a: what the cache keys read: whether another machine may be read as its interface, and each machine's children.
+  if (opts.cache) opts = { ...opts, narrow: narrowable([...program, ...uses.program], expansion.extra.length), spawns: spawnsOf(checked) };
 
   for (const machine of checked.machines.keys()) {
     const mc: MachineCheck = { machine, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
@@ -385,9 +444,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }
-  const configs = configurationReports(module, refused, opts.uses, original, uses.program, opts.refFault);
+  const configs = configurationReports(module, refused, opts.uses, original, uses.program, opts.refFault, { ...(opts.configs ? { configs: opts.configs } : {}), goals, ...(opts.cache ? { cache: opts.cache, keyOpts: opts } : {}) });
   report.configurations.push(...configs.configurations);
-  ruleOut(report, module);
+  // PT14a: a machine that a configuration left out by --config runs keeps its never findings; that configuration might
+  // have confirmed them.
+  const skipped = new Set(module.decls.filter((d): d is A.Configuration => d.kind === 'Configuration' && !!report.notSelected?.includes(d.name)).flatMap((d) => [...closure(d.instances.map((i) => i.machine[i.machine.length - 1]), spawnsOf(checked))]));
+  ruleOut(report, module, skipped);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
   if (module.decls.some((d) => d.kind === 'Policy')) {
     if (refused) {
@@ -490,8 +552,96 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   mc.artefactDigests = Object.fromEntries(Object.entries(lowered.files).map(([f, text]) => [f, 'sha256:' + createHash('sha256').update(text, 'utf8').digest('hex')]));
   mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', ms: performance.now() - t0 });
 
+  // ── PT14a: the result cache, for every stage from validate() on ──────────
+  // The lowering above always runs and writes .poly/build, so the files a host copies and admit digests are this check's.
+  // A stage that throws (an error, a nondeterminism) leaves nothing in the cache.
+  const key = opts.cache && opts.through !== 2 ? machineKey(module, machine, lowered.files, opts) : null;
+  if (key) {
+    const hit = readEntry<CachedMachine>(opts.cache!, 'machine', key);
+    if (hit) { restoreMachine(mc, hit, key); return; }
+    const from = mc.stages.length;
+    await stagesAfterLowering(module, checked, machine, mc, opts, engines, dir, lowered);
+    writeEntry(opts.cache!, 'machine', key, storedMachine(mc, from));
+    mc.cache = { key, hit: false };
+    return;
+  }
+  await stagesAfterLowering(module, checked, machine, mc, opts, engines, dir, lowered);
+}
+
+/** A machine's result from validate() on, as the cache holds it (PT14a): before any configuration rules a finding out. */
+interface CachedMachine {
+  stages: StageRecord[];
+  notRun: MachineCheck['notRun'];
+  vacuous: VacuousRecord[];
+  diagnostics: Diagnostic[];
+  instance?: InstanceRecord;
+  retrySafe?: RetrySafeEntry[];
+  effectClasses?: EffectClassEntry[];
+  declassify?: MachineCheck['declassify'];
+  /** The model-check stage's own findings, as indices into diagnostics, for ruleOut (STAGE2). */
+  stage2: number[];
+}
+
+/**
+ * PT14a: the key of a machine's stages from validate() on. It holds the lowered artefacts' digests, the machine and its
+ * children in full, every other declaration (another machine as its interface, a configuration without its properties,
+ * everything in full when anything is expanded), and the options the stages read. A key that cannot be computed (a
+ * value canonical JSON refuses) is no key: the stages run and nothing is stored.
+ */
+function machineKey(module: Module, machine: string, files: Record<string, string>, opts: CheckOptions): string | null {
+  try {
+    const full = closure([machine], opts.spawns ?? new Map());
+    // Every artefact carries the module digest as its version stamp (PT28.1), which an edit to another machine changes.
+    // The key reads each artefact with that stamp replaced by a placeholder: no stage reads the stamp's value, and
+    // translation validation only compares one artefact's stamp with another's, which the replacement keeps.
+    const stamp = (JSON.parse(files['contract.json'] ?? '{}') as { machineVersion?: string }).machineVersion;
+    const artefacts = Object.fromEntries(Object.entries(files).map(([f, text]) => [f, sha256Hex(stamp ? text.split(stamp).join('<module digest>') : text)]));
+    return cacheKey('machine', {
+      module: module.name,
+      machine,
+      refMachine: opts.refMachine ?? null,
+      artefacts,
+      program: programView([...(opts.refProgram ?? []), ...(opts.refModule ? [opts.refModule] : []), ...(opts.uses ?? []), module], module.name, { narrow: opts.narrow === true, full }),
+      options: keyOptions(opts),
+    });
+  } catch { return null; }
+}
+
+/** The options a result depends on, for its key (PT14a). The source's directory only when a route or budget may read it. */
+function keyOptions(opts: CheckOptions): Record<string, unknown> {
+  return { isolation: opts.isolation ?? null, refFault: opts.refFault ?? null, isStd: opts.isStd === true, std: opts.std ?? null, providers: opts.providers ?? null, routing: opts.routing ?? null, sourceDir: opts.narrow ? null : (opts.sourceDir ?? null) };
+}
+
+/** What the cache stores of a machine: everything its stages from validate() on recorded, as JSON (PT14a). */
+function storedMachine(mc: MachineCheck, from: number): CachedMachine {
+  const own = STAGE2.get(mc) ?? [];
+  const value: CachedMachine = {
+    stages: mc.stages.slice(from), notRun: mc.notRun, vacuous: mc.vacuous, diagnostics: mc.diagnostics,
+    ...(mc.instance ? { instance: mc.instance } : {}), ...(mc.retrySafe ? { retrySafe: mc.retrySafe } : {}), ...(mc.effectClasses ? { effectClasses: mc.effectClasses } : {}), ...(mc.declassify ? { declassify: mc.declassify } : {}),
+    stage2: own.map((d) => mc.diagnostics.indexOf(d)).filter((i) => i >= 0),
+  };
+  return JSON.parse(JSON.stringify(value)) as CachedMachine;
+}
+
+/** A cached machine read back (PT14a); each stage it restores says so in its note. */
+function restoreMachine(mc: MachineCheck, e: CachedMachine, key: string): void {
+  const said = `from the cache, key ${key.slice(0, 19)}`;
+  mc.stages.push(...e.stages.map((s) => ({ ...s, note: s.note ? `${s.note}; ${said}` : said })));
+  mc.notRun.push(...e.notRun);
+  mc.vacuous.push(...e.vacuous);
+  mc.diagnostics.push(...e.diagnostics);
+  if (e.instance) mc.instance = e.instance;
+  if (e.retrySafe) mc.retrySafe = e.retrySafe;
+  if (e.effectClasses) mc.effectClasses = e.effectClasses;
+  if (e.declassify) mc.declassify = e.declassify;
+  STAGE2.set(mc, e.stage2.map((i) => mc.diagnostics[i]).filter(Boolean));
+  mc.cache = { key, hit: true };
+}
+
+/** Every stage of a machine from strict validate() on, over the artefacts the lowering wrote to dir. */
+async function stagesAfterLowering(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>, dir: string, lowered: NonNullable<ReturnType<typeof lowerMachine>['lowered']>): Promise<void> {
   // ── stage 1: strict validate() ────────────────────────────────────────
-  t0 = performance.now();
+  let t0 = performance.now();
   // Finding 5: the lowered module is loaded with sam-pattern resolved from poly's own install, so any --root works.
   let mod: { instance: (o: object) => { validate: () => string[] } };
   try {
@@ -827,7 +977,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
-function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): ConfigCheck {
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault, goals: TypedGoal[] = []): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
@@ -835,8 +985,21 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   }
   const t0 = performance.now();
   // PS15: poly-ref reads the source as written, and generates a channel's configuration on its own.
-  const r = checkConfiguration(original, decl.name, { program: refProgram, ...(fault ? { fault } : {}) });
+  const r = checkConfiguration(original, decl.name, { program: refProgram, ...(fault ? { fault } : {}), ...(goals.length ? { goals } : {}) });
   cc.diagnostics.push(...r.findings);
+  // PS13.10: a goal is reached or not; one not reached is PL5410, INCONCLUSIVE, and unknown when a bound cut the exploration.
+  const bounded = r.capHit || r.findings.some((f) => f.code === 'PL5301' || f.code === 'PL5302' || f.code === 'PL3901');
+  const unreached: Diagnostic[] = [];
+  if (goals.length) {
+    cc.goals = goals.map((g) => {
+      const o = r.goals.find((x) => x.name === g.name)!;
+      if (!o.reached) unreached.push(diag('PL5410', { module: module.name, node: decl.id }, bounded
+        ? `goal ${g.name} is not reached in the global states explored, and the exploration hit a bound, so whether a path reaches it is unknown (PS13.10)`
+        : `goal ${g.name} is reached by no path of ${decl.name}${g.path ? ` (${g.path})` : ''}: the paths the check covers do not include it (PS13.10)`, { property: g.name }));
+      return { name: g.name, ...(g.path ? { path: g.path } : {}), reached: o.reached, ...(o.witness ? { witness: o.witness } : {}) };
+    });
+    cc.diagnostics.push(...unreached);
+  }
   cc.vacuous = vacuousRecords(r.vacuous);
   cc.nevers = r.nevers;
   cc.neverInstances = r.neverInstances;
@@ -855,7 +1018,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   };
   const missing = [...new Set(r.instances.flatMap((i) => missingIntents(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name))))].sort().reverse();
   cc.stages.push({
-    stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
+    stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf([...r.findings, ...unreached]), ms: performance.now() - t0,
     note: `${r.states} global states, ${r.transitions} global steps${r.liveness.length ? `; liveness under delivery fairness per message value (PS13.2b, PS14.2)` : ''}${r.flowStates !== undefined ? `; the flow rule over ${r.flowStates} global states with their taints (PS17.3)` : ''}`,
     notes: missing.length ? [`${missingText(missing)}: the configuration is checked from the semantics, and its machines do not run under polyrun until it has`] : undefined,
   });
@@ -868,9 +1031,11 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
  * instances to the end (no bound hit, no stage not run) and found it violated nowhere. It is then not counted, and is
  * listed under the machine's ruledOut. A configuration that finds it violated confirms it, and the finding stays.
  */
-function ruleOut(report: CheckReport, module: Module): void {
+function ruleOut(report: CheckReport, module: Module, skipped: Set<string> = new Set()): void {
   for (const mc of report.machines) {
     const id = `${module.name}.${mc.machine}`;
+    // PT14a: a configuration --config left out runs this machine, so its findings stay.
+    if (skipped.has(mc.machine)) continue;
     for (const d of [...mc.diagnostics]) {
       if (d.code !== 'PL3002' || d.witness?.environment !== 'unconstrained' || !d.property) continue;
       const including = report.configurations.filter((c) => c.nevers?.some((n) => n.machine === id && n.property === d.property));
@@ -888,13 +1053,59 @@ function ruleOut(report: CheckReport, module: Module): void {
   }
 }
 
+/** PT14a: what configurationReports is asked beyond the module: the configurations chosen, their goals, the cache. */
+export interface ConfigurationAsk {
+  configs?: string[];
+  goals?: Map<string, TypedGoal[]>;
+  cache?: string;
+  /** The check's options, which the cache keys read. */
+  keyOpts?: CheckOptions;
+}
+
+/** Each machine's attached and detached children, by name (PT14a). */
+function spawnsOf(checked: ReturnType<typeof checkModule>): Spawns {
+  return new Map([...checked.machines].map(([n, f]) => [n, [...[...f.children.values()].map((c) => c.machine), ...f.detached.values()]]));
+}
+
+/**
+ * PT14a: the key of a configuration's result: the configuration in full, every machine its instances run or can spawn
+ * in full, the rest of the module as for a machine, the options, and its goals.
+ */
+function configurationKey(module: Module, decl: A.Configuration, goals: TypedGoal[], opts: CheckOptions, extra: { program?: Module[]; original: Module; refProgram?: Module[] }): string | null {
+  try {
+    const full = closure(decl.instances.map((i) => i.machine[i.machine.length - 1]), opts.spawns ?? new Map());
+    return cacheKey('configuration', {
+      module: module.name,
+      configuration: decl.name,
+      program: programView([...(extra.refProgram ?? []), extra.original, ...(extra.program ?? []), module], module.name, { narrow: opts.narrow === true, full, configuration: decl.name }),
+      options: keyOptions(opts),
+      goals: goals.map((g) => ({ name: g.name, path: g.path ?? null, expr: digest(g.expr) })),
+    });
+  } catch { return null; }
+}
+
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
-export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): { configurations: ConfigCheck[]; error?: string } {
+export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault, ask: ConfigurationAsk = {}): { configurations: ConfigCheck[]; error?: string } {
   const configurations: ConfigCheck[] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Configuration') continue;
+    if (ask.configs && !ask.configs.includes(d.name)) continue;
+    const goals = ask.goals?.get(d.name) ?? [];
     try {
-      configurations.push(configurationStage(module, d, refused, program, original, refProgram, fault));
+      const key = ask.cache && !refused ? configurationKey(module, d, goals, ask.keyOpts ?? {}, { program, original, refProgram }) : null;
+      const hit = key ? readEntry<ConfigCheck>(ask.cache!, 'configuration', key) : null;
+      if (hit && key) {
+        const said = `from the cache, key ${key.slice(0, 19)}`;
+        hit.stages = hit.stages.map((s) => ({ ...s, note: s.note ? `${s.note}; ${said}` : said }));
+        configurations.push({ ...hit, cache: { key, hit: true } });
+        continue;
+      }
+      const cc = configurationStage(module, d, refused, program, original, refProgram, fault, goals);
+      if (key) {
+        writeEntry(ask.cache!, 'configuration', key, JSON.parse(JSON.stringify(cc)));
+        cc.cache = { key, hit: false };
+      }
+      configurations.push(cc);
     } catch (e) {
       return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
     }
@@ -1158,7 +1369,7 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
     if (m) { program.push(m); programFiles.push({ file: f, module: m }); }
   }
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(opts.std ? { std: opts.std } : {}) }));
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(opts.std ? { std: opts.std } : {}), ...(opts.cache ? { cache: opts.cache } : {}) }));
   // PT8.2: a scope's policies lower to one document, so they live in one module.
   const scopes = new Map<string, CheckReport>();
   for (const report of reports) {

@@ -14,7 +14,9 @@ import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject,
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
-import { render } from './render.js';
+import { render, renderDiagnostic } from './render.js';
+import { CheckUsageError, readGoals } from './goals.js';
+import { checkDefects, readDefects } from './defects.js';
 import { exportWitness, lookupWitness } from './witness.js';
 import { applyFixById } from './fix.js';
 import { admit, admitWitness, personKey, witnessKey } from './admit.js';
@@ -94,41 +96,98 @@ const need = (input: Record<string, unknown>, k: string): string => {
 };
 const opt = (input: Record<string, unknown>, k: string): string | undefined => (typeof input[k] === 'string' ? (input[k] as string) : undefined);
 
+/** `poly check` of a module or a project (PT12, PT14a), with the configurations chosen and the goals asked. */
+async function checkOutcome(target: string, o: { root?: string; host?: string; cache?: string; configs?: string[]; goalsFile?: string }): Promise<Outcome> {
+  const { root, host, cache } = o;
+  if (statSync(target).isDirectory()) {
+    const p = await checkProject(target, { root, ...(host ? { host } : {}), ...(cache ? { cache } : {}) });
+    const report = { ...p, files: p.files.map(asJson) };
+    writeReport(root ?? target, report);
+    const lines: string[] = [];
+    for (const r of p.files) lines.push(`── ${r.file}\n${render(r)}`);
+    if (p.handlers?.status === 'ran') {
+      for (const d of p.handlers.diagnostics) lines.push(`${d.code} ${d.name}  ${d.message}\n`);
+      lines.push(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
+    } else if (p.handlers) lines.push(`handlers: lint not run (${p.handlers.reason})\n`);
+    if (p.host) lines.push(hostText(p.host));
+    lines.push(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
+    return { exit: p.exit, result: { report, files: report.files, ...(p.host ? { host: hostJson(p.host) } : {}), verdict: p.verdict, exit: p.exit }, text: lines.join('') };
+  }
+  const goals = o.goalsFile ? readGoals(o.goalsFile) : undefined;
+  const r = await checkFile(target, { root, ...(cache ? { cache } : {}), ...(o.configs ? { configs: o.configs } : {}), ...(goals ? { goals } : {}) });
+  const report = asJson(r);
+  writeReport(root ?? process.cwd(), report);
+  if (!host) return { exit: r.exit, result: { report, files: [report], verdict: r.verdict, exit: r.exit }, text: render(r) };
+  // PT28.1d, S312: after the check, which wrote the declarations; an ERROR or a NONDETERMINISM stands.
+  const h = await checkHost(host);
+  const special = r.verdict === 'ERROR' || r.verdict === 'NONDETERMINISM';
+  const verdict = special ? r.verdict : fold([r.verdict as Verdict, h.status === 'ran' ? verdictOf(h.diagnostics) : 'INCONCLUSIVE']);
+  const exit = special ? r.exit : EXIT_CODES[verdict as Verdict];
+  return { exit, result: { report, files: [report], host: hostJson(h), verdict, exit }, text: `${render(r)}${hostText(h)}verdict with the host check: ${verdict} (exit ${exit})\n` };
+}
+
+/**
+ * PT14a: `poly check <file> --defects <file>`. Each defect is found or not; the exit is 0 when every one is found, 1
+ * when one is not, 4 when a check ends in an error. The results go to <root>/.poly/defects.json.
+ */
+async function defectsOutcome(target: string, file: string, o: { root?: string; cache?: string; only?: string[] }): Promise<Outcome> {
+  const results = await checkDefects(target, readDefects(file), o);
+  const lines: string[] = [];
+  for (const d of results) {
+    lines.push(`${d.found ? 'found      ' : 'NOT FOUND  '} ${d.name.padEnd(34)} ${d.expected === 'CLEAN' ? 'CLEAN' : `${d.expected.slice('FINDING '.length)} ${d.finding}`}`);
+    if (d.found) continue;
+    if (d.error) lines.push(`  error: ${d.error}`);
+    lines.push(...(d.findings.length ? d.findings.map((x) => `  ${renderDiagnostic(x, target)[0]}`) : ['  (no findings)']));
+  }
+  const missed = results.filter((d) => !d.found).length;
+  lines.push(missed ? `${missed} seeded defect${missed === 1 ? ' is' : 's are'} not found: a property does not see the fault it was written for.` : `all ${results.length} seeded defect${results.length === 1 ? ' is' : 's are'} found.`);
+  const exit = results.some((d) => d.verdict === 'ERROR' || d.verdict === 'NONDETERMINISM') ? EXIT_CODES.ERROR : missed ? EXIT_CODES.FINDINGS : EXIT_CODES.CLEAN;
+  const result = { defects: results.map((d) => ({ ...d, findings: d.findings.map(toJson) })), verdict: missed ? 'FINDINGS' : 'CLEAN', exit };
+  const dir = join(resolve(o.root ?? process.cwd()), '.poly');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'defects.json'), JSON.stringify(result, null, 2));
+  return { exit, result: { report: result, files: [], verdict: result.verdict, exit }, text: lines.join('\n') + '\n' };
+}
+
 export const COMMANDS: Command[] = [
   {
     name: 'check', mcp: 'poly_check', lsp: true,
-    summary: 'Runs the check pipeline over a module or a project and writes the report to <root>/.poly/report.json.',
-    input: obj({ target: str('a .poly, .policy.poly or .ts module, or a project directory'), root: str('where .poly/ lives (default: the project directory, or the working directory)'), host: str('a tsconfig naming host code to compile against the generated declarations (PT28.1d)') }, ['target']),
+    summary: 'Runs the check pipeline over a module or a project and writes the report to <root>/.poly/report.json. Results are read from and written to the cache in .poly/cache beside the source unless noCache (PT14a).',
+    input: obj({
+      target: str('a .poly, .policy.poly or .ts module, or a project directory'),
+      root: str('where .poly/ lives (default: the project directory, or the working directory)'),
+      host: str('a tsconfig naming host code to compile against the generated declarations (PT28.1d)'),
+      config: str('a module only: the configurations to check, comma-separated; the others are listed as not run (PT14a)'),
+      goals: str('a module only: a JSON file of goals, { configuration, name, expr, path }, each reached or PL5410 (PS13.10, PT14a)'),
+      defects: str('a module only: a JSON file of seeded defects, each checked in place of the module (PT14a)'),
+      only: str('with defects: the defects to check, comma-separated'),
+      cache: str('the result cache directory; none when absent (the command line passes .poly/cache beside the source) (PT14a)'),
+      noCache: { type: 'boolean', description: 'neither read nor write the result cache (PT14a)' },
+    }, ['target']),
     output: obj({ report: { type: 'object', description: 'a module\'s report, or a project\'s with its files' }, files: { type: 'array', items: FILE_REPORT, description: 'each module\'s report' }, host: { type: 'object', description: 'the host check of PT28.1d, when host was given: ran with its diagnostics, or not run with its reason' }, verdict: { type: 'string' }, exit: { type: 'integer' } }, ['report', 'files', 'verdict', 'exit']),
     async run(input) {
       const target = need(input, 'target');
       const root = opt(input, 'root');
       const host = opt(input, 'host');
       if (!existsSync(target)) throw new CommandUsageError(`no such file or directory ${target}`);
-      if (statSync(target).isDirectory()) {
-        const p = await checkProject(target, { root, ...(host ? { host } : {}) });
-        const report = { ...p, files: p.files.map(asJson) };
-        writeReport(root ?? target, report);
-        const lines: string[] = [];
-        for (const r of p.files) lines.push(`── ${r.file}\n${render(r)}`);
-        if (p.handlers?.status === 'ran') {
-          for (const d of p.handlers.diagnostics) lines.push(`${d.code} ${d.name}  ${d.message}\n`);
-          lines.push(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
-        } else if (p.handlers) lines.push(`handlers: lint not run (${p.handlers.reason})\n`);
-        if (p.host) lines.push(hostText(p.host));
-        lines.push(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
-        return { exit: p.exit, result: { report, files: report.files, ...(p.host ? { host: hostJson(p.host) } : {}), verdict: p.verdict, exit: p.exit }, text: lines.join('') };
+      const list = (k: string) => opt(input, k)?.split(',').map((x) => x.trim()).filter(Boolean);
+      // PT14a: a cache only when the caller names one. The command line names .poly/cache beside the source by default;
+      // the MCP and language servers pass what their client asks.
+      const cache = input.noCache === true ? undefined : opt(input, 'cache');
+      const configs = list('config');
+      const goalsFile = opt(input, 'goals');
+      const defectsFile = opt(input, 'defects');
+      const only = list('only');
+      if (statSync(target).isDirectory() && (configs || goalsFile || defectsFile)) throw new CommandUsageError('config, goals and defects take a module, not a project directory');
+      if (only && !defectsFile) throw new CommandUsageError('only chooses among the defects of defects');
+      if (defectsFile && (configs || goalsFile || host)) throw new CommandUsageError('defects checks each defect in the configurations it keeps, with no config, goals or host');
+      try {
+        if (defectsFile) return await defectsOutcome(target, defectsFile, { root, cache, only });
+        return await checkOutcome(target, { root, host, cache, configs, goalsFile });
+      } catch (e) {
+        if (e instanceof CheckUsageError) throw new CommandUsageError(e.message);
+        throw e;
       }
-      const r = await checkFile(target, { root });
-      const report = asJson(r);
-      writeReport(root ?? process.cwd(), report);
-      if (!host) return { exit: r.exit, result: { report, files: [report], verdict: r.verdict, exit: r.exit }, text: render(r) };
-      // PT28.1d, S312: after the check, which wrote the declarations; an ERROR or a NONDETERMINISM stands.
-      const h = await checkHost(host);
-      const special = r.verdict === 'ERROR' || r.verdict === 'NONDETERMINISM';
-      const verdict = special ? r.verdict : fold([r.verdict as Verdict, h.status === 'ran' ? verdictOf(h.diagnostics) : 'INCONCLUSIVE']);
-      const exit = special ? r.exit : EXIT_CODES[verdict as Verdict];
-      return { exit, result: { report, files: [report], host: hostJson(h), verdict, exit }, text: `${render(r)}${hostText(h)}verdict with the host check: ${verdict} (exit ${exit})\n` };
     },
   },
   {

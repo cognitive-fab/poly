@@ -135,7 +135,12 @@ export function render(r: CheckReport): string {
     for (const p of c.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
     for (const p of c.vacuous) out.push(`  vacuous: ${p.property}, its antecedent ${p.antecedent} is never true${p.member !== undefined ? ` for member ${p.member}` : ''} (PT12.3)`);
     for (const s of c.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
+    // PS13.10: each goal, reached with the length of its path, or not (its PL5410 is printed with the findings).
+    for (const g of c.goals ?? []) out.push(`  ${g.reached ? 'reached    ' : 'NOT REACHED'} ${g.name}${g.reached ? ` (${g.witness?.length ?? 0} global step${g.witness?.length === 1 ? '' : 's'})` : ''}${g.path ? `: ${g.path}` : ''}`);
   }
+  // PT14a: a configuration --config left out is not run, and says so.
+  for (const n of r.notSelected ?? []) out.push(`configuration ${n}: not run (not selected with --config)`);
+  for (const g of r.goalsNotRun ?? []) out.push(`  not run: goal ${g.name} of ${g.configuration} (its configuration is not selected with --config)`);
   // PT8: each trust scope's policies, with their stages.
   for (const p of r.policies ?? []) {
     const ran = p.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
@@ -146,7 +151,7 @@ export function render(r: CheckReport): string {
     for (const x of p.vacuous) out.push(`  vacuous: ${x.property}, ${x.antecedent} (S113, S149)`);
   }
   const instances = [...r.machines.map((m) => instanceLine(m, r.module)), ...(r.configurations ?? []).map((c) => configLine(c, r.module))];
-  out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);
+  out.push(`verdict: ${r.verdict} (exit ${r.exit})${r.notSelected?.length ? ' over the configurations selected' : ''}${instances.length ? `  ${instances[0]}` : ''}`);
   for (const line of instances.slice(1)) out.push(`         ${line}`);
   // S35: a reject property that names an action with no handler is decided by poly-ref alone, and says so.
   for (const m of r.machines) for (const x of m.instance?.refOnly ?? []) out.push(`         ${m.machine}: ${x.property} decided by poly-ref alone (it names ${x.actions.join(', ')}, which has no handler; polygraph never takes that step)`);

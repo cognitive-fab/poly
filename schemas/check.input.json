@@ -12,6 +12,30 @@
     "host": {
       "type": "string",
       "description": "a tsconfig naming host code to compile against the generated declarations (PT28.1d)"
+    },
+    "config": {
+      "type": "string",
+      "description": "a module only: the configurations to check, comma-separated; the others are listed as not run (PT14a)"
+    },
+    "goals": {
+      "type": "string",
+      "description": "a module only: a JSON file of goals, { configuration, name, expr, path }, each reached or PL5410 (PS13.10, PT14a)"
+    },
+    "defects": {
+      "type": "string",
+      "description": "a module only: a JSON file of seeded defects, each checked in place of the module (PT14a)"
+    },
+    "only": {
+      "type": "string",
+      "description": "with defects: the defects to check, comma-separated"
+    },
+    "cache": {
+      "type": "string",
+      "description": "the result cache directory; none when absent (the command line passes .poly/cache beside the source) (PT14a)"
+    },
+    "noCache": {
+      "type": "boolean",
+      "description": "neither read nor write the result cache (PT14a)"
     }
   },
   "required": [
