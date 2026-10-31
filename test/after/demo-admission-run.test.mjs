@@ -61,7 +61,7 @@ function normalizeReport(report, workdir) {
   };
 }
 
-test('DF27 item 3, DAC31: two files through scripts/test-run.mjs share one admission', async (t) => {
+test('DF27 item 3, DAC31: two files through scripts/test-run.mjs share one admission', async () => {
   // Create temporary scripts that both admit the demo source in one run.
   const tmpDir = mkdtempSync(join(tmpdir(), 'admission-run-script-'));
   try {
@@ -191,7 +191,7 @@ try {
     assert.match(result.stdout, new RegExp(expectedLine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'script prints run completion line with id and count');
 
     // Check that the run folder is cleaned up after the script ends.
-    const S = await import('../demo/host/admission-store.mjs');
+    const S = await import('../../demo/host/admission-store.mjs');
     const runFolderPath = join(S.storeRoot(), outA.run);
     assert.ok(!existsSync(runFolderPath), 'run folder is removed after script ends');
   } finally {
@@ -199,7 +199,7 @@ try {
   }
 });
 
-test('DF27 item 3: two files by hand (without scripts/test-run.mjs) each make separate admissions', async (t) => {
+test('DF27 item 3: two files by hand (without scripts/test-run.mjs) each make separate admissions', async () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'admission-run-hand-'));
   try {
     const fileAPath = join(tmpDir, 'a-hand.test.mjs');
@@ -302,7 +302,7 @@ try {
     assert.equal(outB.count, 1, 'file B makes one admission (separate process, no sharing)');
 
     // Clean up the run folders created by hand (nothing else removes them).
-    const S = await import('../demo/host/admission-store.mjs');
+    const S = await import('../../demo/host/admission-store.mjs');
     const runA = join(S.storeRoot(), outA.run);
     const runB = join(S.storeRoot(), outB.run);
     rmSync(runA, { recursive: true, force: true });
