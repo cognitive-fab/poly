@@ -5,6 +5,7 @@
 // compares at exit; a difference sets a failing exit code and says which file. POLY_HOME_GUARD_DIR names another folder to
 // watch, for the guard's own test; no other process should set it.
 import { existsSync, readdirSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +29,10 @@ function snapshot(dir) {
 // PT14a: the command line keeps a result cache beside the source by default; every process a test starts inherits this,
 // so the suite never reads a cache it did not name (the release gate runs without the cache).
 process.env.POLY_NO_CACHE = '1';
+
+// DF27 item 3: the runner and every test-file process it starts share one run id, so the demo files share one admission
+// per source; a value already set (by a runner above this one) is kept.
+process.env.POLY_TEST_RUN ??= randomUUID();
 
 const guardKey = Symbol.for('poly.home-guard');
 if (!globalThis[guardKey]) {
