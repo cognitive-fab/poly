@@ -104,3 +104,26 @@ test('DF26: package.json test script has --env-file in both commands, after --te
   const envLines = envContent.split('\n').filter(line => line.trim().length > 0);
   assert(envLines.includes('NODE_OPTIONS=--max-old-space-size=8192'), 'serial-heap.env should contain the line NODE_OPTIONS=--max-old-space-size=8192');
 });
+
+test('DF27: package.json test script runs both commands through scripts/test-run.mjs', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const testDir = dirname(fileURLToPath(import.meta.url));
+  const packagePath = join(testDir, '..', 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
+  const testScript = pkg.scripts.test;
+
+  // Split by && to get individual commands
+  const commands = testScript.split('&&').map(c => c.trim());
+
+  // Find the command with test/after/*.test.mjs
+  const afterCommand = commands.find(c => c.includes('test/after/*.test.mjs'));
+  assert(afterCommand, 'should find command with test/after/*.test.mjs');
+  assert(afterCommand.startsWith('node scripts/test-run.mjs '), 'after command should start with node scripts/test-run.mjs');
+
+  // Find the command with "test/*.test.mjs"
+  const parallelCommand = commands.find(c => c.includes('"test/*.test.mjs"') || c.includes("'test/*.test.mjs'"));
+  assert(parallelCommand, 'should find command with test/*.test.mjs');
+  assert(parallelCommand.startsWith('node scripts/test-run.mjs '), 'parallel command should start with node scripts/test-run.mjs');
+});

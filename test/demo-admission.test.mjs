@@ -319,3 +319,304 @@ test('DF27 item 3: preload sets POLY_TEST_RUN with ??= (keeps existing value)', 
   const output3 = result3.stdout.trim();
   assert.notEqual(output2, output3, 'preload generates a new id for each process');
 });
+
+// DF27 items 3, 5, 11 and DAC31: store paths and operations.
+// These tests import functions from demo/host/admission-store.mjs (rule 7a: not yet implemented).
+
+test('DF27 item 5: storeRoot() returns os.tmpdir()/poly-demo-admissions', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const root = S.storeRoot();
+  assert.equal(root, join(tmpdir(), 'poly-demo-admissions'));
+});
+
+test('DF27 item 5: storeDir(key, run, root) returns root/run/key', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const root = tmpdir();
+  const run = 'test-run-xyz';
+  const key = 'abc123def456';
+  const path = S.storeDir(key, run, root);
+  assert.equal(path, join(root, run, key));
+});
+
+test('DF27 item 5: storeDir with defaults uses POLY_TEST_RUN and storeRoot()', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const orig = process.env.POLY_TEST_RUN;
+  try {
+    process.env.POLY_TEST_RUN = 'test-run-default';
+    const path = S.storeDir('abc123');
+    assert.ok(path.includes('test-run-default'), 'storeDir includes POLY_TEST_RUN');
+    assert.ok(path.includes('poly-demo-admissions'), 'storeDir includes poly-demo-admissions');
+    assert.ok(path.includes('abc123'), 'storeDir includes key');
+  } finally {
+    if (orig !== undefined) process.env.POLY_TEST_RUN = orig;
+    else delete process.env.POLY_TEST_RUN;
+  }
+});
+
+test('DF27 item 5: settle(staging, target) renames staging to target', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = mkdirSync(join(tmpdir(), 'settle-test-' + Math.random().toString(36).slice(2)), { recursive: true });
+  try {
+    const staging = join(tmpRoot, 'staging');
+    const target = join(tmpRoot, 'target');
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(join(staging, 'file.txt'), 'content');
+
+    const result = await S.settle(staging, target);
+    assert.equal(result, target);
+    assert.ok(!statSync(target, { throwIfNoEntry: false }), 'target directory exists');
+    assert.equal(readFileSync(join(target, 'file.txt'), 'utf8'), 'content');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 5: settle returns target when it exists with ready.json and removes staging', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'settle-exists-' + Math.random().toString(36).slice(2));
+  mkdirSync(tmpRoot, { recursive: true });
+  try {
+    const staging = join(tmpRoot, 'staging');
+    const target = join(tmpRoot, 'target');
+    mkdirSync(staging, { recursive: true });
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(staging, 'new-file.txt'), 'staging content');
+    writeFileSync(join(target, 'ready.json'), '{}');
+    writeFileSync(join(target, 'old-file.txt'), 'target content');
+
+    const result = await S.settle(staging, target);
+    assert.equal(result, target);
+    assert.ok(!statSync(staging, { throwIfNoEntry: false }), 'staging is removed');
+    assert.equal(readFileSync(join(target, 'old-file.txt'), 'utf8'), 'target content', 'target file unchanged');
+    assert.ok(!statSync(join(target, 'new-file.txt'), { throwIfNoEntry: false }), 'staging file not in target');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 5: settle throws when target exists without ready.json', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'settle-throw-' + Math.random().toString(36).slice(2));
+  mkdirSync(tmpRoot, { recursive: true });
+  try {
+    const staging = join(tmpRoot, 'staging');
+    const target = join(tmpRoot, 'target');
+    mkdirSync(staging, { recursive: true });
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(staging, 'file.txt'), 'content');
+    writeFileSync(join(target, 'marker.txt'), 'exists');
+
+    await assert.rejects(async () => S.settle(staging, target), (e) => /EPERM|ENOTEMPTY|EEXIST/.test(e.code));
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 11: endRun counts folders with ready.json and removes the run', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'endrun-' + Math.random().toString(36).slice(2));
+  const run = 'test-run-endrun';
+  mkdirSync(tmpRoot, { recursive: true });
+  try {
+    const runDir = join(tmpRoot, run);
+    mkdirSync(runDir, { recursive: true });
+
+    // Create a key folder with ready.json
+    const key1 = join(runDir, 'key1');
+    mkdirSync(key1, { recursive: true });
+    writeFileSync(join(key1, 'ready.json'), '{}');
+
+    // Create another key folder with ready.json
+    const key2 = join(runDir, 'key2');
+    mkdirSync(key2, { recursive: true });
+    writeFileSync(join(key2, 'ready.json'), '{}');
+
+    // Create a staging folder (should not be counted)
+    const staging = join(runDir, '.staging-123-abc');
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(join(staging, 'ready.json'), '{}');
+
+    // Create a key folder without ready.json (should not be counted)
+    const key3 = join(runDir, 'key3');
+    mkdirSync(key3, { recursive: true });
+    writeFileSync(join(key3, 'data.json'), '{}');
+
+    const count = await S.endRun({ run, root: tmpRoot });
+    assert.equal(count, 2, 'counts only key folders with ready.json');
+    assert.ok(!statSync(runDir, { throwIfNoEntry: false }), 'run folder is removed');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 11: endRun returns 0 when run folder does not exist', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'endrun-missing-' + Math.random().toString(36).slice(2));
+  mkdirSync(tmpRoot, { recursive: true });
+  try {
+    const count = await S.endRun({ run: 'nonexistent-run', root: tmpRoot });
+    assert.equal(count, 0);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 11: sweepStores removes entries older than maxAgeMs and keeps newer ones', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'sweep-' + Math.random().toString(36).slice(2));
+  mkdirSync(tmpRoot, { recursive: true });
+  try {
+    const now = 1_800_000_000_000; // Fixed time in milliseconds
+    const maxAgeMs = 7 * 24 * 3600 * 1000; // 7 days
+
+    // Create an old entry (older than maxAgeMs)
+    const oldRun = join(tmpRoot, 'old-run');
+    mkdirSync(oldRun, { recursive: true });
+    const oldMtime = now - maxAgeMs - 1000; // 1 second older
+    statSync(oldRun); // Force creation before setting mtime
+    // Can't set mtime directly on mkdirSync, so we'll create with children first
+    const oldChild = join(oldRun, 'child');
+    mkdirSync(oldChild, { recursive: true });
+    const oldFile = join(oldChild, 'file.txt');
+    writeFileSync(oldFile, 'old');
+    // Set mtime on the child folder
+    const { utimesSync } = await import('node:fs');
+    utimesSync(oldChild, oldMtime / 1000, oldMtime / 1000);
+    utimesSync(oldRun, oldMtime / 1000, oldMtime / 1000);
+
+    // Create an exact-age entry (exactly maxAgeMs old - should be kept)
+    const exactRun = join(tmpRoot, 'exact-run');
+    mkdirSync(exactRun, { recursive: true });
+    const exactMtime = now - maxAgeMs;
+    const exactChild = join(exactRun, 'child');
+    mkdirSync(exactChild, { recursive: true });
+    const exactFile = join(exactChild, 'file.txt');
+    writeFileSync(exactFile, 'exact');
+    utimesSync(exactChild, exactMtime / 1000, exactMtime / 1000);
+    utimesSync(exactRun, exactMtime / 1000, exactMtime / 1000);
+
+    // Create a new entry (newer than maxAgeMs)
+    const newRun = join(tmpRoot, 'new-run');
+    mkdirSync(newRun, { recursive: true });
+    const newMtime = now - 1000; // 1 second ago
+    const newChild = join(newRun, 'child');
+    mkdirSync(newChild, { recursive: true });
+    const newFile = join(newChild, 'file.txt');
+    writeFileSync(newFile, 'new');
+    utimesSync(newChild, newMtime / 1000, newMtime / 1000);
+    utimesSync(newRun, newMtime / 1000, newMtime / 1000);
+
+    // Create an old flat-layout key folder (pre-run layout, should be removed if old)
+    const oldKey = join(tmpRoot, 'oldkey1234567890abcdef1234567890ab');
+    mkdirSync(oldKey, { recursive: true });
+    const oldKeyChild = join(oldKey, 'file.txt');
+    writeFileSync(oldKeyChild, 'oldkey');
+    utimesSync(oldKey, oldMtime / 1000, oldMtime / 1000);
+
+    const removed = await S.sweepStores({ root: tmpRoot, now, maxAgeMs });
+    const removedSorted = removed.sort();
+
+    assert.ok(removedSorted.includes('old-run'), 'removes old run folder');
+    assert.ok(removedSorted.includes('oldkey1234567890abcdef1234567890ab'), 'removes old flat-layout key');
+    assert.ok(!removedSorted.includes('exact-run'), 'keeps folder exactly maxAgeMs old');
+    assert.ok(!removedSorted.includes('new-run'), 'keeps newer folder');
+
+    assert.ok(!statSync(oldRun, { throwIfNoEntry: false }), 'old run folder is gone');
+    assert.ok(statSync(exactRun, { throwIfNoEntry: false }), 'exact-age run exists');
+    assert.ok(statSync(newRun, { throwIfNoEntry: false }), 'new run exists');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('DF27 item 11: sweepStores returns empty when root does not exist', async () => {
+  const S = await import('../demo/host/admission-store.mjs');
+  const tmpRoot = join(tmpdir(), 'sweep-missing-' + Math.random().toString(36).slice(2));
+  const removed = await S.sweepStores({ root: tmpRoot, now: Date.now(), maxAgeMs: 7 * 24 * 3600 * 1000 });
+  assert.deepEqual(removed, []);
+});
+
+test('DF27 item 5: POLY_TEST_RUN must match ^[A-Za-z0-9-]{1,64}$', async () => {
+  const orig = process.env.POLY_TEST_RUN;
+  const origFresh = process.env.POLY_DEMO_ADMISSION;
+  try {
+    // Test that an invalid id throws before any admission
+    const invalidIds = ['..', 'a/b', 'a\\b', 'a'.repeat(65)];
+    for (const badId of invalidIds) {
+      process.env.POLY_TEST_RUN = badId;
+      delete process.env.POLY_DEMO_ADMISSION;
+
+      // Use a nonexistent source so missing files fail fast, not an admission taking minutes
+      const source = join(tmpdir(), 'nonexistent-source-' + Math.random().toString(36).slice(2));
+      const workdir = join(tmpdir(), 'workdir-' + Math.random().toString(36).slice(2));
+
+      const countBefore = A.admissionCount();
+      await assert.rejects(
+        () => A.admitDemoConcierge({ source, workdir }),
+        (e) => e.code !== 'ENOENT' // Must not be a file-not-found error
+      );
+      assert.equal(A.admissionCount(), countBefore, `invalid id ${badId} does not start admission`);
+    }
+  } finally {
+    if (orig !== undefined) process.env.POLY_TEST_RUN = orig;
+    else delete process.env.POLY_TEST_RUN;
+    if (origFresh !== undefined) process.env.POLY_DEMO_ADMISSION = origFresh;
+    else delete process.env.POLY_DEMO_ADMISSION;
+  }
+});
+
+test('DF27 item 3: scripts/test-run.mjs runs a command with a new POLY_TEST_RUN id', async () => {
+  const tmpDir = join(tmpdir(), 'test-run-tiny-' + Math.random().toString(36).slice(2));
+  mkdirSync(tmpDir, { recursive: true });
+  try {
+    const tinyScript = join(tmpDir, 'tiny.mjs');
+    const outFile = join(tmpDir, 'out.json');
+
+    // Write a tiny test script that writes its run id and creates a store folder
+    // Pass outFile as process.argv[2] to avoid template escaping issues
+    const tinyCode = `import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+const runId = process.env.POLY_TEST_RUN;
+const outFile = process.argv[2];
+const keyPath = join(tmpdir(), 'poly-demo-admissions', runId, 'abc123def456', 'ready.json');
+mkdirSync(join(tmpdir(), 'poly-demo-admissions', runId, 'abc123def456'), { recursive: true });
+writeFileSync(keyPath, JSON.stringify({ created: new Date().toISOString() }));
+
+writeFileSync(outFile, JSON.stringify({
+  pid: process.pid,
+  run: runId,
+  created: keyPath
+}));
+process.exit(7);
+`;
+    writeFileSync(tinyScript, tinyCode);
+
+    const result = spawnSync(process.execPath, ['scripts/test-run.mjs', 'node', tinyScript, outFile], {
+      cwd: ROOT,
+      env: { ...process.env, POLY_TEST_RUN: 'outer-run-id' },
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 7, 'script exits with command exit status');
+    assert.match(result.stdout + result.stderr, /poly-demo-admissions: run/, 'prints run completion line');
+
+    // The child process should have written the output file
+    assert.ok(statSync(outFile, { throwIfNoEntry: false }), 'child process ran');
+    const output = JSON.parse(readFileSync(outFile, 'utf8'));
+
+    // The run id should be different from outer-run-id (always new)
+    assert.notEqual(output.run, 'outer-run-id', 'script sets a new run id even when one is already set');
+
+    // The run id should be a valid UUID-like string
+    assert.match(output.run, /^[a-f0-9\-]{36}$/, 'run id is a UUID');
+
+    // The run folder should be cleaned up after the script ends
+    const S = await import('../demo/host/admission-store.mjs');
+    const runFolderPath = join(S.storeRoot(), output.run);
+    assert.ok(!statSync(runFolderPath, { throwIfNoEntry: false }), 'run folder is removed after script ends');
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
