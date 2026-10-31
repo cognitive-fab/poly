@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -181,6 +181,10 @@ try {
     const normA = normalizeReport(outA.report, join(tmpDir, 'workdir-a'));
     const normB = normalizeReport(outB.report, join(tmpDir, 'workdir-b'));
     assert.deepEqual(normA, normB, 'both files get the same report');
+
+    // Check the script's output line format (DF27 item 11): poly-demo-admissions: run <id>, <n> admissions
+    const expectedLine = `poly-demo-admissions: run ${outA.run}, 1 admissions`;
+    assert.match(result.stdout, new RegExp(expectedLine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'script prints run completion line with id and count');
 
     // Check that the run folder is cleaned up after the script ends.
     const S = await import('../demo/host/admission-store.mjs');
