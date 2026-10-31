@@ -143,7 +143,7 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
         const toolchain = toolchainDigest();
         const key = await A.admissionKey({
           run: testRunId,
-          project: 'concierge',
+          project: 'demo-concierge',
           source: DEMO_SOURCE,
           toolchain
         });
@@ -267,13 +267,13 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
       const toolchain = toolchainDigest();
       const keyOriginal = await A.admissionKey({
         run: testRunId,
-        project: 'concierge',
+        project: 'demo-concierge',
         source: DEMO_SOURCE,
         toolchain
       });
       const keyChanged = await A.admissionKey({
         run: testRunId,
-        project: 'concierge',
+        project: 'demo-concierge',
         source: tmpSource,
         toolchain
       });

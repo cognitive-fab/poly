@@ -113,6 +113,11 @@ test('DF27 item 4: admission key is SHA-256 of canonical JSON', async () => {
     writeFileSync(join(tmpSource, 'maps', 'a'), 'a');
     writeFileSync(join(tmpSource, 'maps', 'B'), 'B');
 
+    // Nested prices structure.
+    mkdirSync(join(tmpSource, 'prices', 'sub'), { recursive: true });
+    writeFileSync(join(tmpSource, 'prices', 'sub', 'y'), 'y');
+    writeFileSync(join(tmpSource, 'prices', 'p'), 'p');
+
     const run = 'test-run-123';
     const project = 'concierge';
     const toolchain = 'digest-abc123';
