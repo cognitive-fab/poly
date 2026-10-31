@@ -497,6 +497,24 @@ presenter terminal: staff notices (Notice/Slack panel), poly approve, journal ve
 9. **The seeded controls.** (a) The key without one source file: changing one byte of a file under `maps/` must give a new key, and an admission of the changed source. (b) A changed toolchain digest must give a new key: the key's function takes the digest as an argument, and two digests that differ in one byte give two keys for one source and one run.
 10. **The measurement.** The demo files of the serial suite are run twice, each alone on the machine with the suite's command (`node --import ./test/fixtures/home-guard.mjs --test --env-file=test/fixtures/serial-heap.env --test-concurrency=1` over the eight `test/after/demo-*.test.mjs` files): once with `POLY_DEMO_ADMISSION=fresh` (before) and once without (after). The time of each file and the total, and each test's result, are recorded here from those two runs, not estimated.
 
+    Measured on 2026-10-31 at `7c48e300` (Node 24.12.0), one run after the other, with nothing else started on the machine. The condition both runs share is the machine's idle level, measured before them: 1.9 of 22 cores (8.6%) used by other processes over 30 s. Times are node:test's, summed over each file's top-level tests (`test/reporters/file-times.mjs`).
+
+    | File | Fresh (before) | Shared (after) |
+    |---|---|---|
+    | `demo-approval` | 393.0 s | 376.9 s |
+    | `demo-concierge-e2e` | 529.5 s | 398.2 s |
+    | `demo-diagrams-desk` | 27.6 s | 21.7 s |
+    | `demo-failures` | 3011.4 s | 1161.7 s |
+    | `demo-ledger-e2e` | 397.2 s | 368.8 s |
+    | `demo-resolve-e2e` | 728.7 s | 365.9 s |
+    | `demo-room-answers` | 1463.5 s | 369.7 s |
+    | `demo-spend-stub` | 1504.3 s | 382.0 s |
+    | **Total** (the run's duration) | **8067.9 s** | **3456.7 s** |
+
+    Both runs: 39 tests, 39 pass, 0 fail, exit 0, and each of the 39 results, compared by test name, is the same in both. The shared run wrote nine admissions to the store: one for each of the seven files that assemble the demo, and two more in `demo-failures`, whose tests use three keys, first admitted by DF12.1, DF12.5 and DF12.4 (item 4: a source a test changes is another key).
+
+    **Item 3 did not hold.** Each test file's process had its own `POLY_TEST_RUN`: two files of one `node --test` command with the suite's preload printed two ids (Node 24.12.0). So no file inherited an id from the runner, and the preload of each file (`??=`) set its own. The store was therefore shared within a file and not across files, and the first admission of each file was a real one. The saving above is that of sharing within a file. DAC31 asks for sharing across the files of one run; how those files come to share one id waits for the owner's ruling.
+
 ## 5. The script
 
 Six minutes in three acts. Times are the plan for the stage, not a statement about the work. A recorded segment is labelled **RECORDED** on screen with the date of the recording.
