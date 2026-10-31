@@ -25,18 +25,22 @@ import { ROOT } from '../helpers.mjs';
 
 const DEMO_SOURCE = join(ROOT, 'demo', 'concierge');
 
-// Extract verdict and diagnostics from a CheckReport for comparison.
-// Report structure: { verdict, diagnostics, machines: [...], configurations: [...] }
-// Machines have { machine, verdict, instance, diagnostics }.
-// Configurations have { configuration, verdict, instance, diagnostics }.
-// Normalize paths to relative paths from workdir for comparison across workdirs.
+// Extract verdict and diagnostics from a ProjectReport for comparison.
+// ProjectReport structure: { project, name, files, handlers, verdict, exit }
+// files is an array of CheckReport, one per module: { file, module, moduleDigest, sourceDigest, verdict, exit, diagnostics, machines, configurations, ... }
+// machines and configurations are inside each file entry, with { machine/configuration, verdict, instance, diagnostics }.
+// file is absolute path (differs between workdirs), so identify by module name.
+// module may be null for policy-only files.
+// Normalize paths in instances to relative paths from workdir for comparison across workdirs.
+// NOTE (2026-10-31): The brief of 2026-10-30 said report was a CheckReport with machines at the top level.
+// That was wrong. The first run found report is a ProjectReport with machines inside each file.
 function reportOf(report, workdir) {
   if (!report) return null;
 
-  // Extract code and property from each diagnostic, preserving structure.
+  // Extract code and property from each diagnostic.
   const extractDiag = (diag) => ({ code: diag.code, property: diag.property });
 
-  // Normalize paths in instances: make absolute paths relative to workdir.
+  // Normalize paths: absolute paths relative to workdir become relative.
   const normalizePath = (p) => {
     if (typeof p === 'string' && workdir && p.startsWith(workdir)) {
       return relative(workdir, p);
@@ -57,20 +61,27 @@ function reportOf(report, workdir) {
     return obj;
   };
 
+  // Sort files by module name for consistent comparison (module may be null for policy-only files).
+  const sortedFiles = [...report.files].sort((a, b) => (a.module ?? '').localeCompare(b.module ?? ''));
+
   return {
     verdict: report.verdict,
-    diagnostics: report.diagnostics.map(extractDiag),
-    machines: report.machines.map(m => ({
-      machine: m.machine,
-      verdict: m.verdict,
-      instance: normalizeInstance(m.instance),
-      diagnostics: m.diagnostics.map(extractDiag)
-    })),
-    configurations: report.configurations.map(c => ({
-      configuration: c.configuration,
-      verdict: c.verdict,
-      instance: normalizeInstance(c.instance),
-      diagnostics: c.diagnostics.map(extractDiag)
+    files: sortedFiles.map(f => ({
+      module: f.module,
+      verdict: f.verdict,
+      diagnostics: f.diagnostics.map(extractDiag),
+      machines: f.machines.map(m => ({
+        machine: m.machine,
+        verdict: m.verdict,
+        instance: normalizeInstance(m.instance),
+        diagnostics: m.diagnostics.map(extractDiag)
+      })),
+      configurations: f.configurations.map(c => ({
+        configuration: c.configuration,
+        verdict: c.verdict,
+        instance: normalizeInstance(c.instance),
+        diagnostics: c.diagnostics.map(extractDiag)
+      }))
     }))
   };
 }
@@ -158,10 +169,26 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
         const content = readFileSync(srcFile, 'utf8');
         writeFileSync(srcFile, content + '\n// test mutation');
 
+        // Walk build directory recursively to find first file by sorted relative path.
         const buildDir = join(workdir, 'project', '.poly', 'build');
-        const buildFiles = readdirSync(buildDir);
-        assert.ok(buildFiles.length > 0, 'build directory has files');
-        const firstBuildFile = join(buildDir, buildFiles[0]);
+        let firstBuildFile = null;
+        function findFirstFile(dir, baseDir) {
+          const entries = readdirSync(dir).sort();
+          for (const entry of entries) {
+            const p = join(dir, entry);
+            const stat = statSync(p);
+            if (stat.isDirectory()) {
+              findFirstFile(p, baseDir);
+              if (firstBuildFile) break;
+            } else if (stat.isFile() && !firstBuildFile) {
+              firstBuildFile = p;
+              break;
+            }
+          }
+        }
+        findFirstFile(buildDir, buildDir);
+        assert.ok(firstBuildFile, 'found a file in build directory');
+
         const buildContent = readFileSync(firstBuildFile, 'utf8');
         writeFileSync(firstBuildFile, buildContent + '\n// mutation');
 
@@ -227,11 +254,15 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
         // Assert verdict first, alone (readable failure).
         assert.equal(reportShared.verdict, reportFresh.verdict, 'verdicts are identical');
 
-        // Ensure the reports have content to check: machines exist and have instances.
-        assert.ok(reportShared.machines.length > 0, 'shared report has machines');
-        assert.ok(reportFresh.machines.length > 0, 'fresh report has machines');
-        assert.ok(reportShared.machines.some(m => m.instance), 'shared report has a machine with an instance');
-        assert.ok(reportFresh.machines.some(m => m.instance), 'fresh report has a machine with an instance');
+        // Ensure the reports have content to check: files exist and have machines with instances.
+        assert.ok(reportShared.files.length > 0, 'shared report has files');
+        assert.ok(reportFresh.files.length > 0, 'fresh report has files');
+
+        // At least one file must have a machine with an instance.
+        const sharedHasMachineWithInstance = reportShared.files.some(f => f.machines.some(m => m.instance));
+        const freshHasMachineWithInstance = reportFresh.files.some(f => f.machines.some(m => m.instance));
+        assert.ok(sharedHasMachineWithInstance, 'shared report has a machine with an instance');
+        assert.ok(freshHasMachineWithInstance, 'fresh report has a machine with an instance');
 
         // Assert the entire extracted reports are identical.
         assert.deepEqual(reportShared, reportFresh, 'shared and fresh reports are identical');
@@ -244,7 +275,8 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
     // T4: Seeded control (a): changed source gives a new key and a new admission (DF27 item 9a).
     await t.test('T4: changing one file under maps/ gives a new key and a new admission', async () => {
       // DF27 item 9: (a) changing one byte under maps/ must give a new key.
-      // Verify that the admission of the changed source is new (count increases).
+      // Maps file carries its own digest over parsed fields. A digit change breaks it (REFUSED).
+      // Whitespace outside strings is allowed, keeps JSON valid, and changes the key.
       // Use 'shared' mode (item 7 says controls use 'fresh', but a changed source
       // has a different key regardless of mode, so 'shared' tests the store miss).
       const countBefore = await A.admissionCount();
@@ -253,14 +285,15 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
       const tmpSource = join(tmpdir(), 'demo-test-t4-source-' + Math.random().toString(36).slice(2));
       cpSync(DEMO_SOURCE, tmpSource, { recursive: true });
 
-      // Change one byte in a maps file (keep it valid JSON).
+      // Change whitespace in maps file (space after opening brace, valid JSON, one byte).
       const mapsFile = join(tmpSource, 'maps', 'small.json');
       const originalContent = readFileSync(mapsFile, 'utf8');
       assert.ok(originalContent, 'maps/small.json exists');
 
-      // Change a digit to keep JSON valid (e.g., first '0' -> '1').
-      const changedContent = originalContent.replace(/0/, '1');
+      // Insert a space after the opening brace (keeps JSON valid, changes digest).
+      const changedContent = originalContent.replace(/^\{/, '{ ');
       assert.notEqual(changedContent, originalContent, 'file content changed');
+      assert.equal(changedContent.length, originalContent.length + 1, 'one byte added');
       writeFileSync(mapsFile, changedContent);
 
       // Compute keys: original and changed.
@@ -285,9 +318,8 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
         mkdirSync(workdir, { recursive: true });
 
         // Admit the changed source with shared mode (default).
-        // Since the source is changed, the key is different, and the store has no entry for it.
-        // So a new admission is made.
-        await A.admitDemoConcierge({
+        // The whitespace change does not break the map's digest, so admission succeeds.
+        const resultAdmit = await A.admitDemoConcierge({
           workdir,
           source: tmpSource,
           admission: 'shared'
@@ -296,6 +328,10 @@ test('DAC31: shared and fresh admissions of one source give the same verdict', a
         // The count should increase by 1 (new admission, not in store).
         const countAfter = await A.admissionCount();
         assert.equal(countAfter, countBefore + 1, 'changed source triggers a new admission');
+
+        // The changed source should admit successfully with CLEAN verdict.
+        assert.ok(resultAdmit.report, 'report returned');
+        assert.equal(resultAdmit.report.verdict, 'CLEAN', 'admission verdict is CLEAN');
       } finally {
         rmSync(workdir, { recursive: true, force: true });
         rmSync(tmpSource, { recursive: true, force: true });
