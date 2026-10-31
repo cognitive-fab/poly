@@ -10,12 +10,14 @@
 // Measured on the v1.4.0 serial suite (2026-10-30): a demo test that assembles once took 630 s to 940 s, nearly all of it
 // the admission, and most admissions were of one source.
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { admit, policySubjects, policySignaturePath, toolchainDigest, useTestAnchors } from '@poly/check';
 import { acceptTestAnchors } from '@poly/runtime';
 import { canonicalize, keyringDigest, newAnchor, signRecord, writeAnchorFile } from '@poly/core';
+import { settle, storeDir, storeRoot, storedAdmission } from './admission-store.mjs';
+
+export { storeDir, storedAdmission };
 
 /** A signing key for a person or an agent (PT12.5), generated for the run. */
 export function makePerson(name) {
@@ -62,11 +64,8 @@ export function admissionMode({ admission = 'shared', env = process.env } = {}) 
   return 'shared';
 }
 
-/** DF27 item 5: outside the repository, since the store holds the run's keys. */
-export const storeDir = (key) => join(tmpdir(), 'poly-demo-admissions', key);
-
-/** DF27 item 5: a store folder is read only once ready.json, written last, says it is whole. */
-export const storedAdmission = (key) => (existsSync(join(storeDir(key), 'ready.json')) ? storeDir(key) : null);
+/** DF27 item 5: the run's id names a folder of the store, so only a plain name is used as one. */
+const RUN_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 let admissions = 0;
 /** DAC31: the real admissions this process made, which the test of one admission per key counts. */
@@ -79,7 +78,9 @@ export const admissionCount = () => admissions;
  */
 export async function admitDemoConcierge({ source, workdir, name = 'demo-concierge', admission = 'shared' }) {
   if (admissionMode({ admission }) === 'fresh') return { ...(await admitFresh({ source, workdir, name })), shared: false };
-  const key = admissionKey({ run: process.env.POLY_TEST_RUN, project: name, source, toolchain: toolchainDigest() });
+  const run = process.env.POLY_TEST_RUN;
+  if (!RUN_ID.test(run)) throw new Error(`POLY_TEST_RUN names a folder of the demo's store, so it is letters, digits and hyphens (at most 64), not ${JSON.stringify(run)}`);
+  const key = admissionKey({ run, project: name, source, toolchain: toolchainDigest() });
   if (!storedAdmission(key)) await stored(key, source, name);
   return copyOf(key, workdir, name);
 }
@@ -92,7 +93,8 @@ function stored(key, source, name) {
 }
 
 async function store(key, source, name) {
-  const staging = join(tmpdir(), 'poly-demo-admissions', `.staging-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  // DF27 items 5 and 11: staged inside the run's folder, so a staging folder a killed process leaves goes with the run.
+  const staging = join(storeRoot(), process.env.POLY_TEST_RUN, `.staging-${process.pid}-${Math.random().toString(36).slice(2)}`);
   try {
     const a = await admitFresh({ source, workdir: staging, name });
     writeFileSync(join(staging, 'admission.json'), JSON.stringify({
@@ -100,7 +102,7 @@ async function store(key, source, name) {
       certificate: relative(a.dir, a.certificate).split(sep).join('/'), report: a.report,
     }));
     writeFileSync(join(staging, 'ready.json'), JSON.stringify({ key, at: new Date().toISOString() }));
-    try { renameSync(staging, storeDir(key)); } catch (e) { if (!storedAdmission(key)) throw e; }
+    settle(staging, storeDir(key));
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
