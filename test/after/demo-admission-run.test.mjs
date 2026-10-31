@@ -145,6 +145,10 @@ try {
         const e = { ...process.env };
         delete e.POLY_TEST_RUN;
         delete e.POLY_DEMO_ADMISSION;
+        // Node's test runner sets NODE_TEST_CONTEXT=child-v8 when running test files as children.
+        // If this variable is inherited, spawned node --test commands think they're running recursively
+        // and skip running test files. Remove it so child processes run normally.
+        delete e.NODE_TEST_CONTEXT;
         return e;
       })(),
       encoding: 'utf8',
@@ -259,9 +263,11 @@ try {
 
     // Run both files by hand (plain node --test, no scripts/test-run.mjs).
     // Remove POLY_TEST_RUN so each process sets its own (preload uses ??=).
+    // Remove NODE_TEST_CONTEXT so child processes run normally instead of recursively skipping.
     const env = { ...process.env };
     delete env.POLY_TEST_RUN;
     delete env.POLY_DEMO_ADMISSION;
+    delete env.NODE_TEST_CONTEXT;
 
     const result = spawnSync(process.execPath, [
       '--import', './test/fixtures/home-guard.mjs',
