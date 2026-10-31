@@ -53,7 +53,13 @@ test('DF9: no file of the demo, its fixtures, its records or the examples it cop
 });
 
 test('DAC13: the only code under demo/ that reads the environment is on the list, and none reads a payment provider\'s variable', () => {
-  const ALLOWED = new Set(['demo/demo.mjs', 'demo/launch.mjs', 'demo/driver/replay.mjs', 'demo/driver/map-hosts.cjs', 'demo/baseline/procedure.mjs', 'demo/baseline/hook.mjs', 'demo/baseline/smoke.mjs', 'demo/stand-in/stripe/tls.mjs']);
+  const ALLOWED = new Set([
+    'demo/demo.mjs', 'demo/launch.mjs', 'demo/driver/replay.mjs', 'demo/driver/map-hosts.cjs', 'demo/baseline/procedure.mjs', 'demo/baseline/hook.mjs', 'demo/baseline/smoke.mjs', 'demo/stand-in/stripe/tls.mjs',
+    // DF27 item 12: the shared admission. admission.mjs reads POLY_TEST_RUN and POLY_DEMO_ADMISSION; admission-store.mjs reads
+    // POLY_TEST_RUN. Neither is a credential: one is a test run's id, the other a mode (fresh or unset). The payment check below
+    // still applies to both.
+    'demo/host/admission.mjs', 'demo/host/admission-store.mjs',
+  ]);
   // The committed runs of the baseline are the agent's own work, kept verbatim (DB4), and are not the demo's code.
   const code = walk(join(ROOT, 'demo')).filter((f) => /\.(mjs|cjs|js|ts)$/.test(f) && !rel(f).startsWith('demo/baseline/runs/'));
   assert.ok(code.length >= 10, 'the scan reads the demo\'s code');
