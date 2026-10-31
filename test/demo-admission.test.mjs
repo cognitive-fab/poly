@@ -364,7 +364,8 @@ test('DF27 item 5: settle(staging, target) renames staging to target', async () 
 
     const result = await S.settle(staging, target);
     assert.equal(result, target);
-    assert.ok(!statSync(target, { throwIfNoEntry: false }), 'target directory exists');
+    assert.ok(statSync(target, { throwIfNoEntry: false }), 'target directory exists');
+    assert.ok(!statSync(staging, { throwIfNoEntry: false }), 'staging is removed');
     assert.equal(readFileSync(join(target, 'file.txt'), 'utf8'), 'content');
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
@@ -600,7 +601,6 @@ process.exit(7);
     });
 
     assert.equal(result.status, 7, 'script exits with command exit status');
-    assert.match(result.stdout + result.stderr, /poly-demo-admissions: run/, 'prints run completion line');
 
     // The child process should have written the output file
     assert.ok(statSync(outFile, { throwIfNoEntry: false }), 'child process ran');
@@ -611,6 +611,10 @@ process.exit(7);
 
     // The run id should be a valid UUID-like string
     assert.match(output.run, /^[a-f0-9\-]{36}$/, 'run id is a UUID');
+
+    // Check the script's output line has the correct format: poly-demo-admissions: run <id>, <n> admissions
+    const expectedLine = `poly-demo-admissions: run ${output.run}, 1 admissions`;
+    assert.match(result.stdout + result.stderr, new RegExp(expectedLine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'prints run completion line with id and count');
 
     // The run folder should be cleaned up after the script ends
     const S = await import('../demo/host/admission-store.mjs');
