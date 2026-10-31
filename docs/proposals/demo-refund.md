@@ -525,6 +525,19 @@ presenter terminal: staff notices (Notice/Slack panel), poly approve, journal ve
     **Item 3 did not hold.** Each test file's process had its own `POLY_TEST_RUN`: two files of one `node --test` command with the suite's preload printed two ids (Node 24.12.0). So no file inherited an id from the runner, and the preload of each file (`??=`) set its own. The store was therefore shared within a file and not across files, and the first admission of each file was a real one. The saving above is that of sharing within a file. DAC31 asks for sharing across the files of one run. Ruled by the owner (2026-10-31): the suite's `test` script sets the id once before `node --test` (item 3).
 
     After the code of the 2026-10-31 rulings, the shared demo set is run once more, through `scripts/test-run.mjs` with the suite's command; the number of real admissions (one per distinct source) and the total time are recorded here from that run.
+
+    Measured on 2026-10-31 at `28f0926b`, the eight demo files in one command through `scripts/test-run.mjs`, with nothing else started: **3 real admissions** (the script's line: `poly-demo-admissions: run 5e390179-e920-4a5c-87cb-aef3ff303c04, 3 admissions`), one per distinct source. They were made by the first test to use each source: DF17 in `demo-approval` (the demo copy, 424.8 s), DF12.1 (the example timeouts, 472.4 s) and DF12.4 (the rewritten price tables, 440.8 s) in `demo-failures`. Every other demo test took 45 s or less. **Total: 1448.6 s** (the run's duration; 1450 s by the clock), against 3456.7 s shared within each file and 8067.9 s fresh. 39 tests, 39 pass, 0 fail, and each result, compared by test name, is the same as in the fresh run. The run's folder was removed when the command ended.
+
+    | File | Time |
+    |---|---|
+    | `demo-approval` | 424.8 s |
+    | `demo-concierge-e2e` | 44.8 s |
+    | `demo-diagrams-desk` | 29.2 s |
+    | `demo-failures` | 923.8 s |
+    | `demo-ledger-e2e` | 2.7 s |
+    | `demo-resolve-e2e` | 3.3 s |
+    | `demo-room-answers` | 8.8 s |
+    | `demo-spend-stub` | 2.2 s |
 11. **Cleanup** (ruled 2026-10-31). Stores of earlier runs are removed from the temporary folder at two moments, both by `scripts/test-run.mjs`; nothing else removes them.
     - **When its command ends,** whatever the exit, the script prints one line, `poly-demo-admissions: run <id>, <n> admissions`, where `<n>` is the number of key folders in `<root>/<run>` that hold `ready.json`, and then removes `<root>/<run>` and everything in it, staging folders among them. The line keeps the count of real admissions, which the removal would otherwise take with it. This is `endRun({ run, root = storeRoot() })`, which returns `<n>` (0 when the folder does not exist) and removes the folder.
     - **Before it starts its command,** it removes every entry directly under `<root>` whose modification time is more than seven days before now: run folders, and the key folders of the first layout (`<root>/<key>/`, `7c48e300`), which nothing reads any more. Seven days, because no run lasts that long: the longest, the serial after-suite run file by file, took under ten hours (2026-10-30). This is `sweepStores({ root = storeRoot(), now = Date.now(), maxAgeMs = 7 * 24 * 3600 * 1000 })`, which returns the names it removed; an entry exactly `maxAgeMs` old is kept, and a root that does not exist removes nothing.
