@@ -257,7 +257,7 @@ test('DF27 item 5: storeDir is in os.tmpdir(), not in the repository', async () 
 
   const tmpDir = tmpdir();
   assert.ok(storeDir.startsWith(tmpDir), `store dir starts with tmpdir: ${tmpDir}`);
-  assert.ok(!storeDir.startsWith(ROOT_DIR), `store dir is not under repository: ${ROOT_DIR}`);
+  assert.ok(!storeDir.startsWith(ROOT), `store dir is not under repository: ${ROOT}`);
   assert.ok(storeDir.includes('poly-demo-admissions'), 'store dir includes poly-demo-admissions');
   assert.ok(storeDir.includes(testKey), 'store dir includes the key');
 });
