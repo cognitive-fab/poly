@@ -31,15 +31,18 @@ The owner made these seven decisions on 2026-10-31. They are restated here so th
 
 ### 2a. Decisions on the open questions
 
-The owner read the first draft of this proposal and decided its open questions on the same day, 2026-10-31. Each decision is recorded here and applied in the section it names. Section 15 lists what remains open.
+The owner read the first draft of this proposal and decided its open questions on the same day, 2026-10-31, then decided the four the second draft still listed (D15 to D17, and the number of D8). Each decision is recorded here and applied in the section it names. Section 15 lists what remains open.
 
-8. **D8. The boundary ruling is granted,** on the six conditions of section 7. It is the second ruling of S507's kind; it takes its S-number when it is entered in the decisions log.
+8. **D8. The boundary ruling is granted,** on the six conditions of section 7. It is the second ruling of S507's kind, entered in the decisions log as **S584** (`docs/history/decisions-extensions.md`), the next free number.
 9. **D9. A pin carries a signed record from `poly admit`** (section 11.2). The admission key signs it; no person's record of a new kind is needed.
 10. **D10. Node 22.15 or later is required,** for the synchronous module hooks (section 6.3).
 11. **D11. An extension may carry a provider profile,** declared in its manifest's grants (section 3.3).
 12. **D12. Mail read with a static AWS key is owned by the principal that `poly.json` names for that key** (sections 5.4 and 13.1).
 13. **D13. A Message-ID is an identity for de-duplication only, never for authority.** When a message has none, the identity is a hash of its sender, date and subject (section 10).
 14. **D14. Opening extension authorship beyond Cognitive Fab requires WebAssembly isolation** (sections 6.6 and 11.2).
+15. **D15. An `Instant` may be carried in a payload,** as a typed `Instant` in UTC. The runtime rejects anything that does not parse as one. The date timer needs it: a due date reaches a machine in an action's payload (section 9.2).
+16. **D16. One fresh worker per extension version,** recycled after any error or uncaught exception. An extension may keep no state between calls (sections 3.2, 6.1, 6.6 and 11.4).
+17. **D17. A base parameter of a profile takes only the values the manifest lists.** `poly admit` shows them, so none changes without a new pin (sections 3.3 and 11.3).
 
 ## 3. What an extension is
 
@@ -86,6 +89,8 @@ grant bucket: aws_sigv4 {
   scopes { s3:ListBucket, s3:GetObject }
   profile "aws-s3" {
     base "https://{bucket}.s3.{region}.amazonaws.com/"
+    param bucket { "kanjo-support" }
+    param region { "eu-west-1" }
     source "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
   }
 }
@@ -108,7 +113,7 @@ LeafParam  = Ident ":" Type [ "one" ] [ "raw" ] ;
 - A leaf with `uses g` is a **capability leaf**: it receives exactly one capability, the connection the runtime opens under the grant `g` (D1). Its class is declared and is a floor the program cannot lower (section 8). `Idempotency` is PS23's `idempotent header "<Name>" window <duration>`, written on the leaf because only the extension's author can read the provider's documentation (K17).
 - A leaf's input types are `bool`, ranges, checked strings, payload-free enums of the module, `Key`, `Instant` (section 9), `Content`, and `Items` with `one` (PS17.4b). `raw` on an `Items` parameter asks for the item's raw bytes rather than its rendered body (section 4.3).
 - A leaf's output type is a record of the same types, or `Content`. A record output is how one leaf returns several values; a single value is a record with one field.
-- A leaf has no state the program can see. Whatever a leaf keeps between calls in its worker is outside the program, and the checker assumes nothing that it could break (section 5.1).
+- A leaf keeps no state between calls (D16). The contract forbids it, admission's corpus replay checks it within the corpus (section 11.4), and the checker assumes nothing that state could break in any case (section 5.1).
 
 The module's machines are checked like any module's (section 5.3). An extension whose protocol has state of its own (a cursor that must only move forward, a session that must be closed) writes that state as a machine, so it is checked, and keeps the leaves to I/O and parsing.
 
@@ -130,6 +135,7 @@ The module's machines are checked like any module's (section 5.3). An extension 
     "bucket": { "kind": "aws_sigv4", "service": "s3", "scopes": ["s3:ListBucket", "s3:GetObject"],
                 "profile": { "provider": "aws-s3",
                              "bases": ["https://{bucket}.s3.{region}.amazonaws.com/"],
+                             "params": { "bucket": ["kanjo-support"], "region": ["eu-west-1"] },
                              "scopes": ["s3:ListBucket", "s3:GetObject"],
                              "source": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html" } }
   },
@@ -150,7 +156,7 @@ The module's machines are checked like any module's (section 5.3). An extension 
 - Types are written in a closed JSON form of poly's types: a scalar name, `{ "range": [lo, hi] }`, `{ "enum": "x.sesmail.E" }`, `{ "record": { … } }`, `"Content"`, `"Key"`, `"Instant"`, `{ "items": { "one": true, "raw": true } }`. No other form is read.
 - `limits` bound each call (section 6.5). The program may lower them and never raise them.
 - `source` names the leaves that implement a source adapter (section 4.3).
-- **A grant may carry a provider profile (D11).** Today a provider profile is read only from std (`std/credentials/providers/<provider>.json`, `packages/poly-check/src/providers.ts`), which is why a polylife credential cannot reach Google Calendar (G9). An extension declares the profile its grant needs inside that grant, and nowhere else: its provider name, its base addresses, the scopes it may request, and the documentation it was read from. A base is written as a std profile's is (an absolute `https` URL, no user, query or fragment, `PL1201` otherwise), and may hold named parameters in braces, each standing for one DNS label that the program's credential supplies (`region "eu-west-1"`, `bucket "kanjo-support"`); a parameter is never a wildcard, and the base the credential spells out is checked against the template label by label. A profile carried by an extension reaches only the leaves of that extension: no effect handler and no other source may use it. It cannot shadow a std profile of the same provider name (`PL6416`), and it may not name a model provider (section 7, condition 5). The profile is part of the manifest, so it is pinned by the digest (section 11), printed in the certificate beside the grant, and read back against the module (section 11.5), with the broken variant `profile-base-widened` in the toolchain faults.
+- **A grant may carry a provider profile (D11).** Today a provider profile is read only from std (`std/credentials/providers/<provider>.json`, `packages/poly-check/src/providers.ts`), which is why a polylife credential cannot reach Google Calendar (G9). An extension declares the profile its grant needs inside that grant, and nowhere else: its provider name, its base addresses, the scopes it may request, and the documentation it was read from. A base is written as a std profile's is (an absolute `https` URL, no user, query or fragment, `PL1201` otherwise), and may hold named parameters in braces. **A parameter takes only the values the profile lists (D17):** `param` in the module, `params` in the manifest, each value one DNS label. The program's credential picks one listed value for each parameter (`bucket "kanjo-support"`, `region "eu-west-1"`), and the base it spells out is checked against the template label by label; a value the manifest does not list is refused at check, as a base outside a std profile is. A parameter is never a wildcard. `poly admit` prints each parameter with its values (section 11.3), and the values are part of the manifest and so of the digest, so a new bucket or region is a new manifest and a new pin. An extension used by several projects lists each one's values, or each project pins a version that lists its own. A profile carried by an extension reaches only the leaves of that extension: no effect handler and no other source may use it. It cannot shadow a std profile of the same provider name (`PL6416`), and it may not name a model provider (section 7, condition 5). The profile is part of the manifest, so it is pinned by the digest (section 11), printed in the certificate beside the grant, and read back against the module (section 11.5), with the broken variant `profile-base-widened` in the toolchain faults.
 - `corpus` is the digest of the recorded calls admission replays (section 11.4).
 
 ## 4. Importing an extension and calling a leaf
@@ -304,7 +310,7 @@ The runtime starts one Node worker (`node:worker_threads`) per extension, never 
 - `resourceLimits` from the leaf's `limits` (`maxOldGenerationSizeMb`, `maxYoungGenerationSizeMb`, `stackSizeMb`);
 - `stdout: true` and `stderr: true`, so the leaf's console reaches the runtime's log as data and never the terminal.
 
-The worker is recycled after a number of calls and after any failure, so a leak or a poisoned global does not outlive a few calls.
+**One fresh worker per extension version (D16).** The runtime starts a worker for a pinned version when that version is first called, and keeps it for that version's calls. A new pin gets a new worker; the old one is never reused. After any error or uncaught exception (a leaf that throws, a rejection no one handles, a timeout, a heap beyond its limit, an output outside its type), the runtime terminates the worker and the next call gets a fresh one. An extension may keep no state between calls: the contract allows none, and state a protocol needs is a machine of the extension's module (section 3.2).
 
 ### 6.2 What the bootstrap removes before any leaf code loads
 
@@ -355,7 +361,7 @@ A worker is weaker than WebAssembly. A WebAssembly module starts with no authori
 - **A global the list does not name.** Each Node release can add one. The escape corpus (K20) runs on every supported Node version, and a release of poly names the versions it was run on. A new Node is unsupported until it passes.
 - **One process.** The worker shares the runtime's process. A defect in V8 or Node that escapes a worker reaches the runtime's memory: the vault's keys, the store and the journal. WebAssembly in a separate process, or OpenShell (PT6.5, part 2), would not share it.
 - **Side channels.** Timing is reduced, not removed: a capability leaf keeps the clock, and any leaf can measure its own work. A leaf can also encode what it read into what its capability allows: a `GET` path under the bucket's base reaches the bucket's owner. The capability bounds where data can go, not what it says.
-- **State between calls.** A leaf can keep values in its module's scope between calls of one worker. The checker assumes nothing that this breaks (section 5.1); identity keys are computed once and recorded (section 10) so that it cannot split an identity.
+- **State between calls.** The contract forbids it (D16), but one worker serves many calls of a version, so a leaf that breaks the rule can keep values in its module's scope until its worker is replaced. Admission's replay in reverse order catches that within the corpus (section 11.4), not beyond it. The checker assumes nothing that it breaks (section 5.1), and identity keys are computed once and recorded (section 10) so that it cannot split an identity.
 - **Denial of service.** Bounded by the limits of 6.5, per call, never across calls: a leaf that is slow on every call slows its source.
 
 What stays possible later: a manifest field `"runtime": "wasm"` with the same contract, the leaves compiled to WebAssembly and run with the capability as their only import; or the worker run inside an OpenShell sandbox, where the policy is generated from the grants as it is today from labels. The contract of section 3 does not depend on the worker, so either can replace it without changing a program.
@@ -364,7 +370,7 @@ What stays possible later: a manifest field `"runtime": "wasm"` with the same co
 
 ## 7. The boundary rule
 
-`scripts/check-boundaries.mjs` lists `node:worker_threads` among `PROCESS_MODULES`, and only poly-new may import one (rule 2, review finding P8). A worker in poly-runtime is therefore a change to how a standing rule is enforced. S507 is the precedent: poly-mine became the only other package that may start a process, on six conditions the boundary script and a test hold. **The owner granted a ruling of the same kind on 2026-10-31 (D8), on the six conditions below.** It takes its S-number when it is entered in the decisions log, and the boundary script cites that number in rule 8. The conditions:
+`scripts/check-boundaries.mjs` lists `node:worker_threads` among `PROCESS_MODULES`, and only poly-new may import one (rule 2, review finding P8). A worker in poly-runtime is therefore a change to how a standing rule is enforced. S507 is the precedent: poly-mine became the only other package that may start a process, on six conditions the boundary script and a test hold. **The owner granted a ruling of the same kind on 2026-10-31 (D8), on the six conditions below.** It is S584 in the decisions log (`docs/history/decisions-extensions.md`), and the boundary script cites S584 in rule 8. The conditions:
 
 1. **One place.** Only `packages/poly-runtime/src/extensions/host.ts` imports `node:worker_threads`, and it starts a `Worker` only with the bootstrap's file as its entry, `eval` false, `env: {}` and `execArgv: []`. The script checks each, as rule 6 checks `execFileSync`.
 2. **The bootstrap imports nothing.** `packages/poly-runtime/src/extensions/sandbox.ts` imports `node:worker_threads` (for `parentPort`) and `node:module` (for `registerHooks`) and nothing else; it names no network module and no process module.
@@ -414,6 +420,8 @@ InstantExpr = Expr [ ( "+" | "-" ) Duration ] ;
 ### 9.2 The type `Instant`
 
 `Instant` is a point in time, or `none`. On the wire it is an integer number of milliseconds since the Unix epoch, a non-negative safe integer; the runtime refuses any other value as outside the type (S140). A module stores an `Instant`, passes it, compares two with `==`, `!=`, `<`, `<=`, `>` and `>=`, and uses one in `at`. Any other use (arithmetic outside `at`, a comparison with a number, a literal other than `none`, a map key, a check domain) is `PL1209`, as for `Key`. An `Instant` enters only as data at run time: a leaf's output, a completion, or an input the host or a person dispatches.
+
+**In a payload (D15).** An `Instant` may be carried in a payload as a typed `Instant`, always UTC: an action's parameter, an effect's payload (a calendar write hands one to its leaf, which formats it for the provider), a completion's data. The value has no zone and no offset, so two runs in two zones read the same instant. Wherever one crosses into the runtime, the runtime parses it against the type and rejects anything that does not parse: at dispatch it is refused as outside the type (S140), and from a leaf it is `leaf-output` (section 5.2). The date timer needs this: a due date reaches `Obligation` as the payload of `SetDue(d)` (9.1).
 
 **Check (a new lemma, PS4.1i).** In a module where `Instant` is used as above, every order-preserving bijection `π` on instants gives `(s, l, s') ∈ R_M` iff `(π s, π l, π s') ∈ R_M`: no handler, guard or property can tell two instants apart except by equality and order, no constant other than `none` names one, and `at` does not read its time in **check** (9.3). So every path of **run** is the renaming of a path of **check** over `none` and `n` ordered representatives `i1 < … < in`, `n` following PS4.1c's rule for `Instant` apart. The verdict prints the count. polylife's rule that an estimated date only tightens another estimate (`shouldSetDue`, `host/facts.mjs`) is then a comparison in the machine, explored both ways, and leaves the host.
 
@@ -501,13 +509,13 @@ The digest in `poly.json` is the SHA-256 of the RFC 8785 canonical JSON of `{ na
 3. `package.json` has no `dependencies`, `optionalDependencies` or `bundledDependencies` (a leaf imports only its own files, 6.3), no `install`, `preinstall` or `postinstall` script, and no `exports` condition that names a file outside the package.
 4. **A static lint of the leaves**, the boundary script's own patterns applied to each file the manifest lists: an `import` or `require` of anything but a relative file of the package; a model SDK; a network module named in a string; `process.env`; `getBuiltinModule`, `process.binding`, `dlopen`; `globalThis[…]`; `eval` and `new Function`; `WebAssembly`. Each is `PL6415 EXTENSION_AMBIENT`. The lint is the first line and the loader the second (6.3), as for handlers (PT6.5).
 5. The manifest is read back against the module (11.5) and the corpus is replayed (11.4).
-6. The certificate binds, under `poly.extensions`, each extension's name, version, digest, publisher key id, pin record, provider profiles (D11), and the files with their digests. The verified copy of the files is written to `.poly/build/extensions/<name>/`, which the loader reads (6.3), as the handlers' verified copy is (PT6.5).
+6. The certificate binds, under `poly.extensions`, each extension's name, version, digest, publisher key id, pin record, provider profiles (D11) with the values of each base parameter (D17), and the files with their digests. `poly admit` prints each profile's bases and parameter values, so the person who admits sees every host a leaf can reach. The verified copy of the files is written to `.poly/build/extensions/<name>/`, which the loader reads (6.3), as the handlers' verified copy is (PT6.5).
 
 **At load** the runtime verifies each pin record (`PL6414`), compares the verified copy with the certificate (`PL6413`), and the host's `before each worker start` check does it again (section 7, condition 6).
 
 ### 11.4 The corpus
 
-Each extension ships recorded calls: for each leaf, inputs and the outputs the leaf gave when the package was built, and for a capability leaf the requests it made and the answers it was given. Admission runs each pure leaf over its inputs in the sandbox and requires the recorded outputs; it runs each capability leaf against the recorded answers through a port that replays them and requires the recorded requests and outputs. A difference refuses admission. This is the evidence for K21, and a check that the worker loads the package the pin names. It proves nothing about inputs outside the corpus.
+Each extension ships recorded calls: for each leaf, inputs and the outputs the leaf gave when the package was built, and for a capability leaf the requests it made and the answers it was given. Admission runs each pure leaf over its inputs in the sandbox and requires the recorded outputs; it runs each capability leaf against the recorded answers through a port that replays them and requires the recorded requests and outputs. A difference refuses admission. It then replays the corpus a second time in the same worker, in reverse order, and requires the same outputs again: a leaf whose answer depends on an earlier call is refused (D16). This is the evidence for K21, a check of D16, and a check that the worker loads the package the pin names. It proves nothing about inputs outside the corpus.
 
 ### 11.5 The read-back
 
@@ -564,13 +572,14 @@ Three gaps become extensions (G6, G7, G9), two become language primitives with a
 - **Packages.** `poly-lang` and `poly-core` (grammar, types, the import), `poly-lower` (the call entry, `fireAt`, the source descriptor), `poly-ref` (the read-backs, `Instant`'s ordered representatives, identity naming), `poly-check` (admission, the lint, the corpus replay, the pin command), `poly-runtime` (the worker host and bootstrap, the port, the type check of outputs, identity dispatch), `poly-io` (SigV4, the `aws_sigv4` vault entry, the raw form of a Gmail item).
 - **Scripts and tests.** `scripts/check-boundaries.mjs` (rule 8), `test/toolchain-faults.mjs` (seven variants of section 4.4 and `profile-base-widened` of section 3.3), `test/tv.test.mjs`, a sandbox test over the escape corpus, the evidence scripts unchanged.
 - **Engines.** None. polyrun's `fireAt` already exists.
+- **Decisions.** `docs/history/decisions-extensions.md` holds S584 and the owner's other rulings on this proposal.
 - **Not touched.** Every existing program: one that imports no extension and writes no `at` or `identity` lowers to the same artefacts.
 
 ## 15. Open questions
 
 ### 15.1 Decided (the owner, 2026-10-31)
 
-The first draft listed eight open questions. Six are decided, and one decision was added:
+The owner decided the open questions in two readings: the first draft's, then the four the second draft still listed. One decision was added.
 
 | Question in the first draft | Decision | Applied in |
 |---|---|---|
@@ -581,13 +590,14 @@ The first draft listed eight open questions. Six are decided, and one decision w
 | 5. The owner of SES mail | The principal `poly.json` names for the static key (D12) | 4.3, 5.4, 13.1 |
 | 6. Identity strength | De-duplication only, never authority; a hash of sender, date and subject when the Message-ID is missing (D13) | 10.1 to 10.3, 13.3 |
 | (added) Authorship beyond Cognitive Fab | Requires WebAssembly isolation (D14) | 6.6, 11.2 |
+| (second draft) Instants in payloads | Allowed, as a typed `Instant` in UTC; the runtime rejects anything that does not parse (D15) | 9.2 |
+| (second draft) Worker recycling | A fresh worker per extension version, recycled after any error or uncaught exception; no state between calls (D16) | 3.2, 6.1, 6.6, 11.4 |
+| (second draft) The number of the ruling | S584, the next free number in the decisions log (D8) | 2a, section 7 |
+| (second draft) Base parameters of a profile | Only values the manifest lists; `poly admit` shows them, so none changes without a new pin (D17) | 3.2, 3.3, 11.3 |
 
 ### 15.2 Still open
 
-1. **Instants in payloads.** Whether an `Instant` may leave in an effect's payload (a calendar write), and whether S458's cut-point reduction should extend to instants compared with each other.
-2. **Recycling.** How many calls a worker serves before it is recycled, and whether a pure leaf should get a fresh worker per call when it computes an identity, at the cost of start time.
-3. **The S-number of D8.** The ruling is granted; its number is assigned when it is entered in the decisions log, and rule 8 of the boundary script cites it.
-4. **Parameters in an extension's profile.** D11 allows a profile; whether a base parameter (`{bucket}`, `{region}`) should be limited to declared values in the manifest, or any DNS label the program's credential gives, as section 3.3 proposes.
+1. **Instants in the cut-point reduction.** The first question of the second draft had a second half that D15 does not answer: whether S458's cut-point reduction should extend to instants compared with each other. It changes how many ordered representatives a check explores (PS4.1i), not what a program means, so it can be settled when the check is built.
 
 ## 16. Left out on purpose
 
@@ -606,10 +616,11 @@ An extension is a pinned package of three parts: a poly module the checker reads
 
 Two primitives stay in the language. `at` fires a timer at a date carried by data, with no engine change, since polyrun already accepts an absolute fire time, and it puts due dates inside liveness properties. `identity` names instances by a key a pinned leaf computes once, so the runtime, not the host, decides that one message in two mailboxes is one. That key de-duplicates and never grants anything, and a message with no Message-ID gets a hash of its sender, date and subject.
 
-Of polylife's fourteen gaps, three become extensions, two become primitives with a leaf, one is the import, one is a leaf tier, and seven stay out of scope. The weakest part is the worker: a deny list over a full runtime in the runtime's own process. The owner granted the boundary ruling for it on the six conditions of section 7, for Cognitive Fab's own extensions, and made WebAssembly isolation the condition for any other author. Six of the first draft's open questions are decided (section 15.1), and four smaller ones remain.
+Of polylife's fourteen gaps, three become extensions, two become primitives with a leaf, one is the import, one is a leaf tier, and seven stay out of scope. The weakest part is the worker: a deny list over a full runtime in the runtime's own process. The owner granted the boundary ruling for it on the six conditions of section 7, for Cognitive Fab's own extensions, and made WebAssembly isolation the condition for any other author; the ruling is S584. The later decisions keep the contract narrow: an `Instant` travels in a payload only as a UTC value the runtime parses at every crossing, a worker serves one extension version and is replaced after any error, with no state allowed between calls, and a profile's base parameters take only listed values, so admission shows every host a leaf can reach. Every open question is decided (section 15.1) except one part of one, the cut-point reduction for instants (15.2).
 
 ## Glossary
 
+- **Base parameter:** a named label in a profile's base address, such as `{bucket}`, which takes only the values the manifest lists.
 - **Capability leaf:** a leaf handed exactly one capability, a connection the runtime opened under a grant the program bound.
 - **Date timer:** `at e -> A() as k`, a timer that fires at the `Instant` `e`, lowered to polyrun's `fireAt`.
 - **Declassification point:** a place where information about tainted data leaves without a taint: a count (S325), a finite answer (S323), a leaf's finite or key output.
