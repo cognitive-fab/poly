@@ -1,5 +1,8 @@
 // DB6 item 12 and DAC32: every wait of the driver has a bound, the result of replay() says what its cleanup left behind, and a
-// driver test that does not end fails under its own name. Written from the item alone (rule 7a), before the code.
+// driver test that does not end fails under its own name. Written by a separate writer from the item (rule 7a), before the code.
+// The writer also read the bodies of selfCheck, request, stop() and drive() in demo/driver/replay.mjs and the stand-in's server, to
+// find the stripe factory's interface and to make sure the old tree could not hang this file, and it checked the tests against a
+// scratch implementation in a temporary folder, which it then deleted.
 //
 // This file cannot take its per-test timeout from the helper it tests, so each test carries its own `{ timeout }`. Every wait a
 // test starts here is also raced against a deadline the test owns: on a tree without the bounds of the item, a test fails at its
