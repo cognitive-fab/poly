@@ -293,11 +293,26 @@ The ten examples were written on a branch cut from v1.1.0, which never had v1.2 
 - **Fixed (rule 7a).** The five specs were amended first, then the tests, by a separate writer, then the programs, their defect copies and the READMEs. The expected lines, the defect witnesses and the properties' names are unchanged.
 - **A sixth source, found by the full suite.** `test/fixtures/flow-boundary/leak.poly`, a fixture of finding 17, declared an irreversible send with the default retry, so `test/ex-flow-boundary.test.mjs` found `PL4003` beside its `PL6831` and the retry-impact scan of `test/s526-impact.test.mjs` (DAC7(a)) listed it as an unguarded source. The mail service it names documents no key either, and nothing settles its end, so the send is `retry { attempts 1 }` and the fixture is otherwise unchanged. Both tests failed in the full run and pass after the change (15 of 15).
 
+## After v1.5
+
+### 32. A keyring's `file:` key is read under the project, even when its path is absolute (open)
+
+- **Symptom.** In `poly.json`, `people[].publicKey` may be written `file:PATH`, and so may `agents[].publicKey`, which the same function reads. `keyringsOf` (`packages/poly-core/src/manifest.ts`, line 162) reads the file at `join(projectDir, PATH)`, so an absolute path is joined under the project. On Windows `join('C:\\p', 'C:\\keys\\jj.pem')` names `C:\p\C:\keys\jj.pem`, which does not exist. On POSIX `/keys/jj.pem` becomes `<project>/keys/jj.pem`, another file. The other `file:` locations of `poly.json` honour an absolute path: `keys.admission.location` (`isAbsolute(where) ? where : join(dir, where)`, `packages/poly-check/src/admit.ts`, line 148), and `run.trust` and `run.ledger.signer` (`resolve(dir, …)`, `packages/poly-runtime/src/run.ts`, lines 111 and 120). PT1.2 says only "PEM or `file:PATH`", so the specification does not say which reading is right.
+- **Appeared in.** the poly-tau2 session, which keeps its people's public keys outside the project and names them by absolute path.
+- **Workaround.** A path relative to the project, or the PEM text inline in `poly.json`.
+- **Why it matters.** These are the keys PT12.5 is strictest about. A key file kept outside the project is the arrangement S126 asks for, and it is the one that fails. On POSIX it may not fail at all: if a PEM file exists at the joined path, admission certifies that key into the ring in place of the one named.
+- **Fix, for the next release (rule 7a).**
+  1. **Spec.** PT1.2 states one rule for every `file:` location in `poly.json` (`people[].publicKey`, `agents[].publicKey`, `keys.admission.location`, `run.trust`, `run.ledger.signer`): an absolute path is read as written, and a relative one from the project's directory. Committed alone.
+  2. **Test, by a separate writer** who has read only the amended PT1.2. A project whose `people` and `agents` keys are `file:` absolute paths to PEM files outside it is admitted and certifies those keys. The same keys named by relative paths give the same rings digest. On POSIX, an absolute path whose join under the project would name another existing PEM file certifies the absolute one. The test fails on the code as it is.
+  3. **Code.** `keyringsOf` resolves the path as `admit.ts` does, and the readers share one helper, so the rule cannot drift again.
+
 ## Conclusion
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.
 
 After five batches and the move onto v1.3.1 there are thirty-one. The later ones add three kinds. Some are defects of the toolchain that the examples or an audit exposed, each fixed under rule 7a with a test that failed first: a scope that governed nothing (20), a glob scope (24), the sweep a refused source broke (26), a stage reading CLEAN beside an error (29, and the audit of all nineteen stages, 30). Some are the language costing more than it should, logged with a proposal (15, 17, 21). And one is a rule doing its work: v1.3's retry-safety rule caught five of the ten examples and a fixture that trusted a key no service documents (31), and fixing it showed where a lost answer had been read as a refusal.
+
+After v1.5 there are thirty-two. The new one came from outside the examples: a person's key named by an absolute path is read under the project (32). It is open, with its fix planned under rule 7a for the next release.
 
 ## Glossary
 
