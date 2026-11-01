@@ -1,7 +1,7 @@
 // DAC8 (DB6, DB7): the replay driver reports O1, O2 and O3 correctly on doubles of the baseline, and the control fails first where it
 // should. Three doubles as the plan names them (one that refunds twice, one that sends a key, one that cannot start), the fresh-key
 // double of DAC9, a double that does not retry, and a mutant stand-in that ignores the key. Nothing leaves the machine.
-import { test } from 'node:test';
+import { test } from './fixtures/demo/driver-test.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';

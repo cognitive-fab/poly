@@ -46,6 +46,7 @@ export class StandInInvalid extends Error {}
 export const DRIVER_FAULTS = ['count-by-posts', 'skip-self-check', 'reuse-process'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const STAND_IN_CLOSE_MS = 5000;
 
 export function chargesOf(orders) {
   return orders.map((o) => ({ id: o.charge, amount: o.total, currency: o.currency ?? 'usd' }));
@@ -65,29 +66,41 @@ export function webhook(order, text, secret = SYNTHETIC_ENV.WHATSAPP_APP_SECRET,
   return { body, headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}` } };
 }
 
-function request({ port, ca, host, method, path, headers = {}, body }) {
+const NO_ANSWER = Symbol('no answer');
+
+/** Rejects with NO_ANSWER when the answer has not ended `ms` after the request was sent (DB6 item 12 (b)). */
+function request({ port, ca, host, method, path, headers = {}, body, ms }) {
   return new Promise((resolveRequest, reject) => {
+    let timer = null;
+    const done = (settle, value) => { clearTimeout(timer); settle(value); };
     const req = https.request({ host: '127.0.0.1', port, method, path, ca, servername: host, headers: { host, ...headers } }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolveRequest({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('error', (e) => done(reject, e));
+      res.on('end', () => done(resolveRequest, { status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
     });
-    req.on('error', reject);
+    // A wall-clock timer over the whole request, not a socket's idle timeout: a server that sends one byte at a time never goes idle.
+    timer = setTimeout(() => { reject(NO_ANSWER); req.destroy(); }, ms);
+    req.on('error', (e) => done(reject, e));
     req.end(body);
   });
 }
 
-/** The stand-in checks its own key behaviour against a scratch charge (DAC9). Throws StandInInvalid, naming what failed. */
-export async function selfCheck(standIn, authority, orders) {
+/**
+ * The stand-in checks its own key behaviour against a scratch charge (DAC9). Throws StandInInvalid, naming what failed. Each of its
+ * three requests has `requestMs` from the moment it is sent (DB6 item 12 (b)): a stand-in that does not answer is not a control either.
+ */
+export async function selfCheck(standIn, authority, orders, { requestMs = 10_000 } = {}) {
   const scratch = [{ id: 'ch_selfcheck', amount: 1000, currency: 'usd' }];
   standIn.reset({ charges: scratch, fault: 'none' });
-  const post = (key, amount) => request({ port: standIn.port, ca: authority.ca, host: 'api.stripe.com', method: 'POST', path: '/v1/refunds',
-    headers: { authorization: 'Bearer selfcheck', 'content-type': 'application/x-www-form-urlencoded', 'idempotency-key': key }, body: `charge=ch_selfcheck&amount=${amount}` });
+  const fail = (why) => { throw new StandInInvalid(`the stand-in fails its own check: ${why}`); };
+  const post = (key, amount) => request({ port: standIn.port, ca: authority.ca, host: 'api.stripe.com', method: 'POST', path: '/v1/refunds', ms: requestMs,
+    headers: { authorization: 'Bearer selfcheck', 'content-type': 'application/x-www-form-urlencoded', 'idempotency-key': key }, body: `charge=ch_selfcheck&amount=${amount}` })
+    .catch((e) => { if (e === NO_ANSWER) fail(`no answer within ${requestMs} ms`); throw e; });
   const first = await post('selfcheck-1', 100);
   const again = await post('selfcheck-1', 100);
   const other = await post('selfcheck-1', 200);
   const refunds = standIn.report().refunds;
-  const fail = (why) => { throw new StandInInvalid(`the stand-in fails its own check: ${why}`); };
   if (first.status !== 200) fail(`a first request with a new key gave ${first.status}`);
   if (refunds !== 1) fail(`the same key with the same parameters twice made ${refunds} refunds, not 1`);
   if (JSON.parse(again.body).id !== JSON.parse(first.body).id || again.headers['idempotent-replayed'] !== 'true') fail('the repeated key did not return the first response');
@@ -101,12 +114,21 @@ const freePort = () => new Promise((resolvePort, reject) => {
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolvePort(port)); });
 });
 
-function tcpOpen(port) {
+/** One connection attempt, abandoned after `ms` (DB6 item 12 (c)); the loopback answers at once, so the bound is kept by review. */
+function tcpOpen(port, ms) {
   return new Promise((resolveOpen) => {
     const s = net.connect({ host: '127.0.0.1', port });
-    s.once('connect', () => { s.destroy(); resolveOpen(true); });
-    s.once('error', () => resolveOpen(false));
+    const timer = setTimeout(() => { s.destroy(); resolveOpen(false); }, ms);
+    s.once('connect', () => { clearTimeout(timer); s.destroy(); resolveOpen(true); });
+    s.once('error', () => { clearTimeout(timer); resolveOpen(false); });
   });
+}
+
+/** Whether `promise` settled within `ms`; the timer is cleared either way, so it holds no process open. */
+async function within(promise, ms) {
+  let timer = null;
+  const late = new Promise((resolveLate) => { timer = setTimeout(() => resolveLate(false), ms); });
+  try { return await Promise.race([promise.then(() => true, () => true), late]); } finally { clearTimeout(timer); }
 }
 
 /** Starts the build's command in its directory, with the stand-in's names mapped and its authority trusted. */
@@ -137,15 +159,25 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
       while (Date.now() < until) {
         if (exited) return false;
         // DB6 item 11 (b): the time from the spawn to the first connection that succeeded.
-        if (await tcpOpen(port)) { startedMs = Math.max(1, Date.now() - spawnedAt); return true; }
+        if (await tcpOpen(port, Math.max(1, Math.min(1000, until - Date.now())))) { startedMs = Math.max(1, Date.now() - spawnedAt); return true; }
         await sleep(100);
       }
       return false;
     },
-    stop() {
-      if (exited) return;
-      if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
+    /**
+     * Null when the stop was done, or why it was not confirmed (DB6 item 12 (d)). spawnSync blocks the event loop, so without its
+     * timeout a taskkill that hangs would hold the driver and any test's timeout with it (finding 33).
+     */
+    stop(stopMs) {
+      if (exited) return null;
+      if (process.platform === 'win32') {
+        const r = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', timeout: stopMs, windowsHide: true });
+        if (r.error?.code === 'ETIMEDOUT') return `taskkill did not finish within ${stopMs} ms (pid ${child.pid})`;
+        if (r.error) return `taskkill could not be run (${r.error.message}) (pid ${child.pid})`;
+        return null;
+      }
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+      return null;
     },
   };
 }
@@ -228,7 +260,13 @@ async function drive(ctx, label) {
     // count-by-posts (seeded): a retry that the stand-in replayed counts as a refund.
     if (driverFault === 'count-by-posts') numbers.refunds = numbers.posts.length;
     return { label, driven: true, startedMs: proc.startedMs(), webhook: sent, turns, numbers, output: proc.output() };
-  } finally { if (driverFault !== 'reuse-process') proc.stop(); }
+  } finally { if (driverFault !== 'reuse-process') stopInto(ctx.cleanup, label, proc, ctx.stopMs); }
+}
+
+/** DB6 item 12 (d) and (f): a stop that was not confirmed is an entry of the result's cleanup, with the label of the drive that started it. */
+function stopInto(cleanup, label, proc, stopMs) {
+  const why = proc.stop(stopMs);
+  if (why) cleanup.push(`${label}: ${why}; a process of the build may still be running`);
 }
 
 /** DB6 item 9: the amount, judged apart from the outcome. `refunded` is the sum over the charges of the stand-in. */
@@ -263,6 +301,7 @@ export function classify(control, run, request = REQUEST) {
 export async function replay({
   build, start, fault = 'lost-answer', webhookPath = '/webhook', testCommand = null, mapNames = true,
   stripe, driverFault = null, quietMs = 3000, maxMs = 20_000, startMs = 15_000, webhookMs = 15_000, request = { text: REQUEST.text, amount: REQUEST.amount }, orders: ordersFile, extraEnv = {}, standInPort = 0, standInHost = '127.0.0.1',
+  selfCheckMs = 10_000, stopMs = 10_000,
 }) {
   const buildDir = resolve(build);
   const ordersPath = ordersFile ?? (existsSync(join(buildDir, 'orders.json')) ? join(buildDir, 'orders.json') : ORDERS);
@@ -270,17 +309,19 @@ export async function replay({
   const order = orders.find((o) => o.order === REQUEST.order) ?? orders[0];
   const authority = createAuthority();
   const standIn = await startStandIn({ authority, charges: chargesOf(orders), fault: 'none', port: standInPort, host: standInHost, ...(stripe ? { stripe } : {}) });
-  const result = { build: buildDir, request, fault: typeof fault === 'string' ? fault : fault.name ?? 'custom', start, orders: ordersPath };
+  // DB6 item 12 (f): one list for every result, the stand-in-invalid copy included, filled until the stand-in has closed.
+  const cleanup = [];
+  const result = { build: buildDir, request, fault: typeof fault === 'string' ? fault : fault.name ?? 'custom', start, orders: ordersPath, cleanup };
   let ctx = null;
   try {
     try {
-      if (driverFault !== 'skip-self-check') await selfCheck(standIn, authority, orders);
+      if (driverFault !== 'skip-self-check') await selfCheck(standIn, authority, orders, { requestMs: selfCheckMs });
       result.standIn = { valid: true };
     } catch (e) {
       if (!(e instanceof StandInInvalid)) throw e;
       return { ...result, standIn: { valid: false, why: e.message }, outcome: 'stand-in-invalid', reason: e.message, control: null, run: null, tests: null };
     }
-    ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs, request };
+    ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs, request, stopMs, cleanup };
     standIn.reset({ charges: chargesOf(orders), fault: 'none' });
     result.control = await drive(ctx, 'control');
     const controlOk = result.control.driven && result.control.numbers.posts.length === 1 && result.control.numbers.refunds === 1;
@@ -293,8 +334,9 @@ export async function replay({
     return result;
   } finally {
     // reuse-process (seeded) kept one process for both runs; it ends here.
-    if (driverFault === 'reuse-process') { try { ctx?.kept?.proc.stop(); } catch { /* gone */ } }
-    await standIn.close();
+    if (driverFault === 'reuse-process' && ctx?.kept) { try { stopInto(cleanup, 'control', ctx.kept.proc, stopMs); } catch { /* gone */ } }
+    // DB6 item 12 (e): the stand-in ends its connections when it closes, so this bound is kept by review; past it the driver goes on.
+    if (!(await within(standIn.close(), STAND_IN_CLOSE_MS))) cleanup.push(`the stand-in did not close within ${STAND_IN_CLOSE_MS} ms`);
     authority.remove();
   }
 }
@@ -318,5 +360,6 @@ export function format(result) {
     `outcome ${result.outcome}: ${result.reason}`,
     ...(result.amount ? [`amount: ${result.amount.refunded} refunded of ${result.amount.asked} asked${result.amount.over ? ' (over the amount asked)' : ''}`] : []),
     `its own tests: ${result.tests?.status ?? 'not run'}`,
+    ...(result.cleanup ?? []).map((entry) => `cleanup: ${entry}`),
   ].join('\n');
 }

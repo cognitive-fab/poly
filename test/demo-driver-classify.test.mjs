@@ -1,6 +1,6 @@
 // DB6 item 9 (corrected classify()): test classify(control, run) on synthetic inputs and recorded logs,
 // and format(result) on the amount field. DB6 item 8 (confirmed driver). E (webhook timeout).
-import { test } from 'node:test';
+import { test } from './fixtures/demo/driver-test.mjs';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

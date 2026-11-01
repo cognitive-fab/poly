@@ -1,5 +1,5 @@
 // DB6 item 11: the listen timeout and the time a build took to start.
-import { test } from 'node:test';
+import { test } from './fixtures/demo/driver-test.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
