@@ -2,7 +2,7 @@
 
 *Cognitive Fab · 2026-10-31 · proposal only, no code · on v1.5.0 (`076f9539`)*
 
-This proposal gives mundane code a declared place in a poly program. Mundane code is a parser, a protocol detail, or a source poly does not ship. It is entry 28 of `docs/proposals/v2.0.md`, which holds a summary and links here. The evidence comes from outside this repository: polylife, a poly program that reads mail across six accounts, and its list of fourteen gaps (`polylife/docs/poly-gaps.md`, with the host workarounds in `polylife/host/`). The owner decided seven points before this proposal was written (section 2). The proposal designs within them and does not reopen them. Nothing here changes a requirement until the owner accepts it.
+This proposal gives mundane code a declared place in a poly program. Mundane code is a parser, a protocol detail, or a source poly does not ship. It is entry 28 of `docs/proposals/v2.0.md`, which holds a summary and links here. The evidence comes from outside this repository: polylife, a poly program that reads mail across six accounts, and its list of fourteen gaps (`polylife/docs/poly-gaps.md`, with the host workarounds in `polylife/host/`). The owner decided seven points before this proposal was written, and seven more on its open questions (section 2). The proposal designs within them and does not reopen them. Nothing here changes a requirement until the owner accepts the proposal.
 
 ## 1. The problem
 
@@ -28,6 +28,18 @@ The owner made these seven decisions on 2026-10-31. They are restated here so th
 5. **D5. Pinning.** `poly admit` pins each extension by digest, and any change to the package fails admission.
 6. **D6. Time and identity stay in the language.** A timer fires at a date carried in the data, and an identity key is declared. Extensions only supply the function that extracts the date or computes the key.
 7. **D7. Authorship.** Cognitive Fab only at first. The contract format may change before it opens to others.
+
+### 2a. Decisions on the open questions
+
+The owner read the first draft of this proposal and decided its open questions on the same day, 2026-10-31. Each decision is recorded here and applied in the section it names. Section 15 lists what remains open.
+
+8. **D8. The boundary ruling is granted,** on the six conditions of section 7. It is the second ruling of S507's kind; it takes its S-number when it is entered in the decisions log.
+9. **D9. A pin carries a signed record from `poly admit`** (section 11.2). The admission key signs it; no person's record of a new kind is needed.
+10. **D10. Node 22.15 or later is required,** for the synchronous module hooks (section 6.3).
+11. **D11. An extension may carry a provider profile,** declared in its manifest's grants (section 3.3).
+12. **D12. Mail read with a static AWS key is owned by the principal that `poly.json` names for that key** (sections 5.4 and 13.1).
+13. **D13. A Message-ID is an identity for de-duplication only, never for authority.** When a message has none, the identity is a hash of its sender, date and subject (section 10).
+14. **D14. Opening extension authorship beyond Cognitive Fab requires WebAssembly isolation** (sections 6.6 and 11.2).
 
 ## 3. What an extension is
 
@@ -68,7 +80,15 @@ A leaf that needs the world declares the grant it requests, and is bound to it:
 module x.sesmail
 
 // The S3 bucket SES writes received mail to. The program binds this grant to one of its credentials (section 4.4).
-grant bucket: aws_sigv4 { service "s3"  scopes { s3:ListBucket, s3:GetObject } }
+// It carries its provider profile (D11, section 3.3).
+grant bucket: aws_sigv4 {
+  service "s3"
+  scopes { s3:ListBucket, s3:GetObject }
+  profile "aws-s3" {
+    base "https://{bucket}.s3.{region}.amazonaws.com/"
+    source "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+  }
+}
 
 type Page = { cursor: Key, more: bool }
 
@@ -107,7 +127,11 @@ The module's machines are checked like any module's (section 5.3). An extension 
   "entry": "leaves/index.mjs",
   "files": { "leaves/index.mjs": "sha256:...", "leaves/s3.mjs": "sha256:...", "leaves/mime.mjs": "sha256:..." },
   "grants": {
-    "bucket": { "kind": "aws_sigv4", "service": "s3", "scopes": ["s3:ListBucket", "s3:GetObject"] }
+    "bucket": { "kind": "aws_sigv4", "service": "s3", "scopes": ["s3:ListBucket", "s3:GetObject"],
+                "profile": { "provider": "aws-s3",
+                             "bases": ["https://{bucket}.s3.{region}.amazonaws.com/"],
+                             "scopes": ["s3:ListBucket", "s3:GetObject"],
+                             "source": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html" } }
   },
   "leaves": {
     "sync":    { "export": "sync", "grant": "bucket", "class": "none",
@@ -126,6 +150,7 @@ The module's machines are checked like any module's (section 5.3). An extension 
 - Types are written in a closed JSON form of poly's types: a scalar name, `{ "range": [lo, hi] }`, `{ "enum": "x.sesmail.E" }`, `{ "record": { … } }`, `"Content"`, `"Key"`, `"Instant"`, `{ "items": { "one": true, "raw": true } }`. No other form is read.
 - `limits` bound each call (section 6.5). The program may lower them and never raise them.
 - `source` names the leaves that implement a source adapter (section 4.3).
+- **A grant may carry a provider profile (D11).** Today a provider profile is read only from std (`std/credentials/providers/<provider>.json`, `packages/poly-check/src/providers.ts`), which is why a polylife credential cannot reach Google Calendar (G9). An extension declares the profile its grant needs inside that grant, and nowhere else: its provider name, its base addresses, the scopes it may request, and the documentation it was read from. A base is written as a std profile's is (an absolute `https` URL, no user, query or fragment, `PL1201` otherwise), and may hold named parameters in braces, each standing for one DNS label that the program's credential supplies (`region "eu-west-1"`, `bucket "kanjo-support"`); a parameter is never a wildcard, and the base the credential spells out is checked against the template label by label. A profile carried by an extension reaches only the leaves of that extension: no effect handler and no other source may use it. It cannot shadow a std profile of the same provider name (`PL6416`), and it may not name a model provider (section 7, condition 5). The profile is part of the manifest, so it is pinned by the digest (section 11), printed in the certificate beside the grant, and read back against the module (section 11.5), with the broken variant `profile-base-widened` in the toolchain faults.
 - `corpus` is the digest of the recorded calls admission replays (section 11.4).
 
 ## 4. Importing an extension and calling a leaf
@@ -189,11 +214,12 @@ machine Message {
 **A leaf as a source.** A source extension's leaves are called by the runtime's own source machinery, not by an `emit`:
 
 ```poly
+// A static key: its owner is the principal poly.json names for it (D12), never a holder of a grant request.
 credential kanjo_s3: aws_sigv4 {
+  provider x.sesmail.bucket
+  bucket "kanjo-support"
   region "eu-west-1"
-  base "https://kanjo-support.s3.eu-west-1.amazonaws.com/"
   scopes { s3:ListBucket, s3:GetObject }
-  holder Principal
 }
 
 source support: records {
@@ -206,7 +232,7 @@ source support: records {
 }
 ```
 
-`adapter x.sesmail` names the extension where `adapter "gmail"` names a poly-io adapter, and `PL6834 SOURCE_ADAPTER_UNKNOWN` accepts a used `x.*` module whose manifest has a `source` entry. `credential c binds x.m.g` binds the extension's requested grant `g` to the program's credential `c`, whose kind and scopes must cover the grant's (`PL6416` otherwise). The runtime builds a `SourceAdapter` (PT10j) whose `sync`, `retrieve`, `resolve` and `forget` call the named leaves in the worker, and keeps the source's cursor itself, so the leaves hold no state between calls. A source's leaves must be class `none` (`PL6419 SOURCE_LEAF_WRITES`).
+`adapter x.sesmail` names the extension where `adapter "gmail"` names a poly-io adapter, and `PL6834 SOURCE_ADAPTER_UNKNOWN` accepts a used `x.*` module whose manifest has a `source` entry. `credential c binds x.m.g` binds the extension's requested grant `g` to the program's credential `c`, whose kind and scopes must cover the grant's (`PL6416` otherwise). `provider x.sesmail.bucket` names the profile the extension's grant carries (D11), and `bucket` and `region` fill its base's parameters, so the credential reaches `https://kanjo-support.s3.eu-west-1.amazonaws.com/` and nothing else. **The owner of a static key (D12).** An `aws_sigv4` key is not granted by a person's OAuth consent, so no grant request fixes a holder (S457, S461). `poly.json` names the owner beside the key's store, `"credentials": { "kanjo_s3": { "store": "kms", "owner": "<principal>" } }`, and every item a source reads under the key is owned by that principal. The owner is certified with the credential (`poly.vaults`), so changing it is a new admission, and it is never a value a leaf or an adapter gives. A credential of kind `aws_sigv4` with no `owner` in `poly.json`, named by an `owned` source, is refused at admission (`PL6416`). The runtime builds a `SourceAdapter` (PT10j) whose `sync`, `retrieve`, `resolve` and `forget` call the named leaves in the worker, and keeps the source's cursor itself, so the leaves hold no state between calls. A source's leaves must be class `none` (`PL6419 SOURCE_LEAF_WRITES`).
 
 ### 4.4 Lowering and artefacts
 
@@ -247,7 +273,7 @@ The runtime stamps every leaf output (D3). The leaf is never asked for a taint, 
 - **A `Content` output** carries the join of the taints of the call's `Content` and `Items` arguments, as a decision's answer does (PS17.2). A leaf cannot launder a body: what it returns is at least as restricted as what it read.
 - **A finite output** (a `bool`, an enum, a range, a record of them) carries no taint, as a decision's finite answer does not (S323). It is a declassification point: a leaf over tainted input can pass at most `log2` of the number of its outputs, in bits per call. The certificate lists each leaf called with a tainted argument and a finite output, with the highest class it reads and its number of outputs, beside S323's decisions. `x.mailheaders.parse` has 2 × 2 × 5 × 4 = 80 finite outputs, so about 6.3 bits per message, plus its `Key` (next point).
 - **A `Key` or an `Instant` output** carries no taint, as a `Key` carries none (PS1.4c). Equality of two such values is information about the inputs they came from. The certificate lists every leaf whose `Key` or `Instant` output is computed from tainted input, with the same reading as S325's counts.
-- **A source extension's items** carry the source's declared class, and, for an owned source, the owner is the holder of the grant the request ran under (S461), never a value the leaf returns. K14 (the adapter gives each item's true owner) is replaced, for an extension source, by a fact of the runtime: the leaf never sees the holder. A leaf that returns an `owner` field has it ignored and audited. This is what gives SES mail its account taint.
+- **A source extension's items** carry the source's declared class, and, for an owned source, the owner is the runtime's, never a value the leaf returns: the holder of the grant the request ran under, for a credential granted by a person (S461), or the principal `poly.json` names for a static key (D12, section 4.3). K14 (the adapter gives each item's true owner) is replaced, for an extension source, by a fact of the runtime: the leaf never sees the owner. A leaf that returns an `owner` field has it ignored and audited. This is what gives SES mail its account taint.
 - **The age of an item** (`asOf`, PS17.6) is the leaf's word, bounded by the runtime: an `asOf` after the time the runtime received the item is replaced by that time and audited, so a leaf can make an item older, never fresher.
 - **Provenance.** Each call is journaled with the extension's name, version and digest, the leaf, the digests of its inputs and of its output, and the grant it ran under. The body itself is never journaled (PS17.4a).
 
@@ -295,7 +321,7 @@ It then freezes the intrinsics it kept (`Object`, `Function`, `Array` and their 
 
 ### 6.3 What the loader allows
 
-The bootstrap installs synchronous module hooks (`module.registerHooks`, in Node from 22.15 and 23.5; the package's `engines` field would move from `>=22` to `>=22.15`, open question 3). Every resolution, static or dynamic, goes through the `resolve` hook, which allows exactly:
+The bootstrap installs synchronous module hooks (`module.registerHooks`, in Node from 22.15 and 23.5). Node 22.15 or later is required (D10): the package's `engines` field moves from `>=22` to `>=22.15`, and the asynchronous `module.register` hooks, which run on a thread of their own, are not used. Every resolution, static or dynamic, goes through the `resolve` hook, which allows exactly:
 
 - a file of the extension, by relative path, whose digest is the pin's (section 11);
 - nothing else. No `node:` builtin is allowed: `Buffer`, `TextDecoder`, `TextEncoder`, `URL`, `atob` and `structuredClone` are globals and are enough for parsers.
@@ -334,15 +360,17 @@ A worker is weaker than WebAssembly. A WebAssembly module starts with no authori
 
 What stays possible later: a manifest field `"runtime": "wasm"` with the same contract, the leaves compiled to WebAssembly and run with the capability as their only import; or the worker run inside an OpenShell sandbox, where the policy is generated from the grants as it is today from labels. The contract of section 3 does not depend on the worker, so either can replace it without changing a program.
 
+**Why the worker is enough for Cognitive Fab, and only for it (D14).** The worker's limits are acceptable while every leaf is code Cognitive Fab wrote, reviewed and signed: the deny list is a second line behind an author who is not trying to escape it. A leaf by another author would make the deny list the first line. So opening authorship beyond Cognitive Fab requires WebAssembly isolation: an extension whose publisher is not Cognitive Fab is admitted only with `"runtime": "wasm"`, and a publisher ring that names another publisher is refused while the toolchain has no WebAssembly runtime for leaves. The worker stays the runtime for Cognitive Fab's own extensions.
+
 ## 7. The boundary rule
 
-`scripts/check-boundaries.mjs` lists `node:worker_threads` among `PROCESS_MODULES`, and only poly-new may import one (rule 2, review finding P8). A worker in poly-runtime is therefore a change to how a standing rule is enforced. S507 is the precedent: poly-mine became the only other package that may start a process, on six conditions the boundary script and a test hold. **This proposal needs a ruling of the same kind**, numbered when the owner makes it. The conditions proposed for it:
+`scripts/check-boundaries.mjs` lists `node:worker_threads` among `PROCESS_MODULES`, and only poly-new may import one (rule 2, review finding P8). A worker in poly-runtime is therefore a change to how a standing rule is enforced. S507 is the precedent: poly-mine became the only other package that may start a process, on six conditions the boundary script and a test hold. **The owner granted a ruling of the same kind on 2026-10-31 (D8), on the six conditions below.** It takes its S-number when it is entered in the decisions log, and the boundary script cites that number in rule 8. The conditions:
 
 1. **One place.** Only `packages/poly-runtime/src/extensions/host.ts` imports `node:worker_threads`, and it starts a `Worker` only with the bootstrap's file as its entry, `eval` false, `env: {}` and `execArgv: []`. The script checks each, as rule 6 checks `execFileSync`.
 2. **The bootstrap imports nothing.** `packages/poly-runtime/src/extensions/sandbox.ts` imports `node:worker_threads` (for `parentPort`) and `node:module` (for `registerHooks`) and nothing else; it names no network module and no process module.
 3. **No check package starts or names a worker.** `poly-core`, `poly-lang`, `poly-lower`, `poly-ref`, `poly-embed`, `poly-check` and `poly-agent` never import `node:worker_threads` (unchanged) and never import `@poly/runtime/extensions`. The check reads an extension's module as source text and its manifest as JSON. No check ever runs a leaf.
 4. **No network in poly-runtime.** Unchanged: the capability's requests are sent by poly-io's transports over the port (S182).
-5. **No model call.** A grant's provider profile may not be a model provider: admission refuses a grant whose base is the base of a provider any route names, or of a profile marked `model` (`PL6416`). A leaf's files are linted for model SDKs at admission (section 11.3). So PA0.5 holds: a leaf is never a model call, and a leaf used as a deterministic tier (G3, section 12) is not one either.
+5. **No model call.** A grant's provider profile, whether std's or one the extension carries (D11), may not be a model provider: admission refuses a grant whose base is the base of a provider any route names, or of a profile marked `model` (`PL6416`). A leaf's files are linted for model SDKs at admission (section 11.3). So PA0.5 holds: a leaf is never a model call, and a leaf used as a deterministic tier (G3, section 12) is not one either.
 6. **The pin before each start.** The extension's files are compared with the pin before a worker starts (section 11), and a mismatch starts nothing.
 
 The rule is new as rule 8 of the script, with a test that runs the sandbox against the escape corpus (`test/extension-sandbox.test.mjs`), as `test/polyx-seam.test.mjs` runs poly-mine.
@@ -417,10 +445,12 @@ An identity is declared by the extension that computes it (D6), as a name and a 
 ```poly
 module x.messageid
 
-// RFC 5322 Message-ID, angle brackets and folding whitespace removed, case kept (RFC 5322, 3.6.4).
-leaf of(m: Items one raw) -> { value: Key }
-// The thread's root: the first of References, else In-Reply-To, else the message's own Message-ID.
-leaf root(m: Items one raw) -> { value: Key }
+// RFC 5322 Message-ID, angle brackets and folding whitespace removed, case kept (RFC 5322, 3.6.4). A message with
+// no Message-ID gets the SHA-256 of its sender, date and subject, each normalised, so one message read from two
+// mailboxes still gets one value (D13).
+leaf of(m: Items one raw) -> { value: Key, fallback: bool }
+// The thread's root: the first of References, else In-Reply-To, else the message's own identity as `of` gives it.
+leaf root(m: Items one raw) -> { value: Key, fallback: bool }
 
 identity MessageId by of
 identity ThreadRoot by root
@@ -441,12 +471,15 @@ machine Fact identified by x.messageid.ThreadRoot { … }
 - **The value.** For each item of a source that declares `identity I`, the runtime computes `I`'s value once, when the item first enters the runtime (at sync or at retrieval), by running `I`'s leaf on the item. No `Items` value exists yet at sync, so the runtime gives an identity leaf the item directly, as a one-item set of its raw bytes (or its body, for a source with no raw form), which is what `m: Items one raw` reads; the leaf's signature is the same whether the runtime or an effect calls it. The value is recorded beside the item's keys with the leaf's digest. It is never the adapter's word, so the Gmail source and the SES extension give one value for one message. A leaf that fails, or returns an empty value, leaves the item with no identity, recorded.
 - **A key.** A value of `I` is a `Key` (PS1.4c) named `I`. A retrieval can filter by it as by any declared key (`retrieve mail where owner == p and MessageId == x limit 1`, S451), PS4.1g's lemma covers it, and `items.read` gives it to host code (PS17.4b).
 - **An identified machine.** `identified by I` names the machine's instances by `I`'s value. The host dispatches by item, `rt.dispatchItem("polylife.Message", "support", itemId, "Arrived", data)`, and the runtime reads the item's recorded identity and dispatches to the instance `<machine>:<keyed digest of the value>`, creating it at the first dispatch, as a channel's thread key names its application instance (PS15.4). The first mailbox a message reaches creates the instance; the second dispatches into it, and the machine's own handler decides what a second sighting means. A dispatch for an item with no identity is refused `identity-unavailable` before any step, with an audit row. The host no longer keeps a Message-ID index or chooses an instance name.
+- **De-duplication only, never authority (D13).** An identity says that two items are one message. It never says who may do anything. So an identity key is never a `Principal` and never a field of claims; no policy reads it (`PL1201` on `item.identity` or a field holding one in a policy); an identified machine's instance gets no claims, no mandate and no audience from its name; and a step's verdict never depends on which owner's item created the instance. What an identified machine may decide is what it decides from its inputs' owners and claims, as any machine. In polylife, a `Fact` confirmed "through another mailbox" is confirmed because its second observation comes from another account's item, an owner the runtime stamped; the `ThreadRoot` only brings the two observations to one instance.
+- **The fallback (D13).** A message with no Message-ID gets an identity all the same: the SHA-256 of its sender (the `From` address, lower-cased), its date (the `Date` header as an instant, or the item's `asOf` when the header is missing or does not parse) and its subject (unfolded, with leading `Re:` and `Fwd:` prefixes kept, since they make another message). The leaf reports which rule gave the value (`fallback`), and the runtime records it with the value, so a property or a report can tell a fallback identity from a Message-ID. The fallback is computed by the same pinned leaf, never by the host.
 - **Check.** An instance name is a keyed digest of a key, so naming by it is a renaming of keys, as PS15.4 argues for thread keys. An identified machine is checked as any machine. Two arrivals at one instance from items of different owners are two inputs, which **check** already offers.
 - **Declassification.** An identified machine whose items come from more than one owner joins their observations in one instance. A step's verdict there (a second `Arrived` rejected `"seen"`) tells whoever reads it that another owner holds the same message. The certificate lists each identified machine and the sources and owners that can reach it, as S325 lists counts across owners. In polylife every account is JJ's, so the listing is the record of a choice, not a leak.
 
 ### 10.3 Limits
 
-- **The sender chooses the Message-ID.** A forged Message-ID merges a message into another's instance. The identity is as good as the header. The leaf can narrow it (by folding the `From` and `Date` into the key), at the cost of splitting a message that a relay rewrote. Open question 6.
+- **The sender chooses the Message-ID.** A forged Message-ID merges a message into another's instance. The identity is as good as the header. Because an identity is for de-duplication only (D13), a forged collision can make two messages look like one sighting; it can never give the forger any authority, since nothing that decides who may act reads the key. A program that must not lose the second message keeps it as a second observation, as polylife's `Fact` keeps two, rather than refusing it.
+- **The fallback can collide and can split.** Two different messages from one sender, at one second, with one subject, get one fallback identity. A relay that rewrites the `Date` header splits one message in two. Both are rare against the messages that carry a Message-ID, and the recorded `fallback` flag says which values to trust less.
 - **A changed identity leaf splits instances.** Values are recorded when items enter, so a repinned leaf does not change them; a new item with the new leaf can get another value for the same message. Repinning an identity leaf whose corpus outputs differ is refused at admission unless a person signs it as a migration (proposal 6).
 - **Proposal 1.** The identity key is the first part of proposal 1's conceptual data layer: a declared key of an entity, computed by the runtime, comparable across sources. Reading the key of a cited item (`cites.key(…)`) stays proposal 1's.
 
@@ -458,19 +491,19 @@ The digest in `poly.json` is the SHA-256 of the RFC 8785 canonical JSON of `{ na
 
 ### 11.2 Who may publish, and who accepts
 
-- **Publisher (D7).** The manifest names `"publisher": "cognitive-fab"`, and `poly-extension.sig.json` holds an ed25519 signature over the digest by a key of the publisher ring. The ring is a file of the standard library, `std/extensions/publishers.json`, pinned by digest with the toolchain as the `runtime` models are (S143). In the first release it holds Cognitive Fab's keys and no other. An extension with no signature, a signature by another key, or another publisher is refused at admission with `PL6414 EXTENSION_NOT_SIGNED`. Opening extensions to others is a change to the ring and to this contract (D7), and is not part of this proposal.
-- **The project's acceptance.** A pin is also a decision about what the program may do, and an agent could pin an extension that governs its own I/O. So each pin needs a record of a new kind, `extension`, by a key of the `people` ring (PT12.5), over the digest of `{ package, version, digest }`, kept in `extensions/<name>.sig.json`. Admission refuses a pin with no such record (`PL6414`). A changed pin needs a new record, as a changed policy does (S194).
+- **Publisher (D7).** The manifest names `"publisher": "cognitive-fab"`, and `poly-extension.sig.json` holds an ed25519 signature over the digest by a key of the publisher ring. The ring is a file of the standard library, `std/extensions/publishers.json`, pinned by digest with the toolchain as the `runtime` models are (S143). In the first release it holds Cognitive Fab's keys and no other. An extension with no signature, a signature by another key, or another publisher is refused at admission with `PL6414 EXTENSION_NOT_SIGNED`. Opening extensions to others is a change to the ring and to this contract (D7), and it requires WebAssembly isolation first (D14, section 6.6). It is not part of this proposal.
+- **The pin record (D9).** `poly admit` writes a signed record for each pin it admits, of a new kind, `extension`: `{ v: 1, kind: "extension", subject, by, at, sig }`, its subject the digest of `{ project, package, version, digest, publisher }`, signed with the admission key (`keys.admission`) as the certificate is. It is written to `extensions/<name>.pin.json` and bound in the certificate. Load verifies it against the admission keys `run.trust` names, and refuses a pin whose record is missing, signed by another key, or over another subject (`PL6414`). A changed pin is a new admission and so a new record. No person's record of a new kind is needed: the pin is part of what `poly admit` certifies, and who may run `poly admit` is already decided by who holds the admission key.
 
 ### 11.3 What admission checks
 
 1. The installed package's files give the pin's digest. A difference is `PL6413 EXTENSION_CHANGED`, and the program is not admitted (D5).
-2. The publisher's signature and the person's record (11.2).
+2. The publisher's signature (11.2). Admission then writes the pin record.
 3. `package.json` has no `dependencies`, `optionalDependencies` or `bundledDependencies` (a leaf imports only its own files, 6.3), no `install`, `preinstall` or `postinstall` script, and no `exports` condition that names a file outside the package.
 4. **A static lint of the leaves**, the boundary script's own patterns applied to each file the manifest lists: an `import` or `require` of anything but a relative file of the package; a model SDK; a network module named in a string; `process.env`; `getBuiltinModule`, `process.binding`, `dlopen`; `globalThis[…]`; `eval` and `new Function`; `WebAssembly`. Each is `PL6415 EXTENSION_AMBIENT`. The lint is the first line and the loader the second (6.3), as for handlers (PT6.5).
 5. The manifest is read back against the module (11.5) and the corpus is replayed (11.4).
-6. The certificate binds, under `poly.extensions`, each extension's name, version, digest, publisher key id, person record, and the files with their digests. The verified copy of the files is written to `.poly/build/extensions/<name>/`, which the loader reads (6.3), as the handlers' verified copy is (PT6.5).
+6. The certificate binds, under `poly.extensions`, each extension's name, version, digest, publisher key id, pin record, provider profiles (D11), and the files with their digests. The verified copy of the files is written to `.poly/build/extensions/<name>/`, which the loader reads (6.3), as the handlers' verified copy is (PT6.5).
 
-**At load** the runtime compares the verified copy with the certificate (`PL6413`), and the host's `before each worker start` check does it again (section 7, condition 6).
+**At load** the runtime verifies each pin record (`PL6414`), compares the verified copy with the certificate (`PL6413`), and the host's `before each worker start` check does it again (section 7, condition 6).
 
 ### 11.4 The corpus
 
@@ -491,10 +524,10 @@ Each gap is mapped to an extension, a language primitive, or out of scope. Some 
 | G3 a rules labeller is a priced, calibrated model | extension, with a tier kind | a route tier `tier rules leaf x.<m>.<l>` whose answer is a pure leaf's: no price table, no map, its confidence certain or the tier fails. It is a deterministic call, not a model call (section 7, condition 5). | a grammar item in routes (PS18.1), and a ruling that a leaf tier carries no price table and no calibration map (`PL6841`, `PL6843` do not apply to it) |
 | G4 no timer at a date carried by data | language primitive: the date timer (section 9) | `at e` and `Instant`; an extension leaf extracts the date from a message or a calendar entry | none (polyrun already takes `fireAt`) |
 | G5 no identity across mailboxes | language primitive: the identity key (section 10) | `identity` and `identified by`; the Message-ID extension computes `MessageId` and `ThreadRoot` | the raw message kept for leaves by the Gmail source (see G7) |
-| G6 SES has no source | extension: `x.sesmail` (section 13) | a source extension over S3, its items owned by the grant's holder, so SES mail carries its account's taint | S453: the `aws_sigv4` credential kind, with signing in poly-io and its provider profile |
+| G6 SES has no source | extension: `x.sesmail` (section 13) | a source extension over S3, its items owned by the principal `poly.json` names for the key, so SES mail carries its account's taint | S453: the `aws_sigv4` credential kind, with signing in poly-io; the S3 profile is the extension's (D11), and the owner is named in `poly.json` (D12) |
 | G7 the Gmail source drops the list headers | extension: `x.mailheaders` (section 13) | a pure leaf over the raw message, its finite output listed as a declassification point | the std Gmail source keeps the raw message as an item's `raw` form, readable only by leaves |
 | G8 the Gmail source reads the inbox only | out of scope (std) | a `labels { INBOX, SENT }` item in the Gmail source. Gmail is a source poly ships, so the fix is in poly-io, not an extension. | none |
-| G9 the Google profile has no Calendar | extension: a Calendar source | `x.gcalendar`, a source extension whose items are events and whose leaf gives each an `Instant` | a ruling on whether an extension may carry a provider profile (open question 4), or a Calendar entry in std's Google profile |
+| G9 the Google profile has no Calendar | extension: a Calendar source | `x.gcalendar`, a source extension whose items are events and whose leaf gives each an `Instant` | none: the extension carries its Calendar profile in its grant (D11), base `https://www.googleapis.com/calendar/v3/`, scope `calendar.readonly` |
 | G10 the forecast has no world | out of scope | worlds stay deferred (PT1.1b, appendix A, AD-6) | none |
 | G11 a first sync is one page | out of scope (std) | a `backfill <duration>` item in the Gmail source, which pages the listing as polylife's wrapper does | none |
 | G12 a re-armed timer is a finding | out of scope (a rule) | `PL4002` stays. The date timer eases it: the re-arm stores the new time (section 9.4). | none |
@@ -510,7 +543,7 @@ Three gaps become extensions (G6, G7, G9), two become language primitives with a
 - **What it reads.** The S3 bucket SES writes received mail to, by `ListObjectsV2` and `GetObject` only, as polylife's `s3Bucket` does today.
 - **Leaves.** `sync(cursor) -> { cursor, more }` lists the objects after the cursor; `retrieve` and `resolve` give items and their raw RFC 5322 bytes; `raw` is `resolve`; `forget` is pure (a forget uses no grant, PS17.7) and clears nothing the bucket holds, which is not poly's to erase.
 - **Grant.** `aws_sigv4`, service `s3`, scopes `s3:ListBucket` and `s3:GetObject`, class `none`, so only `GET` and `HEAD` pass the port.
-- **Taint.** The source is `owned`, and its credential names `holder Principal` (S461): the holder is the account the address belongs to, fixed by a person's signed grant request, and every item is owned by it. polylife's SES mail then carries the support account's taint, and a decision over it is held to the flow rule like Gmail mail.
+- **Taint.** The source is `owned`, and every item is owned by the principal `poly.json` names for the key (D12, section 5.4): the support account, in polylife. polylife's SES mail then carries that account's taint, and a decision over it is held to the flow rule like Gmail mail.
 - **Its module.** A machine `x.sesmail.Cursor` whose invariant is that the cursor only moves forward, so a sync that would re-announce old objects is a finding of the extension, not a silent duplicate.
 - **IMAP.** An IMAP variant (`x.imapmail`) needs a capability that is a session, not a request: the runtime would have to hold a TLS stream to class `none`, which means parsing IMAP commands in poly-io to refuse `STORE`, `COPY`, `MOVE`, `EXPUNGE`, `APPEND` and a `FETCH` that sets `\Seen`. It is listed for a later release and is not one of the first three.
 
@@ -521,47 +554,59 @@ Three gaps become extensions (G6, G7, G9), two become language primitives with a
 
 ### 13.3 `@cognitive-fab/poly-x-messageid` (G5)
 
-- **Leaves.** `of` and `root`, pure, as in 10.1.
-- **Identities.** `MessageId` and `ThreadRoot`.
+- **Leaves.** `of` and `root`, pure, as in 10.1, each with the fallback of D13 for a message with no Message-ID.
+- **Identities.** `MessageId` and `ThreadRoot`, for de-duplication only (D13).
 - **What changes in polylife.** The host's Message-ID index (`host/index.mjs`) goes. `Message` is identified by `MessageId` and `Fact` by `ThreadRoot`, so "one message in two mailboxes counts once" is the runtime's naming, and "a reminder through another mailbox confirms a fact" is a second arrival at one `Fact`, which its handler decides.
 
 ## 14. What it touches
 
 - **Specifications.** PS1 (`Instant`, PS4.1i), PS2.2 (`at`), PS15.5 (timers by instant), PS17 (leaf outputs, extension sources, identities), PS23 (leaf classes, the `permanent` check), PS10 (K19 to K21); PT1.3 (`x.*` modules, qualified names), PT2 (grammar), PT6.3, PT10i and PT10j, PT12 (the new codes, the certificate), PT14 (`poly extension pack`, `pin`), PT15 (`rt.dispatchItem`, the host API for identified machines), PT17 (layout), PT33; the architecture's scope table (2a) and a decision AD-16 for extensions.
 - **Packages.** `poly-lang` and `poly-core` (grammar, types, the import), `poly-lower` (the call entry, `fireAt`, the source descriptor), `poly-ref` (the read-backs, `Instant`'s ordered representatives, identity naming), `poly-check` (admission, the lint, the corpus replay, the pin command), `poly-runtime` (the worker host and bootstrap, the port, the type check of outputs, identity dispatch), `poly-io` (SigV4, the `aws_sigv4` vault entry, the raw form of a Gmail item).
-- **Scripts and tests.** `scripts/check-boundaries.mjs` (rule 8), `test/toolchain-faults.mjs` (seven variants), `test/tv.test.mjs`, a sandbox test over the escape corpus, the evidence scripts unchanged.
+- **Scripts and tests.** `scripts/check-boundaries.mjs` (rule 8), `test/toolchain-faults.mjs` (seven variants of section 4.4 and `profile-base-widened` of section 3.3), `test/tv.test.mjs`, a sandbox test over the escape corpus, the evidence scripts unchanged.
 - **Engines.** None. polyrun's `fireAt` already exists.
 - **Not touched.** Every existing program: one that imports no extension and writes no `at` or `identity` lowers to the same artefacts.
 
 ## 15. Open questions
 
-1. **The ruling for rule 8.** Whether the owner accepts a worker in poly-runtime on the six conditions of section 7, or wants OpenShell or WebAssembly before any leaf runs.
-2. **The person's record.** Whether a pin needs a person's signed `extension` record (11.2), or the publisher's signature and the digest are enough while Cognitive Fab is the only publisher.
-3. **Node versions.** Whether to raise `engines` to `>=22.15` for `module.registerHooks`, or support 22.x before 22.15 with the asynchronous `module.register` hooks, which run on a separate thread and are harder to reason about.
-4. **Provider profiles.** Whether an extension may carry a provider profile (G9's Calendar), which today only std may define (`providers.ts`). A profile decides which hosts a grant reaches, so it is as sensitive as a policy.
-5. **The SES owner.** A static AWS key is not a person's grant. S461 fixes a holder by a person's signed request; whether that is the right model for a key the owner pastes once, or the source should name its owner by a configuration record signed by a person.
-6. **Identity strength.** Whether `x.messageid` keys on the Message-ID alone, accepting forged collisions, or folds in `From` and `Date`, accepting that a rewriting relay splits one message.
-7. **Instants in payloads.** Whether an `Instant` may leave in an effect's payload (a calendar write), and whether S458's cut-point reduction should extend to instants compared with each other.
-8. **Recycling.** How many calls a worker serves before it is recycled, and whether a pure leaf should get a fresh worker per call when it computes an identity, at the cost of start time.
+### 15.1 Decided (the owner, 2026-10-31)
+
+The first draft listed eight open questions. Six are decided, and one decision was added:
+
+| Question in the first draft | Decision | Applied in |
+|---|---|---|
+| 1. The ruling for rule 8 | Granted, on the six conditions of section 7 (D8) | section 7 |
+| 2. A person's record for a pin | A pin carries a signed record from `poly admit` (D9) | 11.2, 11.3 |
+| 3. Node versions | Node 22.15 or later is required (D10) | 6.3 |
+| 4. Provider profiles in an extension | Allowed, declared in the manifest's grants (D11) | 3.2, 3.3, 4.3, section 7, G9 |
+| 5. The owner of SES mail | The principal `poly.json` names for the static key (D12) | 4.3, 5.4, 13.1 |
+| 6. Identity strength | De-duplication only, never authority; a hash of sender, date and subject when the Message-ID is missing (D13) | 10.1 to 10.3, 13.3 |
+| (added) Authorship beyond Cognitive Fab | Requires WebAssembly isolation (D14) | 6.6, 11.2 |
+
+### 15.2 Still open
+
+1. **Instants in payloads.** Whether an `Instant` may leave in an effect's payload (a calendar write), and whether S458's cut-point reduction should extend to instants compared with each other.
+2. **Recycling.** How many calls a worker serves before it is recycled, and whether a pure leaf should get a fresh worker per call when it computes an identity, at the cost of start time.
+3. **The S-number of D8.** The ruling is granted; its number is assigned when it is entered in the decisions log, and rule 8 of the boundary script cites it.
+4. **Parameters in an extension's profile.** D11 allows a profile; whether a base parameter (`{bucket}`, `{region}`) should be limited to declared values in the manifest, or any DNS label the program's credential gives, as section 3.3 proposes.
 
 ## 16. Left out on purpose
 
 - **Leaves in expressions.** A leaf is called only as an effect (4.3). A handler stays a function poly-ref can interpret.
-- **Free code by others.** D7. The format may change before it opens.
+- **Free code by others.** D7. The format may change before it opens, and it opens only with WebAssembly isolation (D14).
 - **Leaves that call a model.** A model is reached through a decision and a route, under PS18's prices and budgets. A grant cannot name a model provider (section 7).
 - **npm dependencies of an extension.** An extension is self-contained, so its digest is its whole code. A later release may allow pinned dependencies under the same digest.
 - **Routes, budgets and policies in an extension's module.** G1 first; and a policy governs the program, so a person signs it in the program's project (S194), never in a package.
 - **IMAP in the first release.** 13.1.
-- **WebAssembly leaves.** The contract allows them later (6.6).
+- **WebAssembly leaves.** The contract allows them later (6.6). They are the precondition for other authors (D14), not part of the first release.
 - **A leaf as the clock.** D6: a leaf extracts a date; the language fires the timer.
 
 ## Conclusion
 
 An extension is a pinned package of three parts: a poly module the checker reads, a manifest the runtime reads, and leaves no one reads, run in a worker that can reach the world only through one capability. The checker treats a leaf as an unknown function within its declared type, so its verdict does not depend on the leaf's code, and the runtime makes that true by checking every output before delivery. The runtime stamps every taint, so mail an extension reads carries its account's taint, which closes the leak polylife works around. A leaf is called only as an effect, so handlers stay pure and translation validation is unchanged. A write by a leaf falls under PS23 as any effect does, and the runtime can refuse a leaf's false claim of a definite refusal, which it cannot do for a host handler.
 
-Two primitives stay in the language. `at` fires a timer at a date carried by data, with no engine change, since polyrun already accepts an absolute fire time, and it puts due dates inside liveness properties. `identity` names instances by a key a pinned leaf computes once, so the runtime, not the host, decides that one message in two mailboxes is one.
+Two primitives stay in the language. `at` fires a timer at a date carried by data, with no engine change, since polyrun already accepts an absolute fire time, and it puts due dates inside liveness properties. `identity` names instances by a key a pinned leaf computes once, so the runtime, not the host, decides that one message in two mailboxes is one. That key de-duplicates and never grants anything, and a message with no Message-ID gets a hash of its sender, date and subject.
 
-Of polylife's fourteen gaps, three become extensions, two become primitives with a leaf, one is the import, one is a leaf tier, and seven stay out of scope. The weakest part is the worker: a deny list over a full runtime in the runtime's own process. The proposal says so, keeps the contract independent of it, and asks for a ruling of S507's kind before a worker enters poly-runtime.
+Of polylife's fourteen gaps, three become extensions, two become primitives with a leaf, one is the import, one is a leaf tier, and seven stay out of scope. The weakest part is the worker: a deny list over a full runtime in the runtime's own process. The owner granted the boundary ruling for it on the six conditions of section 7, for Cognitive Fab's own extensions, and made WebAssembly isolation the condition for any other author. Six of the first draft's open questions are decided (section 15.1), and four smaller ones remain.
 
 ## Glossary
 
@@ -575,7 +620,9 @@ Of polylife's fourteen gaps, three become extensions, two become primitives with
 - **`Instant`:** an opaque point in time, compared by equality and order only, explored by ordered representatives.
 - **Leaf:** a JavaScript function of an extension with declared input and output types, called only as an effect or by the runtime's source machinery.
 - **Manifest:** `poly-extension.json`, generated from the extension's module and read back against it; what the runtime reads.
-- **Pin:** an extension's digest in `poly.json`, with the person's record that accepts it.
+- **Pin:** an extension's digest in `poly.json`, with the record `poly admit` signs for it.
+- **Fallback identity:** the hash of a message's sender, date and subject, its identity when it has no Message-ID.
+- **Provider profile (in an extension):** the provider name, base addresses and scopes an extension's grant carries, reachable only by that extension's leaves.
 - **Port:** the `MessagePort` over which a capability leaf asks the runtime to make a request; the worker holds no socket and no secret.
 - **Pure leaf:** a leaf with no capability, class `none`.
 - **Verified copy:** the extension's files written under `.poly/build/extensions/` at admission, the only files the loader reads.
