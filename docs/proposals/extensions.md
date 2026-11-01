@@ -289,18 +289,18 @@ A worker starts with Node's whole global surface. Measured on Node 24.12.0, a wo
 - process control: `process.kill`, `process.exit` and `process.abort` (a leaf ends by returning or throwing), `process.chdir`, `process.setuid` and the rest of the identity setters;
 - the clock and randomness in a pure leaf: `Date.now`, `new Date()` with no argument, `performance.now` and `Math.random` throw. A pure leaf that needs a time takes it as an input. A capability leaf keeps them; the time it signs with is the runtime's (section 6.4);
 - `SharedArrayBuffer` and `Atomics.wait`, the parts of the timing channel a leaf does not need;
-- `WebAssembly.compile` and `WebAssembly.instantiate`, so a leaf cannot carry code the static lint (section 11.3) did not read.
+- `WebAssembly`, the whole namespace: removing `compile` and `instantiate` alone would leave `new WebAssembly.Module(bytes)`, which compiles synchronously. So a leaf cannot carry code the static lint (section 11.3) did not read.
 
 It then freezes the intrinsics it kept (`Object`, `Function`, `Array` and their prototypes, `globalThis`), so the leaf cannot restore a removed global or change a built-in that the bootstrap's own code relies on. The list is a deny list over a full runtime. Section 6.6 says why that is the weakest part.
 
 ### 6.3 What the loader allows
 
-The bootstrap installs synchronous module hooks (`module.registerHooks`, in Node from 22.15 and 23.5; the package's `engines` field moves from `>=22` to `>=22.15`). Every resolution, static or dynamic, goes through the `resolve` hook, which allows exactly:
+The bootstrap installs synchronous module hooks (`module.registerHooks`, in Node from 22.15 and 23.5; the package's `engines` field would move from `>=22` to `>=22.15`, open question 3). Every resolution, static or dynamic, goes through the `resolve` hook, which allows exactly:
 
 - a file of the extension, by relative path, whose digest is the pin's (section 11);
 - nothing else. No `node:` builtin is allowed: `Buffer`, `TextDecoder`, `TextEncoder`, `URL`, `atob` and `structuredClone` are globals and are enough for parsers.
 
-A refused specifier throws before anything is read, and the refusal is audited with the extension's name and the specifier. The `load` hook reads each allowed file from the verified copy (section 11.3) and checks its digest again. So `fs`, `net`, `child_process` and `worker_threads` cannot be loaded (D2), nor `module` (which gives `createRequire`), nor `inspector`, `vm` or any package. `import.meta.resolve` resolves through the same hook.
+A refused specifier throws before anything is read, and the refusal is audited with the extension's name and the specifier. The worker never reads a file. Before it starts the worker, the host thread reads each file of the verified copy (section 11.3), checks its digest against the certificate, and passes the sources in `workerData`; the `load` hook serves each allowed specifier from that memory. So the bootstrap needs no `node:fs` and no `node:crypto` (section 7, condition 2), and `fs`, `net`, `child_process` and `worker_threads` cannot be loaded (D2), nor `module` (which gives `createRequire`), nor `inspector`, `vm` or any package. `import.meta.resolve` resolves through the same hook.
 
 ### 6.4 The capability is a port
 
@@ -438,7 +438,7 @@ machine Fact identified by x.messageid.ThreadRoot { … }
 
 ### 10.2 Semantics
 
-- **The value.** For each item of a source that declares `identity I`, the runtime computes `I`'s value once, when the item first enters the runtime (at sync or at retrieval), by running `I`'s leaf on the item, and records it beside the item's keys with the leaf's digest. It is never the adapter's word, so the Gmail source and the SES extension give one value for one message. A leaf that fails, or returns an empty value, leaves the item with no identity, recorded.
+- **The value.** For each item of a source that declares `identity I`, the runtime computes `I`'s value once, when the item first enters the runtime (at sync or at retrieval), by running `I`'s leaf on the item. No `Items` value exists yet at sync, so the runtime gives an identity leaf the item directly, as a one-item set of its raw bytes (or its body, for a source with no raw form), which is what `m: Items one raw` reads; the leaf's signature is the same whether the runtime or an effect calls it. The value is recorded beside the item's keys with the leaf's digest. It is never the adapter's word, so the Gmail source and the SES extension give one value for one message. A leaf that fails, or returns an empty value, leaves the item with no identity, recorded.
 - **A key.** A value of `I` is a `Key` (PS1.4c) named `I`. A retrieval can filter by it as by any declared key (`retrieve mail where owner == p and MessageId == x limit 1`, S451), PS4.1g's lemma covers it, and `items.read` gives it to host code (PS17.4b).
 - **An identified machine.** `identified by I` names the machine's instances by `I`'s value. The host dispatches by item, `rt.dispatchItem("polylife.Message", "support", itemId, "Arrived", data)`, and the runtime reads the item's recorded identity and dispatches to the instance `<machine>:<keyed digest of the value>`, creating it at the first dispatch, as a channel's thread key names its application instance (PS15.4). The first mailbox a message reaches creates the instance; the second dispatches into it, and the machine's own handler decides what a second sighting means. A dispatch for an item with no identity is refused `identity-unavailable` before any step, with an audit row. The host no longer keeps a Message-ID index or chooses an instance name.
 - **Check.** An instance name is a keyed digest of a key, so naming by it is a renaming of keys, as PS15.4 argues for thread keys. An identified machine is checked as any machine. Two arrivals at one instance from items of different owners are two inputs, which **check** already offers.
@@ -527,7 +527,7 @@ Three gaps become extensions (G6, G7, G9), two become language primitives with a
 
 ## 14. What it touches
 
-- **Specifications.** PS1 (`Instant`, PS4.1i), PS2.2 (`at`), PS15.5 (timers by instant), PS17 (leaf outputs, extension sources, identities), PS23 (leaf classes, the `permanent` check), PS10 (K19 to K21); PT1.3 (`x.*` modules, qualified names), PT2 (grammar), PT6.3, PT10i and PT10j, PT12 (the new codes, the certificate), PT14 (`poly extension pack`, `pin`), PT17 (layout), PT33; the architecture's scope table (2a) and a decision AD-16 for extensions.
+- **Specifications.** PS1 (`Instant`, PS4.1i), PS2.2 (`at`), PS15.5 (timers by instant), PS17 (leaf outputs, extension sources, identities), PS23 (leaf classes, the `permanent` check), PS10 (K19 to K21); PT1.3 (`x.*` modules, qualified names), PT2 (grammar), PT6.3, PT10i and PT10j, PT12 (the new codes, the certificate), PT14 (`poly extension pack`, `pin`), PT15 (`rt.dispatchItem`, the host API for identified machines), PT17 (layout), PT33; the architecture's scope table (2a) and a decision AD-16 for extensions.
 - **Packages.** `poly-lang` and `poly-core` (grammar, types, the import), `poly-lower` (the call entry, `fireAt`, the source descriptor), `poly-ref` (the read-backs, `Instant`'s ordered representatives, identity naming), `poly-check` (admission, the lint, the corpus replay, the pin command), `poly-runtime` (the worker host and bootstrap, the port, the type check of outputs, identity dispatch), `poly-io` (SigV4, the `aws_sigv4` vault entry, the raw form of a Gmail item).
 - **Scripts and tests.** `scripts/check-boundaries.mjs` (rule 8), `test/toolchain-faults.mjs` (seven variants), `test/tv.test.mjs`, a sandbox test over the escape corpus, the evidence scripts unchanged.
 - **Engines.** None. polyrun's `fireAt` already exists.
