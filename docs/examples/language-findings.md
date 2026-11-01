@@ -295,16 +295,16 @@ The ten examples were written on a branch cut from v1.1.0, which never had v1.2 
 
 ## After v1.5
 
-### 32. A keyring's `file:` key is read under the project, even when its path is absolute (open)
+### 32. A keyring's `file:` key is read under the project, even when its path is absolute (fixed)
 
 - **Symptom.** In `poly.json`, `people[].publicKey` may be written `file:PATH`, and so may `agents[].publicKey`, which the same function reads. `keyringsOf` (`packages/poly-core/src/manifest.ts`, line 162) reads the file at `join(projectDir, PATH)`, so an absolute path is joined under the project. On Windows `join('C:\\p', 'C:\\keys\\jj.pem')` names `C:\p\C:\keys\jj.pem`, which does not exist. On POSIX `/keys/jj.pem` becomes `<project>/keys/jj.pem`, another file. The other `file:` locations of `poly.json` honour an absolute path: `keys.admission.location` (`isAbsolute(where) ? where : join(dir, where)`, `packages/poly-check/src/admit.ts`, line 148), and `run.trust` and `run.ledger.signer` (`resolve(dir, …)`, `packages/poly-runtime/src/run.ts`, lines 111 and 120). PT1.2 says only "PEM or `file:PATH`", so the specification does not say which reading is right.
 - **Appeared in.** the poly-tau2 session, which keeps its people's public keys outside the project and names them by absolute path.
 - **Workaround.** A path relative to the project, or the PEM text inline in `poly.json`.
 - **Why it matters.** These are the keys PT12.5 is strictest about. A key file kept outside the project is the arrangement S126 asks for, and it is the one that fails. On POSIX it may not fail at all: if a PEM file exists at the joined path, admission certifies that key into the ring in place of the one named.
-- **Fix, for the next release (rule 7a).**
-  1. **Spec.** PT1.2 states one rule for every `file:` location in `poly.json` (`people[].publicKey`, `agents[].publicKey`, `keys.admission.location`, `run.trust`, `run.ledger.signer`): an absolute path is read as written, and a relative one from the project's directory. Committed alone.
-  2. **Test, by a separate writer** who has read only the amended PT1.2. A project whose `people` and `agents` keys are `file:` absolute paths to PEM files outside it is admitted and certifies those keys. The same keys named by relative paths give the same rings digest. On POSIX, an absolute path whose join under the project would name another existing PEM file certifies the absolute one. The test fails on the code as it is.
-  3. **Code.** `keyringsOf` resolves the path as `admit.ts` does, and the readers share one helper, so the rule cannot drift again.
+- **Fixed (rule 7a), for the next release.**
+  1. **Spec** (`d4d77eb6`). PT1.2 states one rule for every `file:` location in `poly.json` (`people[].publicKey`, `agents[].publicKey`, `keys.admission.location`, `run.trust`, `run.ledger.signer`): an absolute path is read as written, and a relative one from the project's directory. Committed alone.
+  2. **Test, by a separate writer** who had read only the amended PT1.2 (`f1a36598`, `test/finding32-file-locations.test.mjs`). It has eight tests: an absolute `file:` key for `people` and for `agents`; the same keys by relative path giving the same rings digest; a decoy PEM at the absolute path's text joined under the project, which must never be read; an admission with an absolute people key; and a guard that a relative path is read from the project's directory. Seven failed on the code as it was: five with `ENOENT` at the joined path, and the two decoy tests with "the decoy inside the project was read". On Windows the decoy is built from the absolute path without its drive letter, which is still absolute, so the POSIX case is shown on every platform. The guard passed.
+  3. **Code.** `fileLocation(dir, path)` in `packages/poly-core/src/manifest.ts` is the one rule, and every reader uses it: `keyringsOf` (both rings), the admission key in `admit.ts`, and `run.trust` and `run.ledger.signer` in `run.ts`. The eight tests pass, with the keyring, person-key, run-config, certificate and admission tests beside them (83 of 83), and so do the nine demo-baseline files. The serial `test/after` group is run before the merge to main.
 
 ## Conclusion
 
@@ -312,7 +312,7 @@ After two batches there are twelve entries. Most are the cost of a check or an a
 
 After five batches and the move onto v1.3.1 there are thirty-one. The later ones add three kinds. Some are defects of the toolchain that the examples or an audit exposed, each fixed under rule 7a with a test that failed first: a scope that governed nothing (20), a glob scope (24), the sweep a refused source broke (26), a stage reading CLEAN beside an error (29, and the audit of all nineteen stages, 30). Some are the language costing more than it should, logged with a proposal (15, 17, 21). And one is a rule doing its work: v1.3's retry-safety rule caught five of the ten examples and a fixture that trusted a key no service documents (31), and fixing it showed where a lost answer had been read as a refusal.
 
-After v1.5 there are thirty-two. The new one came from outside the examples: a person's key named by an absolute path is read under the project (32). It is open, with its fix planned under rule 7a for the next release.
+After v1.5 there are thirty-two. The new one came from outside the examples: a person's key named by an absolute path is read under the project (32). It is fixed under rule 7a for the next release, with one helper for every `file:` location of `poly.json`, so the readers cannot drift apart again.
 
 ## Glossary
 

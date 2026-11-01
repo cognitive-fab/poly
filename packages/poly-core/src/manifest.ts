@@ -9,7 +9,7 @@
 // unknown field is refused here rather than silently ignored.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { createPublicKey } from 'node:crypto';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 export interface Manifest {
   poly: '1';
@@ -154,12 +154,22 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
   return m as unknown as Manifest;
 }
 
-/** PT12.5, S150: the keyrings a manifest names, each public key read (PEM, or `file:PATH` relative to the project). */
+/**
+ * PT1.2 (finding 32): the file a `file:PATH` location of poly.json names, the PATH after `file:`. An absolute PATH is
+ * that file as written; a relative one is read from the project's directory. Every reader of a `file:` location in
+ * poly.json goes through here (the keyrings, keys.admission, run.trust, run.ledger.signer): the keyrings once joined
+ * an absolute path under the project, which named a file that did not exist on Windows and another file on POSIX.
+ */
+export function fileLocation(dir: string, path: string): string {
+  return resolve(dir, path);
+}
+
+/** PT12.5, S150: the keyrings a manifest names, each public key read (PEM, or `file:PATH` by PT1.2's rule). */
 export function keyringsOf(dir: string, manifest: Manifest): { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] } {
   // Review A3: the text must hold a public key and nothing private. It is parsed, and the SPKI export is what is
   // certified, so no other text in the file reaches the certificate.
   const read = (h: { name: string; keyId: string; publicKey: string }) => {
-    const pem = h.publicKey.startsWith('file:') ? readFileSync(join(dir, h.publicKey.slice(5)), 'utf8') : h.publicKey;
+    const pem = h.publicKey.startsWith('file:') ? readFileSync(fileLocation(dir, h.publicKey.slice(5)), 'utf8') : h.publicKey;
     if (/PRIVATE KEY/.test(pem)) throw new ManifestError(`poly.json: the key of ${h.keyId} holds a private key; a keyring holds public keys only (PT12.5, S126)`);
     if (!/-----BEGIN PUBLIC KEY-----/.test(pem)) throw new ManifestError(`poly.json: the public key of ${h.keyId} is not a PEM public key (PT12.5)`);
     let spki: string;

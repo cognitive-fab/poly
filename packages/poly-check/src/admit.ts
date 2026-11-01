@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync,
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import {
   CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, buildIdOf, signDigest, publicKeyOf, certificateProblems,
-  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, policySubject, advanceAnchor, type Certificate, type CertifiedMachine, type Keyrings, type PolicySubjectParts, type SignedRecord,
+  loadProject, keyringsOf, fileLocation, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, policySubject, advanceAnchor, type Certificate, type CertifiedMachine, type Keyrings, type PolicySubjectParts, type SignedRecord,
 } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
@@ -145,7 +145,8 @@ function admissionKey(dir: string, named: { id: string; location: string } | und
     if (!pem) throw new AdmitError(`the admission key ${named.id} is at env:${where}, which is not set`);
     return { id: named.id, privateKeyPem: pem };
   }
-  const file = isAbsolute(where) ? where : join(dir, where);
+  // PT1.2 (finding 32): one rule for every file: location of poly.json.
+  const file = fileLocation(dir, where);
   if (insideVersionControl(file)) throw new AdmitError(`the admission key ${named.id} is at ${file}, inside a tree under version control; a private key is never committed (S126)`);
   if (!existsSync(file)) throw new AdmitError(`the admission key ${named.id} is at ${file}, which does not exist`);
   return { id: named.id, privateKeyPem: readFileSync(file, 'utf8') };

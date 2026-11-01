@@ -9,7 +9,7 @@ import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { parseManifest, type RunConfig } from '@poly/core';
+import { fileLocation, parseManifest, type RunConfig } from '@poly/core';
 import { load, type PolyRuntime } from './runtime.js';
 
 /** S174: the runtime's own ledger run for its store, where a takeover of a stale lock is journaled. */
@@ -108,7 +108,8 @@ export async function loadRun(project: string, opts: { now?: () => number } = {}
   // Trust: public keys only. A private key here is refused, and its contents are not shown.
   const trust: Record<string, string> = {};
   for (const [keyId, loc] of Object.entries(run.trust)) {
-    const file = resolve(dir, loc.slice('file:'.length));
+    // PT1.2 (finding 32): one rule for every file: location of poly.json.
+    const file = fileLocation(dir, loc.slice('file:'.length));
     if (!existsSync(file)) throw new RunConfigError(`run.trust ${keyId}: no file ${file}`);
     const pem = readFileSync(file, 'utf8');
     if (/PRIVATE KEY/.test(pem) || !/-----BEGIN PUBLIC KEY-----/.test(pem)) throw new RunConfigError(`run.trust ${keyId}: ${file} is not a public key; trust holds admission public keys only (S188)`);
@@ -117,7 +118,7 @@ export async function loadRun(project: string, opts: { now?: () => number } = {}
   // The signer: a file outside the project, read once. Errors name the path only.
   let ledger: { keyId: string; privateKeyPem: string } | undefined;
   if (run.ledger) {
-    const file = resolve(dir, run.ledger.signer.slice('file:'.length));
+    const file = fileLocation(dir, run.ledger.signer.slice('file:'.length));
     if (inside(dir, file)) throw new RunConfigError(`run.ledger.signer ${file} is inside the project ${dir}; a key in the tree is one git add from being committed, so it must resolve outside the project (S188)`);
     if (!existsSync(file)) throw new RunConfigError(`run.ledger.signer: no file ${file}`);
     const pem = readFileSync(file, 'utf8');
