@@ -15,8 +15,6 @@ export const MCP_PROTOCOL_VERSION = '2025-11-25';
  * the Lab's Hello server answered 2024-11-05 through the owner's gateway (live probe, 2026-11-02, PROVENANCE.md).
  */
 export const MCP_SUPPORTED_VERSIONS: readonly string[] = Object.freeze(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
-// MCP-Protocol-Version exists from 2025-06-18 on; an older revision is sent no such header.
-const VERSION_HEADER_FROM = '2025-06-18';
 
 export interface McpConfig {
   /** The access point of the gateway surface (https). */
@@ -134,13 +132,23 @@ export function mcpClient(c: McpConfig): McpClient {
   let negotiated: string | null = null;
   let next = 1;
 
+  // Every request asks for the body as it is (rule 6): the Lab's server labels plain answers gzip (second live probe,
+  // 2026-11-02), and a configured accept-encoding of any letter case is dropped so this one is the only one sent.
+  const base = (): Record<string, string> => ({
+    ...Object.fromEntries(Object.entries(cfg.headers).filter(([k]) => k.toLowerCase() !== 'accept-encoding')),
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    'accept-encoding': 'identity',
+  });
+
   type Sent = { kind: 'answer'; status: number; rpc: Rpc } | { kind: 'ack'; status: number } | { kind: 'fault'; permanent: boolean; answered: boolean; error: string; status?: number };
 
   async function send(message: object, id: number | null): Promise<Sent> {
-    const headers: Record<string, string> = { ...cfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+    const headers = base();
     if (session) headers['mcp-session-id'] = session;
-    // Revision strings are dates, so they compare as text.
-    if (negotiated && negotiated >= VERSION_HEADER_FROM) headers['mcp-protocol-version'] = negotiated;
+    // The negotiated revision on every request, whichever it is (rule 4): the Lab's server refuses any other value with
+    // -32022, and wants it for 2024-11-05 too, which the specification gave no header (second live probe, 2026-11-02).
+    if (negotiated) headers['mcp-protocol-version'] = negotiated;
     let r;
     try { r = await transport.request({ method: 'POST', url: cfg.url, headers, body: JSON.stringify(message) }); }
     catch (e) { return { kind: 'fault', permanent: false, answered: false, error: `no answer: ${e instanceof Error ? e.message : String(e)}` }; }
@@ -166,7 +174,7 @@ export function mcpClient(c: McpConfig): McpClient {
       negotiated = null;
       const id = next++;
       // Not through send(): the answer's header gives the session id, and no session or version exists yet.
-      const headers: Record<string, string> = { ...cfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+      const headers = base();
       const body = JSON.stringify({ jsonrpc: '2.0', id, method: 'initialize', params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: cfg.clientInfo } });
       let r;
       try { r = await transport.request({ method: 'POST', url: cfg.url, headers, body }); }
