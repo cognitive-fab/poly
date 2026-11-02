@@ -313,3 +313,23 @@ test('item 3: a tools/call result with a content of [] is a result with empty te
   assert.equal(r.ok, true);
   assert.equal(r.text, '');
 });
+
+// The review of 2026-11-02, item 4: 408 and 429 are permanent, by design. Every effect has one attempt and no retry
+// (P1 item 5), so a status that invites a retry changes nothing and the client sends no second request.
+for (const status of [408, 429]) {
+  test(`item 4: a ${status} to tools/call is permanent, answered, names the status, and is one attempt with no retry (by design)`, async () => {
+    const { server, client } = await open({ callStatus: status });
+    const r = await client.callTool('find_customers', { query: 'a' });
+    assert.deepEqual([r.ok, r.permanent, r.answered, r.status], [false, true, true, status]);
+    assert.match(r.error, new RegExp(String(status)));
+    assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1);
+  });
+
+  test(`item 4: a ${status} to initialize is permanent and names the status, with no second request (by design)`, async () => {
+    const server = recordedMcp({ status });
+    const client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport });
+    const init = await client.initialize();
+    assert.deepEqual([init.ok, init.permanent, init.status], [false, true, status]);
+    assert.equal(server.requests.length, 1);
+  });
+}
