@@ -592,3 +592,70 @@ for (const [why, opts] of [
     assert.equal(r.digest, digestOf(JSON.stringify(c)));
   });
 }
+
+// Item 1, the third review of 2026-11-02: a URL that holds a space, a tab, a line end or any other control character
+// (U+0000 to U+0020, and U+007F), anywhere, is refused with a message that says "whitespace or a control character". A
+// URL parser drops these at the ends and removes tabs and line ends inside, so the URL it reads is not the one the checks
+// read. The characters are kept out of the host, where the parser itself throws, so a red test here measures the client's
+// check and not a parser error. Each case has a control, the same URL without the character, which is accepted, so a
+// refusal is a refusal of the character and of nothing else.
+const SPACED = /whitespace or a control character/;
+const HEX = (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+// JSON.stringify escapes U+0000 to U+001F but not U+007F, which the reporter would otherwise print raw.
+const shown = (s) => JSON.stringify(s).replace(/\u007f/g, '\\u007f');
+for (const [why, url, control] of [
+  ['a leading space', ` ${URL}`, URL],
+  ['a trailing space', `${URL} `, URL],
+  ['a space inside the path', `${BASE}/a b`, `${BASE}/ab`],
+  ['a tab inside the path', 'https://gateway.example.test/surfaces/customer\t-records/mcp', URL],
+  ['a line feed inside the path', `${BASE}/a\nb`, `${BASE}/ab`],
+  ['a carriage return inside the query', `${BASE}?q=a\rb`, `${BASE}?q=ab`],
+  ['a NUL inside the fragment', `${BASE}#a\u0000b`, `${BASE}#ab`],
+  ['U+001F inside the path', `${BASE}/a\u001fb`, `${BASE}/ab`],
+  ['U+007F inside the query', `${BASE}?q=a\u007fb`, `${BASE}?q=ab`],
+]) {
+  test(`item 1: a URL with ${why} is refused: ${shown(url)}`, () => {
+    assert.doesNotThrow(made({ url: control }), 'the control, without the character, is accepted');
+    assert.throws(made({ url }), SPACED);
+  });
+}
+
+// The case the third review found: with a leading space the host was not found in the URL as written, and the
+// percent-encoded AKIA host of the second review was accepted. The first assertion separates "accepted", the defect,
+// from "refused under another message"; the spec does not order this check against the token-shape check, and the
+// bullet says such a URL is refused with the whitespace message, so the second assertion states that.
+test('item 1: the URL the third review found, a leading space before a percent-encoded AKIA host, is refused', () => {
+  const url = ' https://%41KIAIOSFODNN7EXAMPLE.example.test/mcp';
+  assert.throws(made({ url }), undefined, 'the URL is refused at all');
+  assert.throws(made({ url }), SPACED);
+});
+
+// "Anywhere": every character of the set, at the start, in the middle of the path and at the end. The misses are
+// collected so that one red run names every character and place the client accepts or refuses under another message.
+test('item 1: every character from U+0000 to U+0020, and U+007F, is refused at the start, inside the path and at the end', () => {
+  const set = [...Array.from({ length: 0x21 }, (_, i) => String.fromCharCode(i)), '\u007f'];
+  assert.equal(set.length, 34);
+  const misses = [];
+  for (const ch of set) {
+    for (const [where, url] of [['start', `${ch}${URL}`], ['path', `${BASE}/a${ch}b`], ['end', `${URL}${ch}`]]) {
+      try {
+        made({ url })();
+        misses.push(`${where} ${HEX(ch)}: accepted`);
+      } catch (e) {
+        if (!SPACED.test(String(e?.message))) misses.push(`${where} ${HEX(ch)}: ${String(e?.message)}`);
+      }
+    }
+  }
+  assert.deepEqual(misses, []);
+});
+
+// The set ends at U+0020 and U+007F: the characters just outside it are accepted, and the plain URL still works.
+test('item 1: the characters just outside the set are accepted, and the plain configured URL is used', async () => {
+  assert.doesNotThrow(made({ url: `${BASE}/a!b` }), 'U+0021');
+  assert.doesNotThrow(made({ url: `${BASE}/a~b` }), 'U+007E');
+  assert.doesNotThrow(made({ url: BASE }));
+  const { server, client, init } = await open();
+  assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+  assert.equal(client.url, URL);
+  assert.ok(server.requests.every((r) => r.url === URL));
+});
