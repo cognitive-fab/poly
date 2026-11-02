@@ -229,6 +229,21 @@ for (const [part, plain, encoded] of [
   });
 }
 
+// Item 1, the second review of 2026-11-02: the host is read as written in the URL, then decoded, never as a URL parser
+// returns it. The parser lowercases the host, and the AKIA shape is case-sensitive, so %41KIA... read from the parsed
+// host is akia... and matches nothing.
+test('item 1: a case-sensitive token shape in the host, hidden by percent-encoding, is refused (the host is read as written)', () => {
+  const url = 'https://%41KIAIOSFODNN7EXAMPLE.example.test/mcp';
+  assert.equal(tokenShaped(url), false, 'the raw URL must hide the token, or this test proves nothing about decoding');
+  assert.equal(tokenShaped(decodeURIComponent('%41KIAIOSFODNN7EXAMPLE')), true, 'the host label as written, decoded, is token-shaped');
+  assert.equal(tokenShaped(new globalThis.URL(url).hostname), false, 'the parsed host is lowercased and matches nothing');
+  assert.throws(made({ url }), /token-shaped/);
+});
+
+test('item 1: a plain lowercase host is accepted', () => {
+  assert.doesNotThrow(made({ url: 'https://gateway.example.test/mcp' }));
+});
+
 for (const [part, url] of [
   ['a path segment', `${BASE}/Bearer%20abc`],
   ['a query name', `${BASE}?Basic%20x=1`],
