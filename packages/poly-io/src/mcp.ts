@@ -8,8 +8,15 @@ import { createHash } from 'node:crypto';
 import type { HttpTransport } from '@poly/runtime/adapters';
 import { httpsTransport } from './net.js';
 
-/** The revision this client speaks. A newer revision drops initialize and sessions; the gateway is read as this one. */
+/** The revision this client asks for in initialize: the latest it speaks. The revision of 2026-07-28 drops initialize and sessions. */
 export const MCP_PROTOCOL_VERSION = '2025-11-25';
+/**
+ * The revisions this client speaks. A server that answers one of them is talked to in it (lifecycle, version negotiation):
+ * the Lab's Hello server answered 2024-11-05 through the owner's gateway (live probe, 2026-11-02, PROVENANCE.md).
+ */
+export const MCP_SUPPORTED_VERSIONS: readonly string[] = Object.freeze(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
+// MCP-Protocol-Version exists from 2025-06-18 on; an older revision is sent no such header.
+const VERSION_HEADER_FROM = '2025-06-18';
 
 export interface McpConfig {
   /** The access point of the gateway surface (https). */
@@ -33,6 +40,8 @@ export type McpOutcome =
 export interface McpClient {
   readonly url: string;
   readonly sessionId: string | null;
+  /** The negotiated revision; null before initialize and after one that fails. */
+  readonly protocolVersion: string | null;
   initialize(): Promise<{ ok: true; serverInfo?: unknown } | { ok: false; permanent: boolean; error: string; status?: number }>;
   listTools(): Promise<{ ok: true; tools: McpTool[] } | { ok: false; permanent: boolean; error: string; status?: number }>;
   callTool(name: string, args: Record<string, unknown>): Promise<McpOutcome>;
@@ -122,7 +131,7 @@ export function mcpClient(c: McpConfig): McpClient {
   let ready = false;
   const transport = c.transport ?? httpsTransport;
   let session: string | null = null;
-  const version = MCP_PROTOCOL_VERSION;
+  let negotiated: string | null = null;
   let next = 1;
 
   type Sent = { kind: 'answer'; status: number; rpc: Rpc } | { kind: 'ack'; status: number } | { kind: 'fault'; permanent: boolean; answered: boolean; error: string; status?: number };
@@ -130,7 +139,8 @@ export function mcpClient(c: McpConfig): McpClient {
   async function send(message: object, id: number | null): Promise<Sent> {
     const headers: Record<string, string> = { ...cfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
     if (session) headers['mcp-session-id'] = session;
-    headers['mcp-protocol-version'] = version;
+    // Revision strings are dates, so they compare as text.
+    if (negotiated && negotiated >= VERSION_HEADER_FROM) headers['mcp-protocol-version'] = negotiated;
     let r;
     try { r = await transport.request({ method: 'POST', url: cfg.url, headers, body: JSON.stringify(message) }); }
     catch (e) { return { kind: 'fault', permanent: false, answered: false, error: `no answer: ${e instanceof Error ? e.message : String(e)}` }; }
@@ -148,10 +158,12 @@ export function mcpClient(c: McpConfig): McpClient {
   return {
     url: cfg.url,
     get sessionId() { return session; },
+    get protocolVersion() { return negotiated; },
     async initialize() {
       // Review of 2026-11-02, item 2: only an initialize that succeeds leaves a session; every failure below leaves none.
       ready = false;
       session = null;
+      negotiated = null;
       const id = next++;
       // Not through send(): the answer's header gives the session id, and no session or version exists yet.
       const headers: Record<string, string> = { ...cfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
@@ -164,12 +176,18 @@ export function mcpClient(c: McpConfig): McpClient {
       const rpc = messageOf(r.headers['content-type'] ?? '', r.body, id);
       if (!rpc || rpc.error || !rpc.result) return { ok: false, permanent: true, error: rpc ? protocolFault(rpc) : 'the reply holds no initialize result' };
       const sid = r.headers['mcp-session-id'];
-      // The client speaks one revision; a server that answers another is not talked to (lifecycle, version negotiation).
-      if (rpc.result.protocolVersion !== MCP_PROTOCOL_VERSION) return { ok: false, permanent: true, error: `the server speaks protocol version ${String(rpc.result.protocolVersion)}, and this client speaks ${MCP_PROTOCOL_VERSION}` };
+      // A server that answers a revision this client also speaks is talked to in it; any other is not (lifecycle, version
+      // negotiation). The transport stays Streamable HTTP whatever the revision, as the live probe answered.
+      const answered = rpc.result.protocolVersion;
+      if (typeof answered !== 'string' || !MCP_SUPPORTED_VERSIONS.includes(answered)) {
+        const named = typeof answered === 'string' ? `protocol version ${JSON.stringify(answered)}` : `no protocol version (${JSON.stringify(answered) ?? 'none'})`;
+        return { ok: false, permanent: true, error: `the server speaks ${named}, and this client speaks ${MCP_SUPPORTED_VERSIONS.join(', ')}` };
+      }
+      negotiated = answered;
       // Set only for a server that is talked to, since the notification carries it; a refused one leaves no session id behind.
       session = sid && /^[!-~]+$/.test(sid) ? sid : null;
       const ack = await send({ jsonrpc: '2.0', method: 'notifications/initialized' }, null);
-      if (ack.kind === 'fault') { session = null; return { ok: false, permanent: ack.permanent, error: ack.error, status: ack.status }; }
+      if (ack.kind === 'fault') { session = null; negotiated = null; return { ok: false, permanent: ack.permanent, error: ack.error, status: ack.status }; }
       ready = true;
       return { ok: true, serverInfo: rpc.result.serverInfo };
     },
