@@ -125,7 +125,7 @@ The Model Context Protocol specification revision 2025-11-25, read on 2026-10-27
 |---|---|
 | POSTs each JSON-RPC message to the one endpoint with `Accept: application/json, text/event-stream`; takes a JSON answer or an SSE stream, and reads from a stream the event whose JSON-RPC id is the request's | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports (Streamable HTTP, sending messages) |
 | Sends `initialize` with `protocolVersion` 2025-11-25, then the `notifications/initialized` notification, which the server answers 202 | https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle |
-| Keeps the `MCP-Session-Id` of the `initialize` answer (visible ASCII only) and sends it on every later request; sends `MCP-Protocol-Version` with the negotiated version when that version has the header | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports (session management, protocol version header) |
+| Keeps the `MCP-Session-Id` of the `initialize` answer (visible ASCII only) and sends it on every later request; sends `MCP-Protocol-Version` with the negotiated version on every later request | https://modelcontextprotocol.io/specification/2025-11-25/basic/transports (session management, protocol version header) |
 | Continues with the version the server answers when the client speaks it too, and stops otherwise | https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle (version negotiation) |
 | `MCP-Protocol-Version` exists from 2025-06-18 on; a server that receives none assumes 2025-03-26 | https://modelcontextprotocol.io/specification/2025-06-18/changelog, and the transports page above (protocol version header) |
 | `tools/list` and `tools/call` with `name` and `arguments`; a result with `isError` is a failure of the tool, and its `text` parts are joined | https://modelcontextprotocol.io/specification/2025-11-25/server/tools |
@@ -146,13 +146,22 @@ The Model Context Protocol specification revision 2025-11-25, read on 2026-10-27
 4. **408 and 429 are permanent, by design.** Every effect has one attempt and no retry (P1 item 5), so a status that invites a retry changes nothing. A 408 or a 429, to `initialize` or to `tools/call`, is a permanent failure that names the status (`ok: false`, `permanent: true`, and for a call `answered: true`), and the client sends no second request.
 5. **What was checked is what is used.** The configuration is copied when the client is made. Every request goes to the URL the client was made with, `client.url` is that URL, and changing the caller's object afterwards changes neither the URL nor the headers.
 
-**Version negotiation (rule 7a).** A live probe on 2026-11-02, of the Lab's Hello server through the owner's gateway (Direct URL): `initialize` with `protocolVersion` 2025-11-25 was answered with `protocolVersion` `"2024-11-05"`, as an SSE event, with an `mcp-session-id` header. The gateway passed the answer through unchanged. The client refused it, and the specification says a client that also speaks the server's version continues with it. The rules:
+**Version negotiation (rule 7a).** A live probe on 2026-11-02, of the Lab's Hello server through the owner's gateway (Direct URL): `initialize` with `protocolVersion` 2025-11-25 was answered with `protocolVersion` `"2024-11-05"`, as an SSE event, with an `mcp-session-id` header. The gateway passed the answer through unchanged. The client refused it, and the specification says a client that also speaks the server's version continues with it.
+
+A second probe the same day, through the same gateway:
+
+- `initialize` with 2025-11-25 or with 2025-06-18 is answered with `"2024-11-05"`, as an SSE event, with an `mcp-session-id` header.
+- After that, a request whose `MCP-Protocol-Version` is 2025-06-18 is refused with the JSON-RPC error -32022 `Unsupported protocol version`. The server accepts only 2024-11-05 or 2026-07-28 there. So the header carries the negotiated version even for 2024-11-05, which the specification gave no header.
+- Its answers say `content-encoding: gzip` and are not compressed. Node's `fetch` fails on them with `Z_DATA_ERROR` unless the request sends `accept-encoding: identity`.
+
+The rules:
 
 1. `initialize` asks for 2025-11-25, the latest version the client speaks.
 2. The client speaks four versions: 2024-11-05, 2025-03-26, 2025-06-18 and 2025-11-25. An answer that names one of them is accepted, and that version is the negotiated one. An answer that names any other version, or none, is a permanent failure whose error names the version answered, and it leaves no session (item 2 of the review above).
 3. The client exposes the negotiated version as `client.protocolVersion`: `null` before `initialize` and after an `initialize` that fails.
-4. Every request after `initialize` (`notifications/initialized`, `tools/list`, `tools/call`) carries `MCP-Protocol-Version` with the negotiated version when it is 2025-06-18 or 2025-11-25, and carries no such header when it is 2024-11-05 or 2025-03-26, which do not have it. `initialize` itself carries none.
+4. Every request after `initialize` (`notifications/initialized`, `tools/list`, `tools/call`) carries `MCP-Protocol-Version` with the negotiated version, whichever of the four it is, and never the version `initialize` asked for when the two differ. `initialize` itself carries none. This replaces the first reading of this rule, which sent no header for 2024-11-05 and 2025-03-26: the second probe shows a server that wants it. A server that refuses the header (the probe's -32022, which the specification answers with HTTP 400) is a permanent failure, as any 4xx is.
 5. The transport stays Streamable HTTP whatever the version, with the session id, the JSON answer and the single-event SSE answer as above. The probe shows the Lab's server answering a POST that way while it names 2024-11-05, whose own transport was HTTP with SSE. The tool results are read the same way; `structuredContent`, which older versions do not have, is simply absent.
+6. Every request, `initialize` included, carries `accept-encoding: identity`, and it replaces an `accept-encoding` the configuration gives whatever the letter case of its name. The body of an answer is read as it arrives and is never decoded by its `content-encoding`: an answer labelled `gzip` whose body is plain JSON or SSE is read as that JSON or SSE.
 
 ## Conclusion
 
