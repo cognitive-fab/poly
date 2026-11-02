@@ -23,6 +23,7 @@ const found = (customers) => ({ ...text(JSON.stringify({ customers })), structur
  * opts.callStatus: answer only tools/call with this status;
  * opts.emptyCall: answer tools/call with a JSON-RPC message that has neither result nor error;
  * opts.version: the protocol version initialize answers with;
+ * opts.noVersion: answer initialize with no protocolVersion at all (version negotiation, rule 2);
  * opts.dropAfterSend: throw after the request is recorded, as a connection lost once the request is sent;
  * opts.sse: answer requests as a single-event text/event-stream;
  * opts.initializedStatus: answer only notifications/initialized with this status (item 2 of the review of 2026-11-02);
@@ -75,7 +76,9 @@ export function recordedMcp(opts = {}) {
         if (opts.callStatus && message.method === 'tools/call') return { status: opts.callStatus, headers: {}, body: '' };
         if (opts.status) return { status: opts.status, headers: {}, body: '' };
         if (message.method === 'initialize') {
-          const out = reply(message.id, { protocolVersion: opts.version ?? '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'customer-records', version: '1' } });
+          const answered = { protocolVersion: opts.version ?? '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'customer-records', version: '1' } };
+          if (opts.noVersion) delete answered.protocolVersion;
+          const out = reply(message.id, answered);
           out.headers['mcp-session-id'] = sessionId;
           return out;
         }

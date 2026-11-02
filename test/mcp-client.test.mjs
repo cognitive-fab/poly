@@ -139,9 +139,10 @@ test('a call before initialize is refused without a request, and a server of ano
   assert.equal((await client.callTool('find_customers', { query: 'a' })).ok, false);
   assert.equal((await client.listTools()).ok, false);
   assert.equal(server.requests.length, 0);
-  const other = await open({ version: '2024-11-05' });
+  // Version negotiation, rule 2: 2024-11-05 is now spoken, so the other version is one the client does not speak.
+  const other = await open({ version: '2024-10-07' });
   assert.equal(other.init.ok, false);
-  assert.match(other.init.error, /2024-11-05/);
+  assert.match(other.init.error, /2024-10-07/);
   assert.equal(other.client.sessionId, null);
   assert.equal((await other.client.callTool('find_customers', { query: 'a' })).ok, false);
 });
@@ -335,5 +336,107 @@ for (const status of [408, 429]) {
     const init = await client.initialize();
     assert.deepEqual([init.ok, init.permanent, init.status], [false, true, status]);
     assert.equal(server.requests.length, 1);
+  });
+}
+
+// Version negotiation (rule 7a). The live probe of 2026-11-02: the Lab's Hello server, through the owner's gateway,
+// answered initialize with protocolVersion "2024-11-05", as an SSE event with an mcp-session-id header. The client speaks
+// 2024-11-05, 2025-03-26, 2025-06-18 and 2025-11-25 (rule 2) and asks for 2025-11-25 (rule 1).
+// A header is looked up under any capitalization, so that "carries none" cannot pass because the client wrote
+// MCP-Protocol-Version where the test read mcp-protocol-version.
+const headerOf = (headers, name) => {
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === name);
+  return key === undefined ? undefined : headers[key];
+};
+const AFTER_INITIALIZE = ['notifications/initialized', 'tools/list', 'tools/call'];
+const SPOKEN = [['2024-11-05', false], ['2025-03-26', false], ['2025-06-18', true], ['2025-11-25', true]];
+
+for (const [version, hasHeader] of SPOKEN) {
+  for (const sse of [false, true]) {
+    const form = sse ? 'a single-event SSE answer' : 'a JSON answer';
+    test(`version negotiation: a server answering ${version} as ${form} is used, and the version is the negotiated one`, async () => {
+      const { server, client, init } = await open({ version, sse });
+      assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+      assert.equal(client.protocolVersion, version, 'rule 3: client.protocolVersion is the negotiated version');
+      assert.equal(client.sessionId, 'sess-0123456789abcdef');
+      const l = await client.listTools();
+      assert.deepEqual(l.tools.map((t) => t.name), TOOLS);
+      const r = await client.callTool('find_customers', { query: 'example.test' });
+      assert.equal(r.ok, true);
+      assert.equal(JSON.parse(r.text).customers.length, 10);
+      // Rule 5: the session id goes on every later request, whatever the version.
+      const after = server.requests.slice(1);
+      assert.deepEqual(after.map((q) => q.message.method), AFTER_INITIALIZE);
+      for (const q of after) assert.equal(headerOf(q.headers, 'mcp-session-id'), 'sess-0123456789abcdef', q.message.method);
+    });
+  }
+
+  // Rule 4: MCP-Protocol-Version exists from 2025-06-18 on. The methods are asserted first, so that "no request carries
+  // the header" is never read over an empty list.
+  test(`version negotiation: with ${version}, every request after initialize carries ${hasHeader ? `mcp-protocol-version ${version}` : 'no mcp-protocol-version header'}`, async () => {
+    const { server, client, init } = await open({ version });
+    assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+    await client.listTools();
+    await client.callTool('find_customers', { query: 'a' });
+    const after = server.requests.slice(1);
+    assert.deepEqual(after.map((q) => q.message.method), AFTER_INITIALIZE);
+    for (const q of after) {
+      assert.equal(headerOf(q.headers, 'mcp-protocol-version'), hasHeader ? version : undefined, q.message.method);
+    }
+  });
+
+  // Rules 1 and 4: initialize asks for 2025-11-25 and carries no version header, whatever the server then answers.
+  test(`version negotiation: initialize asks for 2025-11-25 with no mcp-protocol-version header (server answers ${version})`, async () => {
+    const { server } = await open({ version });
+    const first = server.requests[0];
+    assert.equal(first.message.method, 'initialize');
+    assert.equal(first.message.params.protocolVersion, '2025-11-25');
+    assert.equal(headerOf(first.headers, 'mcp-protocol-version'), undefined);
+  });
+}
+
+// Rule 2: any other answer, or none, is a permanent failure that names the version answered and leaves no session.
+// Whether notifications/initialized is sent after such an answer is not stated, so the requests are counted from the
+// moment initialize returns.
+for (const [why, opts, named] of [
+  ['2024-10-07, a version older than any the client speaks', { version: '2024-10-07' }, /2024-10-07/],
+  ['2026-07-28, the revision without initialize', { version: '2026-07-28' }, /2026-07-28/],
+  ['2025-11-24, one day off a spoken version', { version: '2025-11-24' }, /2025-11-24/],
+  ['an empty string', { version: '' }, null],
+  ['no protocolVersion at all', { noVersion: true }, null],
+]) {
+  for (const sse of [false, true]) {
+    test(`version negotiation: an initialize answer naming ${why} is refused, permanent, with no session${sse ? ' (SSE)' : ''}`, async () => {
+      const { server, client, init } = await open({ ...opts, sse });
+      assert.equal(init.ok, false, 'not ok');
+      assert.equal(init.permanent, true, 'permanent');
+      assert.equal(typeof init.error, 'string');
+      assert.ok(init.error.length > 0, 'the error says why');
+      if (named) assert.match(init.error, named, 'the error names the version answered');
+      assert.equal(client.sessionId, null, 'no session');
+      assert.equal(client.protocolVersion, null, 'rule 3: no negotiated version');
+      const sent = server.requests.length;
+      assert.equal((await client.listTools()).ok, false);
+      assert.equal((await client.callTool('find_customers', { query: 'a' })).ok, false);
+      assert.equal(server.requests.length, sent, 'later calls send nothing');
+    });
+  }
+}
+
+test('version negotiation: client.protocolVersion is null before initialize', () => {
+  const client = mcpClient({ url: URL, tools: TOOLS, transport: recordedMcp().transport });
+  assert.equal(client.protocolVersion, null);
+});
+
+// Rule 3: null after an initialize that fails, whatever made it fail, even when the version answered was spoken.
+for (const [why, opts] of [
+  ['a 403 to initialize', { status: 403 }],
+  ['a refused notifications/initialized after a spoken 2024-11-05', { version: '2024-11-05', initializedStatus: 400 }],
+  ['a notifications/initialized with no answer after a spoken 2025-06-18', { version: '2025-06-18', initializedDrop: true }],
+]) {
+  test(`version negotiation: client.protocolVersion is null after ${why}`, async () => {
+    const { client, init } = await open(opts);
+    assert.equal(init.ok, false);
+    assert.equal(client.protocolVersion, null);
   });
 }
