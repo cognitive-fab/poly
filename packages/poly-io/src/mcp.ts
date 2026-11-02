@@ -57,11 +57,15 @@ const CREDENTIAL_NAME = /auth|token|secret|passw|api[-_]?key|cookie|credential|b
 const AUTH_SCHEME = /^\s*(?:Basic|Bearer|Concealed|Digest|DPoP|GNAP|HOBA|Mutual|Negotiate|OAuth|PrivateToken|SCRAM-SHA-1|SCRAM-SHA-256|vapid|ApiKey|AWS4-HMAC-SHA256|NTLM|Token)\s+\S/i;
 
 /** The parts of the URL as a reader of it decodes them; a malformed escape is refused, since nobody can say what it holds. */
-function decodedParts(u: URL): string[] {
+function decodedParts(u: URL, raw: string): string[] {
   const decode = (raw: string, where: string): string => {
     try { return decodeURIComponent(raw); } catch { throw new Error(`mcp: the access point URL has a malformed percent-encoding in ${where}`); }
   };
-  const parts = [u.hostname];
+  // The host as written, not u.hostname: the parser lowercases it, and the token shapes are case-sensitive (AKIA). A second
+  // review of 2026-11-02 found %41KIA... in the host accepted that way.
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(raw)?.[1] ?? '';
+  const host = authority.slice(authority.lastIndexOf('@') + 1).replace(/^(\[[^\]]*\]|[^:]*).*$/, '$1');
+  const parts = [decode(host, 'its host')];
   for (const s of u.pathname.split('/')) parts.push(decode(s, 'its path'));
   for (const pair of u.search.replace(/^\?/, '').split('&')) {
     const i = pair.indexOf('=');
@@ -84,7 +88,7 @@ function refuseCredentials(c: McpConfig): void {
   for (const k of u.searchParams.keys()) if (CREDENTIAL_NAME.test(k)) throw new Error(`mcp: the access point URL carries a ${k} parameter; poly sends no credential`);
   if (u.username || u.password) throw new Error('mcp: the access point URL carries a user or password; poly sends no credential');
   if (u.protocol !== 'https:') throw new Error(`mcp: the access point is ${u.protocol}, and a call goes over https`);
-  const parts = decodedParts(u);
+  const parts = decodedParts(u, c.url);
   const headerValues = Object.values(c.headers ?? {});
   const values = [c.url, ...parts, ...headerValues, ...c.tools, ...Object.values(c.clientInfo ?? {})];
   if (values.some((v) => TOKEN_SHAPES.some((re) => re.test(v)))) throw new Error('mcp: the configuration holds a token-shaped value; poly holds no key');
