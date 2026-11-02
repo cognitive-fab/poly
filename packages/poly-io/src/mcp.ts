@@ -187,7 +187,10 @@ export function mcpClient(c: McpConfig): McpClient {
       if (s.kind !== 'answer') return { ok: false, permanent: true, answered: true, error: 'the reply is not an answer' };
       if (s.rpc.error) return { ok: false, permanent: true, answered: true, error: protocolFault(s.rpc) };
       if (!s.rpc.result || typeof s.rpc.result !== 'object') return { ok: false, permanent: true, answered: true, error: 'the reply holds neither a result nor an error' };
-      const content: unknown[] = Array.isArray(s.rpc.result?.content) ? s.rpc.result.content : [];
+      // Review of 2026-11-02, item 3: a result with no content array is no answer, whatever isError says. Whether the tool
+      // ran is not known, so the attempt is spent as for a transport error. A content of [] is a result.
+      if (!Array.isArray(s.rpc.result.content)) return { ok: false, permanent: false, answered: false, status: s.status, error: 'no answer: the result holds no content' };
+      const content: unknown[] = s.rpc.result.content;
       const text = content.map((p) => (p && typeof p === 'object' && (p as { type?: string }).type === 'text' ? String((p as { text?: unknown }).text ?? '') : '')).filter((t) => t !== '').join('\n');
       const digest = digestOf(text);
       // The tool's text is kept for the journal by its digest; the text itself is the caller's to keep or drop.
