@@ -51,6 +51,28 @@ export const TOKEN_SHAPES: RegExp[] = [
 ];
 // Any name that says it carries a credential, not a list of known ones: a short value has no shape to find.
 const CREDENTIAL_NAME = /auth|token|secret|passw|api[-_]?key|cookie|credential|bearer|^key$/i;
+// A value that starts with an HTTP authentication scheme carries a credential whatever its header is called (review of
+// 2026-11-02, item 1): the IANA registry's schemes and four in common use outside it. poly-io's own shape, not one of the
+// seven PL6825 reads (PROVENANCE.md).
+const AUTH_SCHEME = /^\s*(?:Basic|Bearer|Concealed|Digest|DPoP|GNAP|HOBA|Mutual|Negotiate|OAuth|PrivateToken|SCRAM-SHA-1|SCRAM-SHA-256|vapid|ApiKey|AWS4-HMAC-SHA256|NTLM|Token)\s+\S/i;
+
+/** The parts of the URL as a reader of it decodes them; a malformed escape is refused, since nobody can say what it holds. */
+function decodedParts(u: URL): string[] {
+  const decode = (raw: string, where: string): string => {
+    try { return decodeURIComponent(raw); } catch { throw new Error(`mcp: the access point URL has a malformed percent-encoding in ${where}`); }
+  };
+  const parts = [u.hostname];
+  for (const s of u.pathname.split('/')) parts.push(decode(s, 'its path'));
+  for (const pair of u.search.replace(/^\?/, '').split('&')) {
+    const i = pair.indexOf('=');
+    for (const raw of i < 0 ? [pair] : [pair.slice(0, i), pair.slice(i + 1)]) {
+      // A form decoder reads + as a space, so both readings are checked.
+      parts.push(decode(raw, 'its query'), decode(raw.replace(/\+/g, ' '), 'its query'));
+    }
+  }
+  parts.push(decode(u.hash.replace(/^#/, ''), 'its fragment'));
+  return parts.filter((p) => p !== '');
+}
 
 function refuseCredentials(c: McpConfig): void {
   for (const name of Object.keys(c.headers ?? {})) {
@@ -58,11 +80,15 @@ function refuseCredentials(c: McpConfig): void {
   }
   let u: URL;
   try { u = new URL(c.url); } catch { throw new Error('mcp: the access point is not a URL'); }
-  if (u.username || u.password) throw new Error('mcp: the access point URL carries a user or password; poly sends no credential');
+  // A credential is refused by its name first, then a user or password, then the scheme (review of 2026-11-02, item 1).
   for (const k of u.searchParams.keys()) if (CREDENTIAL_NAME.test(k)) throw new Error(`mcp: the access point URL carries a ${k} parameter; poly sends no credential`);
+  if (u.username || u.password) throw new Error('mcp: the access point URL carries a user or password; poly sends no credential');
   if (u.protocol !== 'https:') throw new Error(`mcp: the access point is ${u.protocol}, and a call goes over https`);
-  const values = [c.url, ...Object.values(c.headers ?? {}), ...c.tools, ...Object.values(c.clientInfo ?? {})];
+  const parts = decodedParts(u);
+  const headerValues = Object.values(c.headers ?? {});
+  const values = [c.url, ...parts, ...headerValues, ...c.tools, ...Object.values(c.clientInfo ?? {})];
   if (values.some((v) => TOKEN_SHAPES.some((re) => re.test(v)))) throw new Error('mcp: the configuration holds a token-shaped value; poly holds no key');
+  if ([...headerValues, ...parts].some((v) => AUTH_SCHEME.test(v))) throw new Error('mcp: the configuration holds a value that starts with an authentication scheme; poly holds no key');
 }
 
 export const digestOf = (text: string): string => `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`;
