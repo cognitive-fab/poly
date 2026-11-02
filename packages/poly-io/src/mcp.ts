@@ -145,6 +145,9 @@ export function mcpClient(c: McpConfig): McpClient {
     url: cfg.url,
     get sessionId() { return session; },
     async initialize() {
+      // Review of 2026-11-02, item 2: only an initialize that succeeds leaves a session; every failure below leaves none.
+      ready = false;
+      session = null;
       const id = next++;
       // Not through send(): the answer's header gives the session id, and no session or version exists yet.
       const headers: Record<string, string> = { ...cfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
@@ -159,10 +162,10 @@ export function mcpClient(c: McpConfig): McpClient {
       const sid = r.headers['mcp-session-id'];
       // The client speaks one revision; a server that answers another is not talked to (lifecycle, version negotiation).
       if (rpc.result.protocolVersion !== MCP_PROTOCOL_VERSION) return { ok: false, permanent: true, error: `the server speaks protocol version ${String(rpc.result.protocolVersion)}, and this client speaks ${MCP_PROTOCOL_VERSION}` };
-      // Set only for a server that is talked to: a refused one leaves no session id behind.
+      // Set only for a server that is talked to, since the notification carries it; a refused one leaves no session id behind.
       session = sid && /^[!-~]+$/.test(sid) ? sid : null;
       const ack = await send({ jsonrpc: '2.0', method: 'notifications/initialized' }, null);
-      if (ack.kind === 'fault') return { ok: false, permanent: ack.permanent, error: ack.error, status: ack.status };
+      if (ack.kind === 'fault') { session = null; return { ok: false, permanent: ack.permanent, error: ack.error, status: ack.status }; }
       ready = true;
       return { ok: true, serverInfo: rpc.result.serverInfo };
     },
