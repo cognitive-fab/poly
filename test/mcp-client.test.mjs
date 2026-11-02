@@ -152,10 +152,14 @@ test('the configuration is copied: changing it afterwards moves no endpoint and 
   const client = mcpClient(config);
   config.url = 'https://evil.example.test/mcp';
   config.headers.Authorization = 'Bearer abc';
+  config.headers['x-trace'] = 'b';
   await client.initialize();
   await client.callTool('find_customers', { query: 'a' });
   assert.equal(server.requests.length > 0, true);
   assert.ok(server.requests.every((r) => !('Authorization' in r.headers) && r.headers['x-trace'] === 'a'));
+  // Item 5 of the review of 2026-11-02: the test once changed config.url and never asserted where requests went.
+  assert.equal(client.url, URL);
+  assert.ok(server.requests.every((r) => r.url === URL), JSON.stringify(server.requests.map((r) => r.url)));
 });
 
 test('clientInfo and the scheme are checked too', () => {

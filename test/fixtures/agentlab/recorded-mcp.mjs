@@ -66,7 +66,8 @@ export function recordedMcp(opts = {}) {
     transport: {
       async request(r) {
         const message = JSON.parse(r.body);
-        requests.push({ headers: r.headers, message });
+        // The URL is recorded so a test can assert where each request went (item 5 of the review of 2026-11-02).
+        requests.push({ url: r.url, headers: r.headers, message });
         if (opts.dropAfterSend && message.method === 'tools/call') throw new Error('socket hang up');
         if (opts.initializedDrop && message.method === 'notifications/initialized') throw new Error('socket hang up');
         if (opts.initializedStatus && message.method === 'notifications/initialized') return { status: opts.initializedStatus, headers: {}, body: '' };
