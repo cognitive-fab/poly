@@ -364,9 +364,9 @@ const headerOf = (headers, name) => {
   return key === undefined ? undefined : headers[key];
 };
 const AFTER_INITIALIZE = ['notifications/initialized', 'tools/list', 'tools/call'];
-const SPOKEN = [['2024-11-05', false], ['2025-03-26', false], ['2025-06-18', true], ['2025-11-25', true]];
+const SPOKEN = ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'];
 
-for (const [version, hasHeader] of SPOKEN) {
+for (const version of SPOKEN) {
   for (const sse of [false, true]) {
     const form = sse ? 'a single-event SSE answer' : 'a JSON answer';
     test(`version negotiation: a server answering ${version} as ${form} is used, and the version is the negotiated one`, async () => {
@@ -386,9 +386,11 @@ for (const [version, hasHeader] of SPOKEN) {
     });
   }
 
-  // Rule 4: MCP-Protocol-Version exists from 2025-06-18 on. The methods are asserted first, so that "no request carries
-  // the header" is never read over an empty list.
-  test(`version negotiation: with ${version}, every request after initialize carries ${hasHeader ? `mcp-protocol-version ${version}` : 'no mcp-protocol-version header'}`, async () => {
+  // Rule 4, as replaced after the second probe of 2026-11-02: every request after initialize carries the negotiated
+  // version, whichever of the four it is, and never the 2025-11-25 that initialize asked for when the server answered
+  // another. The first reading sent no header for 2024-11-05 and 2025-03-26, and the probed server refuses that. The
+  // methods are asserted first, so that "every request carries" is never read over an empty list.
+  test(`version negotiation: with ${version}, every request after initialize carries mcp-protocol-version ${version}`, async () => {
     const { server, client, init } = await open({ version });
     assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
     await client.listTools();
@@ -396,7 +398,8 @@ for (const [version, hasHeader] of SPOKEN) {
     const after = server.requests.slice(1);
     assert.deepEqual(after.map((q) => q.message.method), AFTER_INITIALIZE);
     for (const q of after) {
-      assert.equal(headerOf(q.headers, 'mcp-protocol-version'), hasHeader ? version : undefined, q.message.method);
+      assert.equal(headerOf(q.headers, 'mcp-protocol-version'), version, q.message.method);
+      if (version !== '2025-11-25') assert.notEqual(headerOf(q.headers, 'mcp-protocol-version'), '2025-11-25', `${q.message.method}: never the version asked for`);
     }
   });
 
@@ -453,5 +456,139 @@ for (const [why, opts] of [
     const { client, init } = await open(opts);
     assert.equal(init.ok, false);
     assert.equal(client.protocolVersion, null);
+  });
+}
+
+// The second live probe of 2026-11-02, recorded (rule 4). The Lab's Hello server, through the owner's gateway, answers
+// initialize with 2024-11-05 as one SSE event with an mcp-session-id header, and refuses with -32022 "Unsupported
+// protocol version" a later request whose MCP-Protocol-Version is 2025-06-18. The fixture's probe option refuses every
+// later request whose header is not 2024-11-05, a missing header included, with HTTP 400.
+const send = (server, message, headers = {}) => server.transport.request({
+  method: 'POST',
+  url: URL,
+  headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
+  body: JSON.stringify(message),
+});
+const INITIALIZE = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'probe', version: '1' } } };
+
+// Sent straight to the fixture's transport, with no client, so that the green client test below is known to pass a
+// server that does refuse. The session id is the one initialize returned, so a 400 here is not the session check, and
+// the -32022 body tells the two apart (the session check answers 400 with an empty body).
+test('the probe fixture refuses a later request whose mcp-protocol-version is not 2024-11-05, a missing one included', async () => {
+  const server = recordedMcp({ probe: true });
+  const init = await send(server, INITIALIZE);
+  assert.equal(init.status, 200);
+  assert.match(headerOf(init.headers, 'content-type'), /text\/event-stream/);
+  assert.match(init.body, /"protocolVersion":"2024-11-05"/);
+  const session = headerOf(init.headers, 'mcp-session-id');
+  assert.equal(session, 'sess-0123456789abcdef');
+  const list = { jsonrpc: '2.0', id: 2, method: 'tools/list' };
+  for (const [why, headers] of [
+    ['2025-06-18, as probed', { 'mcp-protocol-version': '2025-06-18' }],
+    ['2025-11-25, the version initialize asked for', { 'mcp-protocol-version': '2025-11-25' }],
+    ['no header at all', {}],
+  ]) {
+    const r = await send(server, list, { 'mcp-session-id': session, ...headers });
+    assert.equal(r.status, 400, why);
+    const error = JSON.parse(r.body).error;
+    assert.deepEqual([error.code, error.message], [-32022, 'Unsupported protocol version'], why);
+  }
+  // The control: the same request with 2024-11-05, under another letter case, is answered, so the fixture does not
+  // refuse everything.
+  const answered = await send(server, list, { 'mcp-session-id': session, 'MCP-Protocol-Version': '2024-11-05' });
+  assert.equal(answered.status, 200);
+  assert.match(answered.body, /find_customers/);
+});
+
+test('the probe server: the client negotiates 2024-11-05, lists the three tools and calls a tool, every later request carrying mcp-protocol-version 2024-11-05', async () => {
+  const { server, client, init } = await open({ probe: true });
+  assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+  assert.equal(client.protocolVersion, '2024-11-05');
+  assert.equal(client.sessionId, 'sess-0123456789abcdef');
+  const l = await client.listTools();
+  assert.deepEqual(l.tools.map((t) => t.name), TOOLS);
+  const c = server.customers[0];
+  const r = await client.callTool('read_customer', { id: c.id });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.text, JSON.stringify(c));
+  assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE]);
+  assert.equal(headerOf(server.requests[0].headers, 'mcp-protocol-version'), undefined, 'initialize carries none');
+  for (const q of server.requests.slice(1)) assert.equal(headerOf(q.headers, 'mcp-protocol-version'), '2024-11-05', q.message.method);
+});
+
+// Rule 4: a server that refuses the header (the probe's -32022, which the specification answers with HTTP 400) is a
+// permanent failure, as any 4xx is. Here the server answers 2025-06-18 and then wants 2024-11-05, so the client's
+// notifications/initialized, which carries the negotiated 2025-06-18, is refused, and initialize fails (item 2).
+test('rule 4: a server that refuses the version header with 400 and -32022 is a permanent failure and leaves no session', async () => {
+  const { server, client, init } = await open({ version: '2025-06-18', requireVersion: '2024-11-05' });
+  const notified = server.requests.filter((q) => q.message.method === 'notifications/initialized');
+  assert.equal(notified.length, 1);
+  assert.equal(headerOf(notified[0].headers, 'mcp-protocol-version'), '2025-06-18', 'the negotiated version is what the server refused');
+  assert.deepEqual([init.ok, init.permanent], [false, true]);
+  assert.equal(client.sessionId, null);
+  assert.equal(client.protocolVersion, null);
+});
+
+// Rule 6: every request, initialize included, carries accept-encoding: identity, and nothing else under that name in
+// any letter case. All the values under the name are collected, so that a leftover Accept-Encoding: gzip beside an
+// accept-encoding: identity cannot pass.
+const valuesOf = (headers, name) => Object.keys(headers).filter((k) => k.toLowerCase() === name).map((k) => headers[k]);
+
+for (const sse of [false, true]) {
+  test(`rule 6: every request, initialize included, carries accept-encoding identity and no other (${sse ? 'SSE' : 'JSON'} answers)`, async () => {
+    const { server, client, init } = await open({ sse });
+    assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+    await client.listTools();
+    await client.callTool('find_customers', { query: 'a' });
+    assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE]);
+    for (const q of server.requests) assert.deepEqual(valuesOf(q.headers, 'accept-encoding'), ['identity'], q.message.method);
+  });
+}
+
+test('rule 6: an initialize that is refused still carried accept-encoding identity', async () => {
+  const server = recordedMcp({ status: 403 });
+  const client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport });
+  await client.initialize();
+  assert.equal(server.requests.length, 1);
+  assert.deepEqual(valuesOf(server.requests[0].headers, 'accept-encoding'), ['identity']);
+});
+
+for (const name of ['Accept-Encoding', 'accept-encoding', 'ACCEPT-ENCODING', 'aCcEpT-eNcOdInG']) {
+  test(`rule 6: a configuration header ${name} is replaced by accept-encoding identity on every request`, async () => {
+    for (const value of ['gzip', 'gzip, deflate, br']) {
+      const server = recordedMcp();
+      const client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers: { [name]: value } });
+      const init = await client.initialize();
+      assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+      await client.listTools();
+      await client.callTool('find_customers', { query: 'a' });
+      assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE]);
+      for (const q of server.requests) {
+        assert.deepEqual(valuesOf(q.headers, 'accept-encoding'), ['identity'], `${name}: ${value}, ${q.message.method}`);
+      }
+    }
+  });
+}
+
+// Rule 6: the body is read as it arrives and never decoded by its content-encoding. The probed server labels its answers
+// gzip and does not compress them. The fixture's label is checked first, so that a green read is a read of a gzip label.
+for (const [why, opts] of [
+  ['a plain JSON body', { gzipLabel: true }],
+  ['a plain SSE body', { gzipLabel: true, sse: true }],
+  ['the probe server as probed (2024-11-05, SSE)', { gzipLabel: true, probe: true }],
+]) {
+  test(`rule 6: answers labelled content-encoding gzip with ${why} are read as sent`, async () => {
+    const raw = await send(recordedMcp(opts), INITIALIZE);
+    assert.equal(headerOf(raw.headers, 'content-encoding'), 'gzip', 'the fixture labels its answer gzip');
+    assert.match(raw.body, /"protocolVersion"/, 'the body is plain text');
+    const { server, client, init } = await open(opts);
+    assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+    const l = await client.listTools();
+    assert.deepEqual(l.tools.map((t) => t.name), TOOLS);
+    const c = server.customers[0];
+    const r = await client.callTool('read_customer', { id: c.id });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.text, JSON.stringify(c));
+    assert.equal(r.digest, digestOf(JSON.stringify(c)));
   });
 }
