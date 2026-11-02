@@ -288,3 +288,28 @@ for (const [why, opts] of [
     assert.equal(server.requests.length, sent);
   });
 }
+
+// The review of 2026-11-02, item 3: a tools/call result whose content is not an array is no answer. The server answered,
+// but whether the tool ran is not known, so the attempt is spent as for a transport error, whatever isError says.
+for (const result of [
+  {},
+  { isError: true },
+  { content: null },
+  { content: null, isError: true },
+  { content: { type: 'text', text: 'x' } },
+  { content: { type: 'text', text: 'x' }, isError: false },
+]) {
+  test(`item 3: a tools/call result of ${JSON.stringify(result)} is a failure with no answer`, async () => {
+    const { server, client } = await open({ callResult: result });
+    const r = await client.callTool('find_customers', { query: 'a' });
+    assert.deepEqual([r.ok, r.answered, r.permanent], [false, false, false]);
+    assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1);
+  });
+}
+
+test('item 3: a tools/call result with a content of [] is a result with empty text', async () => {
+  const { client } = await open({ callResult: { content: [] } });
+  const r = await client.callTool('find_customers', { query: 'a' });
+  assert.equal(r.ok, true);
+  assert.equal(r.text, '');
+});

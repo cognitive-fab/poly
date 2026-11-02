@@ -26,7 +26,8 @@ const found = (customers) => ({ ...text(JSON.stringify({ customers })), structur
  * opts.dropAfterSend: throw after the request is recorded, as a connection lost once the request is sent;
  * opts.sse: answer requests as a single-event text/event-stream;
  * opts.initializedStatus: answer only notifications/initialized with this status (item 2 of the review of 2026-11-02);
- * opts.initializedDrop: throw on notifications/initialized after it is recorded, as a request that gets no answer.
+ * opts.initializedDrop: throw on notifications/initialized after it is recorded, as a request that gets no answer;
+ * opts.callResult: answer tools/call with this JSON-RPC result, whatever the tool (item 3 of the review of 2026-11-02).
  */
 export function recordedMcp(opts = {}) {
   const customers = CUSTOMERS.map((c) => ({ ...c }));
@@ -80,6 +81,7 @@ export function recordedMcp(opts = {}) {
         if (r.headers['mcp-session-id'] !== sessionId) return { status: 400, headers: {}, body: '' };
         if (message.method === 'notifications/initialized') return { status: 202, headers: {}, body: '' };
         if (message.method === 'tools/list') return reply(message.id, { tools: LISTED });
+        if (message.method === 'tools/call' && opts.callResult) return reply(message.id, opts.callResult);
         if (message.method === 'tools/call') {
           const result = call(message.params.name, message.params.arguments ?? {});
           return result
