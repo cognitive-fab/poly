@@ -89,6 +89,9 @@ function refuseCredentials(c: McpConfig): void {
   for (const name of Object.keys(c.headers ?? {})) {
     if (CREDENTIAL_NAME.test(name)) throw new Error(`mcp: the configuration carries a ${name} header; the gateway injects the key, and poly sends none`);
   }
+  // A parser drops spaces and controls at the ends and removes tabs and line ends inside, so the URL it reads would not be
+  // the one checked below (third review of 2026-11-02: a leading space hid an encoded AKIA in the host).
+  if (/[\u0000-\u0020\u007f]/.test(c.url)) throw new Error('mcp: the access point URL holds whitespace or a control character');
   let u: URL;
   try { u = new URL(c.url); } catch { throw new Error('mcp: the access point is not a URL'); }
   // A credential is refused by its name first, then a user or password, then the scheme (review of 2026-11-02, item 1).
