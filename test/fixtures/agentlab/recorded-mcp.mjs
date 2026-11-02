@@ -24,7 +24,9 @@ const found = (customers) => ({ ...text(JSON.stringify({ customers })), structur
  * opts.emptyCall: answer tools/call with a JSON-RPC message that has neither result nor error;
  * opts.version: the protocol version initialize answers with;
  * opts.dropAfterSend: throw after the request is recorded, as a connection lost once the request is sent;
- * opts.sse: answer requests as a single-event text/event-stream.
+ * opts.sse: answer requests as a single-event text/event-stream;
+ * opts.initializedStatus: answer only notifications/initialized with this status (item 2 of the review of 2026-11-02);
+ * opts.initializedDrop: throw on notifications/initialized after it is recorded, as a request that gets no answer.
  */
 export function recordedMcp(opts = {}) {
   const customers = CUSTOMERS.map((c) => ({ ...c }));
@@ -65,6 +67,8 @@ export function recordedMcp(opts = {}) {
         const message = JSON.parse(r.body);
         requests.push({ headers: r.headers, message });
         if (opts.dropAfterSend && message.method === 'tools/call') throw new Error('socket hang up');
+        if (opts.initializedDrop && message.method === 'notifications/initialized') throw new Error('socket hang up');
+        if (opts.initializedStatus && message.method === 'notifications/initialized') return { status: opts.initializedStatus, headers: {}, body: '' };
         if (opts.emptyCall && message.method === 'tools/call') return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: message.id }) };
         if (opts.callStatus && message.method === 'tools/call') return { status: opts.callStatus, headers: {}, body: '' };
         if (opts.status) return { status: opts.status, headers: {}, body: '' };

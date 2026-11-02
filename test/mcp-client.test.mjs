@@ -264,3 +264,27 @@ test('item 1: the existing checks keep their messages, and a credential name is 
 test('item 1: a credential-named query parameter is refused by its name before a user or password in the same URL', () => {
   assert.throws(made({ url: 'https://u:p@gateway.example.test/mcp?api_key=z' }), /api_key parameter/);
 });
+
+// The review of 2026-11-02, item 2: sessionId is set only by an initialize that succeeds. When notifications/initialized
+// is refused or gets no answer, initialize fails, sessionId is null, and later calls send nothing. The notification itself
+// still carries the session id of the initialize answer.
+for (const [why, opts] of [
+  ['refused with 400', { initializedStatus: 400 }],
+  ['refused with 403', { initializedStatus: 403 }],
+  ['refused with 404', { initializedStatus: 404 }],
+  ['answered with 502', { initializedStatus: 502 }],
+  ['given no answer (a thrown transport error)', { initializedDrop: true }],
+]) {
+  test(`item 2: a notifications/initialized ${why} leaves no session, and later calls send nothing`, async () => {
+    const { server, client, init } = await open(opts);
+    const notified = server.requests.filter((r) => r.message.method === 'notifications/initialized');
+    assert.equal(notified.length, 1);
+    assert.equal(notified[0].headers['mcp-session-id'], 'sess-0123456789abcdef');
+    assert.equal(init.ok, false);
+    assert.equal(client.sessionId, null);
+    const sent = server.requests.length;
+    assert.equal((await client.listTools()).ok, false);
+    assert.equal((await client.callTool('find_customers', { query: 'a' })).ok, false);
+    assert.equal(server.requests.length, sent);
+  });
+}
