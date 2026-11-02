@@ -15,6 +15,7 @@ export const MCP_PROTOCOL_VERSION = '2025-11-25';
  * the Lab's Hello server answered 2024-11-05 through the owner's gateway (live probe, 2026-11-02, PROVENANCE.md).
  */
 export const MCP_SUPPORTED_VERSIONS: readonly string[] = Object.freeze(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
+const OWN_HEADERS = new Set(['content-type', 'accept', 'accept-encoding', 'mcp-session-id', 'mcp-protocol-version']);
 
 export interface McpConfig {
   /** The access point of the gateway surface (https). */
@@ -135,10 +136,11 @@ export function mcpClient(c: McpConfig): McpClient {
   let negotiated: string | null = null;
   let next = 1;
 
-  // Every request asks for the body as it is (rule 6): the Lab's server labels plain answers gzip (second live probe,
-  // 2026-11-02), and a configured accept-encoding of any letter case is dropped so this one is the only one sent.
+  // The headers the client sets are its own (rule 7): a configured one of the same name, in any letter case, is dropped, so
+  // initialize carries no version and a later request only the negotiated one (third review of 2026-11-02). Every request
+  // asks for the body as it is (rule 6): the Lab's server labels plain answers gzip (second live probe, 2026-11-02).
   const base = (): Record<string, string> => ({
-    ...Object.fromEntries(Object.entries(cfg.headers).filter(([k]) => k.toLowerCase() !== 'accept-encoding')),
+    ...Object.fromEntries(Object.entries(cfg.headers).filter(([k]) => !OWN_HEADERS.has(k.toLowerCase()))),
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
     'accept-encoding': 'identity',
