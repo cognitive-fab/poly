@@ -173,3 +173,94 @@ test('a connection dropped after the request is sent is a failure with no answer
   assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1);
   assert.equal(server.customers[0].email, 'ada.alder@example.test');
 });
+
+// The review of 2026-11-02, item 1 (PT10g, PL6825): a header name is not evidence. Every header value and every decoded
+// part of the URL is checked, whatever its name. Each value below triggers one rule only, because the spec does not order
+// the token-shape, scheme-shape and malformed checks against each other. Names are innocent (x-trace, q, trace): a
+// credential-named header or parameter is refused by its name first.
+const made = (extra) => () => mcpClient({ url: URL, tools: TOOLS, transport: recordedMcp().transport, ...extra });
+const tokenShaped = (s) => TOKEN_SHAPES.some((re) => new RegExp(re.source, re.flags.replace(/[gy]/g, '')).test(s));
+const BASE = 'https://gateway.example.test/mcp';
+
+// The IANA registry's schemes and the four in common use outside it, in mixed case and after leading whitespace.
+for (const value of [
+  'Bearer abc', 'bearer abc', 'BASIC dXNlcjpwYXNz', 'Concealed x', 'digest username="u"', 'DPoP x', 'gnap x', 'HOBA x',
+  'Mutual x', 'negotiate YII', 'OAuth x', 'privatetoken token=x', 'SCRAM-SHA-1 x', 'scram-sha-256 x', 'vapid t=x',
+  'ApiKey x', 'aws4-hmac-sha256 x', 'NTLM x', 'token x', '  Bearer abc', '\tBasic x', 'Bearer\tabc',
+]) {
+  test(`item 1: a header value that starts with an authentication scheme is refused under an innocent name: ${JSON.stringify(value)}`, () => {
+    assert.throws(made({ headers: { 'x-trace': value } }), /authentication scheme/);
+  });
+}
+
+for (const value of ['Bearer', 'bearer', 'Bearerish x', 'abc', 'TokenRing 2']) {
+  test(`item 1: a scheme name alone or inside a longer word is accepted: ${JSON.stringify(value)}`, () => {
+    assert.doesNotThrow(made({ headers: { 'x-trace': value } }));
+  });
+}
+
+test('item 1: a token shape under an innocent header name is refused', () => {
+  for (const value of ['ghp_' + 'a'.repeat(32), 'AKIA' + 'A'.repeat(16), 'xoxb-1234567890-abc']) {
+    assert.throws(made({ headers: { 'x-trace': value } }), /token-shaped/, value);
+  }
+});
+
+// Each part of the URL is checked decoded: written plainly, then percent-encoded so that the raw URL matches no shape.
+const SK = 'sk_live_abcdefghijklmnop';
+const SK_ENCODED = 'sk%5Flive%5Fabcdefghijklmnop';
+for (const [part, plain, encoded] of [
+  ['the host', `https://${SK}.example.test/mcp`, `https://%73k_live_abcdefghijklmnop.example.test/mcp`],
+  ['a path segment', `${BASE}/${SK}`, `${BASE}/${SK_ENCODED}`],
+  ['a query name', `${BASE}?${SK}=1`, `${BASE}?${SK_ENCODED}=1`],
+  ['a query value', `${BASE}?q=${SK}`, `${BASE}?q=${SK_ENCODED}`],
+  ['the fragment', `${BASE}#${SK}`, `${BASE}#${SK_ENCODED}`],
+]) {
+  test(`item 1: a token shape in ${part} of the URL is refused, written plainly`, () => {
+    assert.throws(made({ url: plain }), /token-shaped/);
+  });
+  test(`item 1: a token shape in ${part} of the URL is refused when percent-encoding hides it`, () => {
+    assert.equal(tokenShaped(encoded), false, 'the raw URL must hide the token, or this test proves nothing about decoding');
+    assert.throws(made({ url: encoded }), /token-shaped/);
+  });
+}
+
+for (const [part, url] of [
+  ['a path segment', `${BASE}/Bearer%20abc`],
+  ['a query name', `${BASE}?Basic%20x=1`],
+  ['a query value', `${BASE}?trace=Bearer%20abc`],
+  ['the fragment', `${BASE}#Token%20x`],
+]) {
+  test(`item 1: an authentication scheme in ${part} of the URL, decoded, is refused`, () => {
+    assert.throws(made({ url }), /authentication scheme/);
+  });
+}
+
+for (const [part, url] of [
+  ['a path segment', `${BASE}/%zz`],
+  ['a query name', `${BASE}?%zz=1`],
+  ['a query value', `${BASE}?q=%4`],
+  ['the fragment', `${BASE}#%`],
+]) {
+  test(`item 1: a malformed percent-encoding in ${part} of the URL is refused`, () => {
+    assert.throws(made({ url }), /malformed/);
+  });
+}
+
+test('item 1: innocent values, plain and percent-encoded, are accepted', () => {
+  assert.doesNotThrow(made({ headers: { 'x-trace': 'abc' } }));
+  assert.doesNotThrow(made({ url: `${BASE}/a%20b?q=hello%20world&trace=abc#top` }));
+});
+
+test('item 1: the existing checks keep their messages, and a credential name is refused before the new shapes', () => {
+  assert.throws(made({ headers: { Authorization: 'Bearer abc' } }), /Authorization header/);
+  assert.throws(made({ headers: { 'x-api-key': 'Bearer abc' } }), /x-api-key header/);
+  assert.throws(made({ url: `${BASE}?api_key=Bearer%20x` }), /api_key parameter/);
+  assert.throws(made({ url: 'http://u:p@gateway.example.test/mcp' }), /user or password/);
+  assert.throws(made({ url: 'http://gateway.example.test/mcp' }), /https/);
+});
+
+// The spec states the order "by its name first, then a user or password in the URL". Measured before the fix: a URL with
+// both is refused for its user or password, so this states the spec's order, not today's.
+test('item 1: a credential-named query parameter is refused by its name before a user or password in the same URL', () => {
+  assert.throws(made({ url: 'https://u:p@gateway.example.test/mcp?api_key=z' }), /api_key parameter/);
+});
