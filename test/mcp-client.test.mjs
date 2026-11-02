@@ -659,3 +659,133 @@ test('item 1: the characters just outside the set are accepted, and the plain co
   assert.equal(client.url, URL);
   assert.ok(server.requests.every((r) => r.url === URL));
 });
+
+// Version negotiation, rule 7: the headers the client sets are its own (content-type, accept, accept-encoding,
+// mcp-session-id, mcp-protocol-version). A configured header with one of these names, in any letter case, is never sent,
+// and the client's value is the only one of that name on a request. The third review of 2026-11-02 found a configured
+// mcp-protocol-version sent on initialize. The server answers 2024-11-05, so the negotiated version differs from the
+// 2025-11-25 initialize asks for. The client's own values are read from a baseline run with no such header configured,
+// whose own shape is asserted first, so that "equal to the baseline" never passes over a baseline that sends nothing.
+const OWN = ['content-type', 'accept', 'accept-encoding', 'mcp-session-id', 'mcp-protocol-version'];
+const NEGOTIATED = '2024-11-05';
+const SESSION = 'sess-0123456789abcdef';
+// The configured values are markers, so a value that leaks under another name, or merges into the client's own, is seen.
+// For mcp-protocol-version they are a spoken version that is not negotiated, the version initialize asks for, and the
+// negotiated version itself: initialize must still carry none, and a later request one value and not two equal ones.
+const CONFIGURED = {
+  'content-type': ['text/x-configured'],
+  accept: ['text/x-configured'],
+  'accept-encoding': ['x-configured'],
+  'mcp-session-id': ['sess-configured-0000'],
+  'mcp-protocol-version': ['2025-06-18', '2025-11-25', NEGOTIATED],
+};
+const casesOf = (name) => {
+  const title = name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('-');
+  const alternating = [...name].map((c, i) => (i % 2 ? c.toUpperCase() : c)).join('');
+  return [...new Set([name, name.toUpperCase(), title, title.replace(/^Mcp-/, 'MCP-'), alternating])];
+};
+
+// One client, made with these headers, runs initialize, tools/list and tools/call against a server answering 2024-11-05.
+// The client is made under doesNotThrow, so a refusal when it is made is reported as that and not as a missing header.
+const runWith = async (headers, opts = {}) => {
+  const server = recordedMcp({ version: NEGOTIATED, ...opts });
+  let client;
+  assert.doesNotThrow(() => {
+    client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers });
+  }, `a configuration with ${JSON.stringify(headers)} is accepted when the client is made`);
+  const init = await client.initialize();
+  await client.listTools();
+  await client.callTool('find_customers', { query: 'a' });
+  return { server, client, init };
+};
+const ownOf = (q) => Object.fromEntries(OWN.map((n) => [n, valuesOf(q.headers, n)]));
+
+test('rule 7: the baseline, with no own header configured, carries one of each own header with the client\'s value', async () => {
+  const { server, init } = await runWith({ 'x-trace': 'abc' });
+  assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+  assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE]);
+  for (const q of server.requests) {
+    const own = ownOf(q);
+    const m = q.message.method;
+    assert.equal(own['content-type'].length, 1, `${m}: content-type`);
+    assert.equal(own.accept.length, 1, `${m}: accept`);
+    assert.match(own.accept[0], /application\/json/, `${m}: accept`);
+    assert.match(own.accept[0], /text\/event-stream/, `${m}: accept`);
+    assert.deepEqual(own['accept-encoding'], ['identity'], `${m}: accept-encoding`);
+    if (m === 'initialize') {
+      assert.deepEqual(own['mcp-protocol-version'], [], 'initialize carries no mcp-protocol-version');
+    } else {
+      assert.deepEqual(own['mcp-session-id'], [SESSION], `${m}: mcp-session-id`);
+      assert.deepEqual(own['mcp-protocol-version'], [NEGOTIATED], `${m}: mcp-protocol-version`);
+    }
+    assert.deepEqual(valuesOf(q.headers, 'x-trace'), ['abc'], `${m}: x-trace`);
+  }
+});
+
+// The initialize request is checked before init.ok: a forged mcp-session-id beside the client's own can make the server
+// answer 400, and checking init.ok first would hide the header fault behind "initialize failed".
+const assertOwnOnly = async (headers, markers) => {
+  const label = JSON.stringify(headers);
+  const base = await runWith({ 'x-trace': 'abc' });
+  const { server, init } = await runWith({ ...headers, 'x-trace': 'abc' });
+  assert.ok(server.requests.length > 0, `${label}: initialize was sent`);
+  const first = server.requests[0];
+  assert.equal(first.message.method, 'initialize');
+  assert.deepEqual(valuesOf(first.headers, 'mcp-protocol-version'), [], `${label}: initialize carries no mcp-protocol-version`);
+  assert.deepEqual(ownOf(first), ownOf(base.server.requests[0]), `${label}: initialize carries the client's own headers only`);
+  for (const q of server.requests) {
+    for (const [k, v] of Object.entries(q.headers)) {
+      for (const marker of markers) assert.ok(!String(v).includes(marker), `${label}: ${q.message.method} sent ${k}: ${v}`);
+    }
+  }
+  assert.equal(init.ok, true, `${label}: initialize: ${JSON.stringify(init)}`);
+  assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE], label);
+  server.requests.forEach((q, i) => {
+    const m = q.message.method;
+    for (const n of OWN) {
+      const values = valuesOf(q.headers, n);
+      const expected = valuesOf(base.server.requests[i].headers, n);
+      assert.deepEqual(values, expected, `${label}: ${m} carries ${n} ${JSON.stringify(values)}, the client's own is ${JSON.stringify(expected)}`);
+    }
+    if (m !== 'initialize') assert.deepEqual(valuesOf(q.headers, 'mcp-protocol-version'), [NEGOTIATED], `${label}: ${m} carries only the negotiated version`);
+    assert.deepEqual(valuesOf(q.headers, 'x-trace'), ['abc'], `${label}: ${m} still carries x-trace`);
+  });
+};
+
+for (const name of OWN) {
+  for (const variant of casesOf(name)) {
+    test(`rule 7: a configured ${variant} header is never sent, and every request carries the client's own ${name} only`, async () => {
+      for (const value of CONFIGURED[name]) {
+        // The negotiated version is the client's own value on later requests, so it cannot serve as a marker there.
+        await assertOwnOnly({ [variant]: value }, value === NEGOTIATED ? [] : [value]);
+      }
+    });
+  }
+}
+
+test('rule 7: the five own headers configured at once, each under two letter cases, are never sent', async () => {
+  const headers = {};
+  for (const name of OWN) {
+    const value = CONFIGURED[name][0];
+    headers[name] = value;
+    headers[name.toUpperCase()] = value;
+  }
+  await assertOwnOnly(headers, [...new Set(OWN.map((n) => CONFIGURED[n][0]))]);
+});
+
+// The probed server of 2026-11-02 refuses a later request whose version is not 2024-11-05. A configured
+// MCP-Protocol-Version of 2025-06-18 must not reach it: initialize carries none, and every later request only the
+// negotiated version. The fixture reads the first header of the name it finds, so the counts here decide, not its answer.
+test('rule 7: against the probe server, a configured MCP-Protocol-Version 2025-06-18 is never sent and the client works', async () => {
+  const { server, client, init } = await runWith({ 'MCP-Protocol-Version': '2025-06-18', 'x-trace': 'abc' }, { probe: true });
+  assert.ok(server.requests.length > 0);
+  assert.deepEqual(valuesOf(server.requests[0].headers, 'mcp-protocol-version'), [], 'initialize carries none');
+  for (const q of server.requests.slice(1)) {
+    assert.deepEqual(valuesOf(q.headers, 'mcp-protocol-version'), [NEGOTIATED], q.message.method);
+  }
+  assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+  assert.equal(client.protocolVersion, NEGOTIATED);
+  assert.deepEqual(server.requests.map((q) => q.message.method), ['initialize', ...AFTER_INITIALIZE]);
+  const r = await client.callTool('read_customer', { id: server.customers[0].id });
+  assert.equal(r.ok, true, JSON.stringify(r));
+});
