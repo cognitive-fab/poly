@@ -66,10 +66,17 @@ const CREDENTIAL_NAME = /auth|token|secret|passw|api[-_]?key|cookie|credential|b
 // the HTTP credential PL6825 reads, since a configuration value has a start and a file's text does not (PROVENANCE.md).
 const AUTH_SCHEME = /^\s*(?:Basic|Bearer|Concealed|Digest|DPoP|GNAP|HOBA|Mutual|Negotiate|OAuth|PrivateToken|SCRAM-SHA-1|SCRAM-SHA-256|vapid|ApiKey|AWS4-HMAC-SHA256|NTLM|Token)\s+\S/i;
 
+// C0, DEL and C1 (the owner's ruling 4, 2026-11-02).
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
 /** The parts of the URL as a reader of it decodes them; a malformed escape is refused, since nobody can say what it holds. */
 function decodedParts(u: URL, raw: string): string[] {
   const decode = (raw: string, where: string): string => {
-    try { return decodeURIComponent(raw); } catch { throw new Error(`mcp: the access point URL has a malformed percent-encoding in ${where}`); }
+    let text: string;
+    try { text = decodeURIComponent(raw); } catch { throw new Error(`mcp: the access point URL has a malformed percent-encoding in ${where}`); }
+    // An encoded control (%00, %0a, %C2%80) is refused as a written one is (the owner's ruling 4, 2026-11-02); %20 is not one.
+    if (CONTROL.test(text)) throw new Error(`mcp: the access point URL holds a control character in ${where}`);
+    return text;
   };
   // The host as written, not u.hostname: the parser lowercases it, and the token shapes are case-sensitive (AKIA). A second
   // review of 2026-11-02 found %41KIA... in the host accepted that way.
@@ -94,7 +101,7 @@ function refuseCredentials(c: McpConfig): void {
   }
   // A parser drops spaces and controls at the ends and removes tabs and line ends inside, so the URL it reads would not be
   // the one checked below (third review of 2026-11-02: a leading space hid an encoded AKIA in the host).
-  if (/[\u0000-\u0020\u007f]/.test(c.url)) throw new Error('mcp: the access point URL holds whitespace or a control character');
+  if (/[\u0000-\u0020\u007f-\u009f]/.test(c.url)) throw new Error('mcp: the access point URL holds whitespace or a control character');
   let u: URL;
   try { u = new URL(c.url); } catch { throw new Error('mcp: the access point is not a URL'); }
   // A credential is refused by its name first, then a user or password, then the scheme (review of 2026-11-02, item 1).
