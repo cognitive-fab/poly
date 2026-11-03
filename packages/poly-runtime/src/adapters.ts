@@ -79,6 +79,12 @@ export type SendResult = { ok: true; providerId: string } | { ok: false; permane
 
 /** An HTTP exchange, given to an adapter so that a test replays recorded traffic and only poly-io opens a socket. */
 export interface HttpRequest { method: string; url: string; headers: Record<string, string>; body: string }
+/**
+ * A response's header names are lower-case, whatever letter case the server sent (RFC 9110 5.1: they are
+ * case-insensitive). The adapters read them by the lower-case name (mcp.ts: content-type, mcp-session-id), so a
+ * transport that kept the server's case would lose the session id. poly-io's https transport gives Node's names, which
+ * are lower-case; a host's own transport must do the same (review of 2026-11-03).
+ */
 export interface HttpResponse { status: number; headers: Record<string, string>; body: string }
 export interface HttpTransport { request(r: HttpRequest): Promise<HttpResponse> }
 
