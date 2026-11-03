@@ -918,3 +918,145 @@ test('rule 7: against the probe server, a configured MCP-Protocol-Version 2025-0
   const r = await client.callTool('read_customer', { id: server.customers[0].id });
   assert.equal(r.ok, true, JSON.stringify(r));
 });
+
+// The owner's ruling 4 of 2026-11-02: a decoded part of the URL that holds a control character (U+0000 to U+001F,
+// U+007F, U+0080 to U+009F) is refused with a message that says "control character". The URL as written holds no raw
+// control, which each case asserts first, so the refusal is the decoded check and not the whitespace check of item 1. Each
+// part has a control, the same URL with the encoding removed, which is accepted.
+const CONTROL = /control character/;
+const RAW_CONTROL = /[\u0000- \u007f-\u009f]/;
+const PARTS = [
+  ['a path segment', (enc) => `${BASE}/a${enc}b`],
+  ['a query name', (enc) => `${BASE}?a${enc}b=1`],
+  ['a query value', (enc) => `${BASE}?q=a${enc}b`],
+  ['the fragment', (enc) => `${BASE}#a${enc}b`],
+];
+for (const [part, at] of PARTS) {
+  test(`ruling 4: the control for ${part}, the same URL without the encoded character, is accepted`, () => {
+    assert.doesNotThrow(made({ url: at('') }));
+  });
+  for (const enc of ['%00', '%0a', '%0A', '%09', '%0d', '%1F', '%7F', '%7f', '%C2%80', '%C2%85', '%C2%9F', '%c2%9f']) {
+    test(`ruling 4: ${enc} in ${part} of the URL is refused as a control character`, () => {
+      const url = at(enc);
+      assert.equal(RAW_CONTROL.test(url), false, 'the URL as written holds no raw control character');
+      assert.throws(made({ url }), CONTROL);
+    });
+  }
+}
+
+// "U+0000 to U+001F, U+007F, and U+0080 to U+009F": every one, encoded, in a path segment and in a query value. The
+// misses are collected so that one red run names every character the client accepts or refuses under another message.
+test('ruling 4: every C0 control, U+007F and every C1 control, percent-encoded, is refused in a path segment and a query value', () => {
+  const codes = [...Array.from({ length: 0x20 }, (_, i) => i), 0x7f, ...Array.from({ length: 0x20 }, (_, i) => 0x80 + i)];
+  assert.equal(codes.length, 65);
+  const misses = [];
+  for (const code of codes) {
+    const enc = encodeURIComponent(String.fromCharCode(code));
+    for (const [where, url] of [['path', `${BASE}/a${enc}b`], ['query', `${BASE}?q=a${enc}b`]]) {
+      assert.equal(RAW_CONTROL.test(url), false, `${where} ${HEX(String.fromCharCode(code))}: the URL as written holds no raw control`);
+      try {
+        made({ url })();
+        misses.push(`${where} ${HEX(String.fromCharCode(code))}: accepted`);
+      } catch (e) {
+        if (!CONTROL.test(String(e?.message))) misses.push(`${where} ${HEX(String.fromCharCode(code))}: ${String(e?.message)}`);
+      }
+    }
+  }
+  assert.deepEqual(misses, []);
+});
+
+// A decoded space, %20 or + in a query, is not a control character and is still accepted. So are the characters just
+// outside the set, decoded: U+0021 and U+007E.
+for (const [why, url] of [
+  ['%20 in a path segment', `${BASE}/a%20b`],
+  ['%20 in a query name', `${BASE}?a%20b=1`],
+  ['%20 in a query value', `${BASE}?q=a%20b`],
+  ['%20 in the fragment', `${BASE}#a%20b`],
+  ['+ in a query name', `${BASE}?a+b=1`],
+  ['+ in a query value', `${BASE}?q=a+b`],
+  ['%21 in a path segment', `${BASE}/a%21b`],
+  ['%7E in a query value', `${BASE}?q=a%7Eb`],
+]) {
+  test(`ruling 4: ${why} is accepted`, () => {
+    assert.doesNotThrow(made({ url }));
+  });
+}
+
+// U+00A0 and U+00E9, decoded, are outside the set. The spec says nothing else about them, so the test asserts only that
+// neither is refused as a control character. U+00A0 is whitespace to a JavaScript \s, which is the reading this rules out.
+for (const enc of ['%C2%A0', '%C3%A9']) {
+  test(`ruling 4: ${enc} in a path segment and a query value is not refused as a control character`, () => {
+    for (const url of [`${BASE}/a${enc}b`, `${BASE}?q=a${enc}b`]) {
+      let message = null;
+      try {
+        made({ url })();
+      } catch (e) {
+        message = String(e?.message);
+      }
+      assert.ok(message === null || !CONTROL.test(message), `refused as: ${message}`);
+    }
+  });
+}
+
+// In the host the URL parser refuses an encoded control first, and the message says the access point "is not a URL";
+// measured on Node 22 for these five. The parser's refusal is asserted as the premise, so a Node that parses one of them
+// shows here and not as a fault of the client.
+for (const enc of ['%00', '%09', '%0a', '%7F', '%C2%80']) {
+  test(`ruling 4: ${enc} in the host is refused as not a URL`, () => {
+    const url = `https://a${enc}b.example.test/mcp`;
+    assert.equal(RAW_CONTROL.test(url), false, 'the URL as written holds no raw control character');
+    assert.throws(() => new globalThis.URL(url), undefined, 'premise: the URL parser refuses this host');
+    assert.throws(made({ url }), /is not a URL/);
+  });
+}
+
+// In the URL as written, the C1 controls (U+0080 to U+009F) are refused like the C0 ones, with the message that says
+// "whitespace or a control character". The titles name each character by its code point, never raw.
+for (const ch of ['\u0080', '\u0085', '\u009f']) {
+  for (const [where, url, control] of [
+    ['inside the path', `${BASE}/a${ch}b`, `${BASE}/ab`],
+    ['inside the query', `${BASE}?q=a${ch}b`, `${BASE}?q=ab`],
+    ['inside the fragment', `${BASE}#a${ch}b`, `${BASE}#ab`],
+    ['at the start', `${ch}${URL}`, URL],
+    ['at the end', `${URL}${ch}`, URL],
+  ]) {
+    test(`ruling 4: a raw ${HEX(ch)} ${where} of the URL as written is refused`, () => {
+      assert.doesNotThrow(made({ url: control }), 'the control, without the character, is accepted');
+      assert.throws(made({ url }), SPACED);
+    });
+  }
+}
+
+test('ruling 4: every raw C1 control, U+0080 to U+009F, is refused at the start, inside the path and at the end', () => {
+  const set = Array.from({ length: 0x20 }, (_, i) => String.fromCharCode(0x80 + i));
+  assert.equal(set.length, 32);
+  const misses = [];
+  for (const ch of set) {
+    for (const [where, url] of [['start', `${ch}${URL}`], ['path', `${BASE}/a${ch}b`], ['end', `${URL}${ch}`]]) {
+      try {
+        made({ url })();
+        misses.push(`${where} ${HEX(ch)}: accepted`);
+      } catch (e) {
+        if (!SPACED.test(String(e?.message))) misses.push(`${where} ${HEX(ch)}: ${String(e?.message)}`);
+      }
+    }
+  }
+  assert.deepEqual(misses, []);
+});
+
+// U+00A0 and U+00E9 are outside the set. The spec says nothing else about them written raw, so the test asserts only
+// that neither is refused as whitespace or a control character; accepted, or refused for another reason, both pass.
+// U+00A0 is whitespace to a JavaScript \s, which is the reading this rules out.
+for (const ch of [' ', 'é']) {
+  for (const [where, url] of [['inside the path', `${BASE}/a${ch}b`], ['inside the query', `${BASE}?q=a${ch}b`], ['inside the fragment', `${BASE}#a${ch}b`], ['at the end', `${URL}${ch}`]]) {
+    test(`ruling 4: a raw ${HEX(ch)} ${where} is not refused as whitespace or a control character`, () => {
+      let message = null;
+      try {
+        made({ url })();
+      } catch (e) {
+        message = String(e?.message);
+      }
+      assert.ok(message === null || !SPACED.test(message), `refused as: ${message}`);
+    });
+  }
+}
