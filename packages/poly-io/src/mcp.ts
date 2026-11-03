@@ -224,7 +224,9 @@ export function mcpClient(c: McpConfig): McpClient {
       if (s.kind === 'fault') return { ok: false, permanent: s.permanent, answered: s.answered, error: s.error, status: s.status };
       if (s.kind !== 'answer') return { ok: false, permanent: true, answered: true, error: 'the reply is not an answer' };
       if (s.rpc.error) return { ok: false, permanent: true, answered: true, error: protocolFault(s.rpc) };
-      if (!s.rpc.result || typeof s.rpc.result !== 'object') return { ok: false, permanent: true, answered: true, error: 'the reply holds neither a result nor an error' };
+      // The owner's ruling 3 (2026-11-02): with neither a result nor an error, the single attempt is spent and its outcome
+      // is not known, as for a transport error.
+      if (!s.rpc.result || typeof s.rpc.result !== 'object') return { ok: false, permanent: false, answered: false, status: s.status, error: 'no answer: the reply holds neither a result nor an error' };
       // Review of 2026-11-02, item 3: a result with no content array is no answer, whatever isError says. Whether the tool
       // ran is not known, so the attempt is spent as for a transport error. A content of [] is a result.
       if (!Array.isArray(s.rpc.result.content)) return { ok: false, permanent: false, answered: false, status: s.status, error: 'no answer: the result holds no content' };
