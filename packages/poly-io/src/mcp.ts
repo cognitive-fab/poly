@@ -103,7 +103,8 @@ function refuseCredentials(c: McpConfig): void {
   const headerValues = Object.values(c.headers ?? {});
   const values = [c.url, ...parts, ...headerValues, ...c.tools, ...Object.values(c.clientInfo ?? {})];
   if (values.some((v) => TOKEN_SHAPES.some((re) => re.test(v)))) throw new Error('mcp: the configuration holds a token-shaped value; poly holds no key');
-  if ([...headerValues, ...parts].some((v) => AUTH_SCHEME.test(v))) throw new Error('mcp: the configuration holds a value that starts with an authentication scheme; poly holds no key');
+  // clientInfo is sent in the initialize body, so it is checked as a header value is (the owner's ruling 1, 2026-11-02).
+  if ([...headerValues, ...parts, ...Object.values(c.clientInfo ?? {})].some((v) => AUTH_SCHEME.test(v))) throw new Error('mcp: the configuration holds a value that starts with an authentication scheme; poly holds no key');
 }
 
 export const digestOf = (text: string): string => `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`;
