@@ -101,13 +101,78 @@ test('a configuration that carries a credential is refused', () => {
   assert.doesNotThrow(make({ headers: { 'x-trace': 'abc' } }));
 });
 
-test('the token shapes are the ones PL6825 reads', () => {
-  const samples = ['sk_live_abcdefghijklmnop', 'xoxb-1234567890-abc', 'ya29.' + 'a'.repeat(24), 'ghp_' + 'a'.repeat(32), 'AKIA' + 'A'.repeat(16), 'eyJhbGciOiJ.eyJzdWIiOiJ.c2lnbmF0dXJl', '-----BEGIN PRIVATE KEY-----'];
+// The owner's ruling 2 of 2026-11-02: PL6825 reads eight shapes, the eighth an HTTP credential (Bearer or Basic and a
+// value, PT10g), and TOKEN_SHAPES carries the same eight. Each shape is read without its g or y flag, so lastIndex left by
+// one sample cannot change the next. The samples are the tests' own made-up strings.
+const shapeMatches = (s) => TOKEN_SHAPES.some((re) => new RegExp(re.source, re.flags.replace(/[gy]/g, '')).test(s));
+test('the token shapes are the ones PL6825 reads, eight with the HTTP credential', () => {
+  const samples = ['sk_live_abcdefghijklmnop', 'xoxb-1234567890-abc', 'ya29.' + 'a'.repeat(24), 'ghp_' + 'a'.repeat(32), 'AKIA' + 'A'.repeat(16), 'eyJhbGciOiJ.eyJzdWIiOiJ.c2lnbmF0dXJl', '-----BEGIN PRIVATE KEY-----', 'Bearer abc123def456'];
   for (const s of samples) {
     assert.ok(secretShapes(s).length > 0, s);
-    assert.ok(TOKEN_SHAPES.some((re) => re.test(s)), s);
+    assert.ok(shapeMatches(s), s);
   }
+  assert.equal(samples.length, 8);
   assert.equal(TOKEN_SHAPES.length, samples.length);
+});
+
+// Ruling 2: TOKEN_SHAPES carries the shape PL6825 reads, so the two agree on PT10g's found and not-found examples of the
+// HTTP credential. Only the HTTP credential is in play in these strings, so agreement here is agreement on that shape.
+for (const [label, s] of [
+  ['Bearer and a JSON Web Token header', 'Bearer eyJhbGciOiJIUzI1NiJ9'],
+  ['Basic and a 12-character value', 'Basic dXNlcjpwYXNz'],
+  ['bearer and a 12-character value', 'bearer abc123def456'],
+  ['BASIC with = padding', 'BASIC dXNlcjE6cGFzcw=='],
+  ['a tab after the scheme', 'Bearer\tabc123def456'],
+  ['the word Bearer alone', 'Bearer'],
+  ['the Bearer token', 'the Bearer token'],
+  ['Bearer authentication', 'Bearer authentication'],
+  ['a template', 'Authorization: Bearer ${token}'],
+  ['a value of 11 characters', 'Bearer abc123def45'],
+  ['the scheme inside a longer word', 'Bearerish abc123def456'],
+  ['another scheme', 'Digest abc123def456'],
+]) {
+  test(`ruling 2: TOKEN_SHAPES and PL6825 agree on the HTTP credential: ${label}`, () => {
+    assert.equal(shapeMatches(s), secretShapes(s).length > 0, label);
+  });
+}
+
+test('ruling 2: TOKEN_SHAPES finds PT10g\'s HTTP credentials', () => {
+  for (const [label, s] of [['Bearer, JWT header', 'Bearer eyJhbGciOiJIUzI1NiJ9'], ['Basic', 'Basic dXNlcjpwYXNz'], ['Bearer, letters and digits', 'Bearer abc123def456']]) {
+    assert.ok(shapeMatches(s), label);
+  }
+});
+
+// Ruling 2: a configuration PL6825 would find is refused here too, with the message that says "token-shaped". The
+// credential is not at the start of the value, so the authentication-scheme shape of item 1 does not refuse it.
+test('ruling 2: an HTTP credential not at the start of a header value under an innocent name is refused as token-shaped', () => {
+  const server = recordedMcp();
+  const make = (headers) => () => mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers });
+  assert.throws(make({ 'x-trace': 'ref Bearer abc123def456' }), /token-shaped/);
+  assert.throws(make({ 'x-trace': 'ref: basic dXNlcjpwYXNz' }), /token-shaped/);
+});
+
+test('ruling 2: an HTTP credential in a decoded query value is refused as token-shaped', () => {
+  const server = recordedMcp();
+  const url = 'https://gateway.example.test/mcp?trace=ref%20Bearer%20abc123def456';
+  assert.throws(() => mcpClient({ url, tools: TOOLS, transport: server.transport }), /token-shaped/);
+});
+
+// The order of the configuration checks puts a token shape before an authentication scheme, so a value that starts with
+// Bearer and holds a credential of 12 characters is refused as token-shaped.
+test('ruling 2: a header value that is an HTTP credential at its start is refused as token-shaped, the token shape coming first', () => {
+  const server = recordedMcp();
+  assert.throws(() => mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers: { 'x-trace': 'Bearer abc123def456' } }), /token-shaped/);
+  assert.throws(() => mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers: { 'x-trace': 'BASIC dXNlcjpwYXNz' } }), /token-shaped/);
+});
+
+// What PL6825 does not find stays as item 1 says: a scheme with a short value is refused as an authentication scheme, and
+// the word Bearer inside a value that does not start with it is accepted.
+test('ruling 2: a short value after Bearer is still an authentication scheme, and Bearer inside prose is accepted', () => {
+  const server = recordedMcp();
+  const make = (headers) => () => mcpClient({ url: URL, tools: TOOLS, transport: server.transport, headers });
+  assert.throws(make({ 'x-trace': 'Bearer abc' }), /authentication scheme/);
+  assert.doesNotThrow(make({ 'x-trace': 'uses the Bearer token' }));
+  assert.doesNotThrow(make({ 'x-trace': 'ref Bearer authentication' }));
 });
 
 test('a 403 from the gateway is permanent and names the status', async () => {
@@ -227,7 +292,7 @@ const BASE = 'https://gateway.example.test/mcp';
 
 // The IANA registry's schemes and the four in common use outside it, in mixed case and after leading whitespace.
 for (const value of [
-  'Bearer abc', 'bearer abc', 'BASIC dXNlcjpwYXNz', 'Concealed x', 'digest username="u"', 'DPoP x', 'gnap x', 'HOBA x',
+  'Bearer abc', 'bearer abc', 'BASIC dXNl', 'Concealed x', 'digest username="u"', 'DPoP x', 'gnap x', 'HOBA x',
   'Mutual x', 'negotiate YII', 'OAuth x', 'privatetoken token=x', 'SCRAM-SHA-1 x', 'scram-sha-256 x', 'vapid t=x',
   'ApiKey x', 'aws4-hmac-sha256 x', 'NTLM x', 'token x', '  Bearer abc', '\tBasic x', 'Bearer\tabc',
 ]) {

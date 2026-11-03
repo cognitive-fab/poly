@@ -222,3 +222,19 @@ test('PL6825: admission refuses a token-shaped string in an adapter configuratio
   writeFileSync(join(dir, 'src', 'adapter-config.ts'), "export const slackConfig = { botToken: 'vault:slack-bot', teamId: 'T123ABC456' };\n");
   assert.equal((await admit(dir)).verdict, 'CLEAN');
 });
+
+// The owner's ruling of 2026-11-02 (PT10g): PL6825 reads an eighth shape, an HTTP credential, Bearer or Basic followed by
+// a value of at least 12 characters from letters, digits and -._~+/. The value is random and starts with a capital and a
+// digit, so it is never a word (one letter followed only by lower-case letters), and hex keeps it inside the value set.
+// The message is checked for the value only: the kind's own name, "an HTTP credential (Bearer or Basic)", says Bearer.
+test('PL6825: admission refuses an HTTP credential (Bearer) in an adapter configuration file the handlers import, naming the file and the kind and never the value', { timeout: 300_000 }, async () => {
+  const key = makeKey('grant-adapter-bearer');
+  const dir = project('grant-adapter-bearer', ['conformance/m1/effects.poly'], key, 'test-grants');
+  const value = `A1${randomBytes(12).toString('hex')}`;
+  writeFileSync(join(dir, 'src', 'adapter-config.ts'), `export const crmConfig = { headers: { authorization: 'Bearer ${value}' }, region: 'eu' };\n`);
+  writeFileSync(join(dir, 'src', 'handlers.ts'), `import { crmConfig } from './adapter-config.ts';\nexport const region = crmConfig.region;\n${readFileSync(join(dir, 'src', 'handlers.ts'), 'utf8')}`);
+  await assert.rejects(admit(dir), (e) => /PL6825/.test(e.message) && /adapter-config\.ts/.test(e.message) && /HTTP credential \(Bearer or Basic\)/.test(e.message) && !e.message.includes(value));
+  // The control: the same file whose comment reads only the word Bearer, with the credential named by reference, is admitted.
+  writeFileSync(join(dir, 'src', 'adapter-config.ts'), "// Bearer\nexport const crmConfig = { headers: { authorization: 'vault:crm-token' }, region: 'eu' };\n");
+  assert.equal((await admit(dir)).verdict, 'CLEAN');
+});
