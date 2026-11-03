@@ -56,12 +56,14 @@ export const TOKEN_SHAPES: RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/,
   /\beyJ[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{8,}/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  // An HTTP credential, PL6825's eighth shape (the owner's ruling of 2026-11-02, PT10g).
+  /\b(?:Bearer|bearer|BEARER|Basic|basic|BASIC)[ \t]+(?![A-Za-z][a-z]*(?![A-Za-z0-9\-._~+/=]))[A-Za-z0-9\-._~+/]{12,}=*/,
 ];
 // Any name that says it carries a credential, not a list of known ones: a short value has no shape to find.
 const CREDENTIAL_NAME = /auth|token|secret|passw|api[-_]?key|cookie|credential|bearer|^key$/i;
 // A value that starts with an HTTP authentication scheme carries a credential whatever its header is called (review of
-// 2026-11-02, item 1): the IANA registry's schemes and four in common use outside it. poly-io's own shape, not one of the
-// seven PL6825 reads (PROVENANCE.md).
+// 2026-11-02, item 1): the IANA registry's schemes and four in common use outside it. poly-io's own shape, broader than
+// the HTTP credential PL6825 reads, since a configuration value has a start and a file's text does not (PROVENANCE.md).
 const AUTH_SCHEME = /^\s*(?:Basic|Bearer|Concealed|Digest|DPoP|GNAP|HOBA|Mutual|Negotiate|OAuth|PrivateToken|SCRAM-SHA-1|SCRAM-SHA-256|vapid|ApiKey|AWS4-HMAC-SHA256|NTLM|Token)\s+\S/i;
 
 /** The parts of the URL as a reader of it decodes them; a malformed escape is refused, since nobody can say what it holds. */
