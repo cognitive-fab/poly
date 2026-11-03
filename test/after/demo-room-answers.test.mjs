@@ -257,3 +257,91 @@ test('DF11.5a: recorded mode, guest 1 gets fixture answer within 20 seconds real
   assert.ok(replyEvent, `no reply arrived within 20 s of real time for fixture status message; heard: ${JSON.stringify(heard.map((e) => ({ kind: e.kind, text: e.text?.slice?.(0, 50) })))}`);
   assert.equal(replyEvent.text, expectedAnswerText, `reply should match fixture answer text "${expectedAnswerText}", got: ${replyEvent.text}`);
 });
+
+// ---- DF28 item 6, DAC32: the recorded room's notice for a message it does not answer. --------
+// A room of its own: the shared recorded room's guest 1 already holds replies from the tests above, and DF28 counts guest 1's
+// whole history. It is given onFailure, so that its failure lines are read; the watcher of those lines has no pump of its own
+// (it polls every 500 ms of real time), so the test waits for its lines.
+
+let df28Demo = null;
+const df28Lines = [];
+
+const getDf28Demo = async () => {
+  if (!df28Demo) {
+    const { recordedOrdersOf } = await import('../../demo/host/recorded-orders.mjs');
+    const { assembleDemo } = await import('../../demo/host/assemble.mjs');
+    const workdir = mkdtempSync(join(tmpdir(), 'demo-room-answers-df28-'));
+    let t = 1_790_000_000_000;
+    const clock = { now: () => t, advance: (ms) => { t += ms; } };
+    df28Demo = {
+      promise: assembleDemo({
+        mode: 'recorded',
+        workdir,
+        now: clock.now,
+        ordersOf: recordedOrdersOf(FIXTURE),
+        size: 4,
+        limits: { minGapMs: 1000, maxMessages: 100 },
+        onFailure: (line) => df28Lines.push(line),
+      }).then((d) => Object.assign(d, { clock })),
+      workdir,
+    };
+  }
+  return df28Demo.promise;
+};
+
+test.after(async () => {
+  if (df28Demo) {
+    const demo = await df28Demo.promise;
+    await demo.close();
+    rmSync(df28Demo.workdir, { recursive: true, force: true });
+  }
+});
+
+// Waits up to 20 seconds of real time for a failure line that passes the filter.
+const pollLine = async (filter) => {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (df28Lines.some(filter)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
+};
+
+test('DF28 item 6: in the recorded room, a message one letter off gets the room\'s notice, the recorded one its reply, and the lines say no recorded answer', { timeout: 1_800_000 }, async () => {
+  const demo = await getDf28Demo();
+  const { room } = demo;
+  const g1 = room.join('s1');
+  assert.equal(g1.id, 'guest-01', 'the first session is guest 1');
+  // DF28 item 2: the recorded room is recorded, and guest 1 is offered guest 1's recorded messages.
+  assert.equal(room.recorded, true);
+  assert.deepEqual(room.suggestions('s1'), FIXTURE.messages.filter((m) => m.from === 'wa-1').map((m) => m.text));
+  const heard = [];
+  room.subscribe('s1', (e) => heard.push(e));
+
+  // DF28 item 1: the recorded status question without its first letter.
+  demo.clock.advance(1100);
+  assert.deepEqual(await room.say('s1', 'i, where is my order 1002? It was due on Monday.'), { ok: true });
+  await demo.settle();
+  await demo.pumpUnanswered();
+  const notice = 'The concierge did not answer this message. This room answers only its recorded messages.';
+  const first = room.history('s1');
+  assert.equal(first.length, 1, `guest 1's history holds one event (got: ${JSON.stringify(first)})`);
+  assert.equal(first[0].kind, 'notice');
+  assert.equal(first[0].text, notice);
+  assert.deepEqual(heard.filter((e) => e.kind === 'notice').map((e) => e.text), [notice], 'the notice reached guest 1\'s page');
+
+  // The recorded status question: its reply, and no second notice.
+  const status = FIXTURE.messages.find((m) => m.id === 'status');
+  demo.clock.advance(1100);
+  assert.deepEqual(await room.say('s1', status.text), { ok: true });
+  await demo.settle();
+  await demo.pumpUnanswered();
+  const second = room.history('s1');
+  assert.deepEqual(second.map((e) => e.kind), ['notice', 'reply'], `a reply follows, and no second notice (got: ${JSON.stringify(second)})`);
+  assert.equal(second[1].text, status.answer.text);
+
+  // DF28 item 3: the failure lines of this room.
+  assert.ok(await pollLine((l) => l.includes('no recorded answer')), `a line says no recorded answer (lines: ${JSON.stringify(df28Lines)})`);
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // one more pass of the 500 ms watcher, so that every line of the turn is in
+  assert.deepEqual(df28Lines.filter((l) => l.includes('not recognised')), [], `no line says not recognised (lines: ${JSON.stringify(df28Lines)})`);
+});
