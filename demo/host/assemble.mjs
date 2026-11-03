@@ -30,6 +30,8 @@ import { createSpendMeter, formatSpend, meteredTransport, parseCap } from './spe
 import { operatorVerifier } from './resolve.mjs';
 import { stubTransport } from './stub-model.mjs';
 import { domainsOf, routesOf, watchFailures } from './failures.mjs';
+import { recordedMessagesOf } from './recorded-orders.mjs';
+import { watchUnanswered } from './unanswered.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const hostModule = (f) => import(pathToFileURL(join(ROOT, 'examples', 'concierge', 'host', f)).href);
@@ -81,14 +83,16 @@ export function modelSide({ mode, source, now = () => Date.now(), apiKey = null,
  *   startWorkers     run the runtime's own workers (the launcher); a test settles by hand
  *   limits      overrides of the room's limits
  *   standInFault   the stand-in's fault script by name (DF22): 'none' (the default), 'lost-all' or 'down'; the show uses none
+ *   messagesOf  the recorded texts each guest may send (DF28 item 2); by default those of the answers fixture in recorded mode, else none
  */
 export async function assembleDemo({
   mode = 'recorded', workdir, now = () => Date.now(), answers = null, apiKey = null, models = null, modelTransport = null,
-  size = 40, ordersOf = null, standInFault = 'none', startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, onFailure = null, stubLatencyMs = 0, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'),
+  size = 40, ordersOf = null, standInFault = 'none', startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, onFailure = null, stubLatencyMs = 0, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'), messagesOf: givenMessagesOf = undefined,
 }) {
   if (!workdir) throw new Error('the demo needs a folder for its run');
   mkdirSync(workdir, { recursive: true });
   let providers;
+  let messagesOf = null;
   let meter = null;
   let room = null;
   if (mode === 'live' || mode === 'stub-model') {
@@ -103,8 +107,12 @@ export async function assembleDemo({
     meter = side.meter;
   } else {
     const { loadAnswers, recordedConcierge } = await hostModule('recorded.mjs');
-    providers = recordedConcierge(loadAnswers(answers ?? join(ROOT, 'test', 'fixtures', 'concierge', 'answers.json')));
+    const fixture = loadAnswers(answers ?? join(ROOT, 'test', 'fixtures', 'concierge', 'answers.json'));
+    providers = recordedConcierge(fixture);
+    // DF28 item 2: the room offers each guest the messages these providers answer.
+    messagesOf = recordedMessagesOf(fixture);
   }
+  if (givenMessagesOf !== undefined) messagesOf = givenMessagesOf;
 
   const pool = createPersonaPool({ size, ordersOf });
   const personas = pool.all();
@@ -129,6 +137,7 @@ export async function assembleDemo({
     rt, wa, now, pool, limiter, onReply, capReached: () => meter?.capReached() ?? false,
     settle: async () => { if (!startWorkers) await settle(); },
     onKill: (by) => { rt.stopWorkers(); onKill(by); },
+    messagesOf,
   });
 
   rt.connectChannel('support', whatsapp(wa), supportTransport(room));
@@ -171,9 +180,14 @@ export async function assembleDemo({
   if (startWorkers) rt.startWorkers();
   // DF12 item 3: each failed decision is a line. The watcher reads the runtime's ledger.
   const watcher = onFailure ? watchFailures({ db: rt.store.db, context: { ...(() => { const text = readFileSync(join(source, 'concierge.poly'), 'utf8'); return { routes: routesOf(text), domains: domainsOf(text) }; })(), secrets: apiKey ? [apiKey] : [] }, onLine: onFailure }) : null;
+  // DF28 item 4: a turn that ends with no reply is the room's notice on that guest's page, in every mode.
+  const desks = async () => Promise.all(pool.claimed().map(async (p) => ({ instance: await rt.threadId('support', p.phone), phone: p.phone })));
+  const unanswered = watchUnanswered({ db: rt.store.db, desks, onUnanswered: (phone) => room.unanswered(phone) });
 
   return {
     mode, meter, rt, room, pool, staff, standIn, admission, providers, db, settle, wa, limiter, connect,
+    /** DF28 item 4: one pass of the notice watcher, for a test that settles by hand. */
+    pumpUnanswered: () => unanswered.poll(),
     /** Tells the staff of each refund the gate escalated on the claimed personas' desks (host/notice.mjs). */
     async pumpStaff() {
       const desks = [];
@@ -221,6 +235,7 @@ export async function assembleDemo({
       if (closed) return;
       closed = true;
       watcher?.stop();
+      unanswered.stop();
       await rt.close();
       await standIn.close();
       authority.remove();

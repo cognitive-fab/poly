@@ -50,6 +50,9 @@ function rejections(text) {
 
 const REASONS = [
   [/route-exhausted/, () => 'every tier failed'],
+  // DF28 item 3: every error of the recorded providers begins so. The reason is the fixed text, never the message's id.
+  [/^no recorded /, () => 'no recorded answer'],
+  [/uncited:/, () => 'cited no order'],
   [/timed out after (\d+)\s*ms/, (m) => `timed out after ${m[1]} ms`],
   [/the limit \w+ is not a whole number/, () => 'limit is not a whole number'],
   [/HTTP (\d{3})(?: \((\w+)\)(?:: ([\s\S]+))?)?/, (m, secrets) => (m[2] ? `HTTP ${m[1]} (${m[2]})${m[3] ? `: ${cleanMessage(m[3], secrets)}` : ''}` : `HTTP ${m[1]}`)],

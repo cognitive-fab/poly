@@ -86,6 +86,9 @@ export async function startRoomServer({ room, staff, presenterToken, host = '127
         return json(res, 200, {
           persona: persona ? { id: persona.id, phone: persona.phone, display: persona.display, orders: persona.orders.map((o) => o.id) } : null,
           killed: room.killed,
+          // DF28 item 2: whether the room answers only recorded messages, and the ones this guest may send.
+          recorded: room.recorded,
+          suggestions: room.suggestions(session),
           limits: limiter ? { maxChars: limiter.maxChars, minGapMs: limiter.minGapMs, maxMessages: limiter.maxMessages } : undefined,
         });
       }

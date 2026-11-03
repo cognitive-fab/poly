@@ -395,7 +395,7 @@ node demo/launch.mjs
 
 You should see `Model calls: RECORDED answers only; no model is called.`
 
-A message that is not one of the nine has no recorded answer, so the program sends nothing. `where is my order?` is not one of them. Type the messages below, exactly. The first browser window is guest 1. Open a second window (a private window gives a second session) for guest 2.
+A message that is not one of the nine has no recorded answer, so the program sends nothing. `where is my order?` is not one of them. Each guest's page lists that guest's recorded messages as buttons under the conversation (DF28): a click puts the text in the box, and the guest presses Send. Guest 4 and later have none. Type or pick the messages below. The first browser window is guest 1. Open a second window (a private window gives a second session) for guest 2.
 
 | Guest | Type exactly | The page should answer |
 |---|---|---|
@@ -411,7 +411,7 @@ A message that is not one of the nine has no recorded answer, so the program sen
 
 Guest 1 owns the orders of the recorded customer `cust-a` (two orders), and guest 2 those of `cust-b` (one order). Guest 3, in a third window, holds one synthetic order (`o-9031`), which the message about the desk lamp cites. A thread has one refund at a time (DF19): once a refund is issued on a guest's thread, a second refund request on it gets the `Already` reply, for any order. Wait 5 seconds between two messages of one guest. A guest's desk answers one message at a time: while a refund waits for approval, the guest's next message gets only the acknowledgement. Type `quit` at the prompt to end.
 
-If a recorded message shows no answer, check that you typed it exactly and that you are in the right window.
+A message that is not recorded gets the room's notice, in grey italics: `The concierge did not answer this message. This room answers only its recorded messages.` The terminal prints its failure lines with the reason `no recorded answer`. If a recorded message gets the notice, check that you are in the right window: a guest's own buttons hold the messages that guest's orders answer.
 
 ### 2.6 The live launch (this costs money, up to the cap)
 
@@ -513,7 +513,7 @@ decision failed: answer, tier none, no text (1 ask: reply cut off)
 model key refused (HTTP 401): set a fresh key and restart the launcher
 ```
 
-  Each line has the decision, the tier (`none` for a decision with one provider) and the reason. The reasons are: `timed out after <n> ms` (the timeout is too short for the provider: run the latency measurement), `HTTP <status>` with the error type (the provider refused: 401 or 403 is the key, 429 is the rate limit, 5xx is the provider), `over its input share` (the message is too long), `no allowed answer (5 asks: ...)` (no ask of the vote was accepted: the counts say why, from `no JSON object`, `value missing`, `value a string`, `value not a whole number`, `value negative`, `answer missing`, `answer not allowed` and `reply cut off`; `reply cut off at <n> tokens` means the per-ask output limit was too small: the amount vote has 200 tokens an ask, the other asks 400 or 80), `no text (1 ask: ...)` (the same reasons for a single ask), `every tier failed`, and `not recognised`. A line never holds the key, a body or the customer's text. A refused key is silent in the page and is a line here. The spend line still counts the abandoned calls, because the provider bills them.
+  Each line has the decision, the tier (`none` for a decision with one provider) and the reason. The reasons are: `timed out after <n> ms` (the timeout is too short for the provider: run the latency measurement), `HTTP <status>` with the error type (the provider refused: 401 or 403 is the key, 429 is the rate limit, 5xx is the provider), `over its input share` (the message is too long), `no allowed answer (5 asks: ...)` (no ask of the vote was accepted: the counts say why, from `no JSON object`, `value missing`, `value a string`, `value not a whole number`, `value negative`, `answer missing`, `answer not allowed` and `reply cut off`; `reply cut off at <n> tokens` means the per-ask output limit was too small: the amount vote has 200 tokens an ask, the other asks 400 or 80), `no text (1 ask: ...)` (the same reasons for a single ask), `every tier failed`, `no recorded answer` (the recorded room has no answer for the message), `cited no order` (an answer cited none of the guest's orders, so the program refused it), and `not recognised`. When the turn ends with no reply, the guest's page shows the room's notice `The concierge did not answer this message.` A line never holds the key, a body or the customer's text. A refused key is silent in the page and is a line here. The spend line still counts the abandoned calls, because the provider bills them.
 
 If the first question fails, do not go on to the attacks. Stop the room (`quit`) and report the lines.
 

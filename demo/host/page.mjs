@@ -14,6 +14,9 @@ h1 { font-size: 1.25rem; margin: 0 0 4px; }
 #log { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
 #log li { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--them); max-width: 90%; white-space: pre-wrap; overflow-wrap: anywhere; }
 #log li.me { background: var(--me); justify-self: end; }
+#log li.notice { color: var(--muted); font-style: italic; background: transparent; }
+#suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+#suggestions button { font-size: .9rem; padding: 6px 10px; text-align: left; }
 form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 input, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--them); color: var(--fg); }
 button { cursor: pointer; }
@@ -23,12 +26,29 @@ button { cursor: pointer; }
 /** The script of the room page (DF18 item 3): a function of its own so that a test can run it. */
 export function roomPageScript() {
   return String.raw`const log = document.getElementById('log'), status = document.getElementById('status'), input = document.getElementById('t'), button = document.getElementById('b');
-const add = (text, me) => { const li = document.createElement('li'); if (me) li.className = 'me'; li.textContent = text; log.appendChild(li); li.scrollIntoView({ block: 'end' }); };
+const add = (text, me, kind) => { const li = document.createElement('li'); if (me) li.className = 'me'; if (kind) li.className = kind; li.textContent = text; log.appendChild(li); li.scrollIntoView({ block: 'end' }); };
+// DF28 item 2: a recorded room answers only its recorded messages; each is a button that puts its text in the box and sends nothing.
+const recordedRoom = (me) => {
+  if (!me.recorded) return;
+  const texts = Array.isArray(me.suggestions) ? me.suggestions : [];
+  document.getElementById('recorded').textContent = texts.length
+    ? 'This room answers only its recorded messages. Pick one to put it in the box, then send it.'
+    : 'This room answers only its recorded messages, and this guest has none.';
+  const box = document.getElementById('suggestions');
+  for (const text of texts) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'suggestion';
+    b.textContent = text;
+    b.addEventListener('click', () => { input.value = text; input.focus(); });
+    box.appendChild(b);
+  }
+};
 let stopped = false;
 const halted = () => { stopped = true; status.textContent = 'The presenter has stopped the room.'; input.disabled = true; button.disabled = true; };
-fetch('/api/me').then((r) => r.json()).then((me) => { if (!me.persona) { status.textContent = 'The room is full.'; return; } document.getElementById('who').textContent = me.persona.id + ' (' + me.persona.display + ')'; if (me.killed) halted(); });
+fetch('/api/me').then((r) => r.json()).then((me) => { if (!me.persona) { status.textContent = 'The room is full.'; return; } document.getElementById('who').textContent = me.persona.id + ' (' + me.persona.display + ')'; recordedRoom(me); if (me.killed) halted(); });
 const events = new EventSource('/api/events');
-events.onmessage = (e) => { const ev = JSON.parse(e.data); if (ev.kind === 'reply') add(ev.text, false); if (ev.kind === 'halted') halted(); };
+events.onmessage = (e) => { const ev = JSON.parse(e.data); if (ev.kind === 'reply') add(ev.text, false); if (ev.kind === 'notice') add(ev.text, false, 'notice'); if (ev.kind === 'halted') halted(); };
 // DF18 item 3: the page says it is sending, and gives up on the host after 10 seconds, so a request that the browser holds in a queue is not silent.
 let sending = false;
 document.getElementById('f').addEventListener('submit', async (e) => {
@@ -76,6 +96,8 @@ export function roomPage() {
 <p class="note warn">Everything you type is shown on screen and kept in this session's record. Please use no real personal data.</p>
 <p class="note">Refunds go through a mock-up of Stripe on this machine: no real money moves.</p>
 <ul id="log" aria-live="polite"></ul>
+<p id="recorded" class="note"></p>
+<div id="suggestions"></div>
 <form id="f"><input id="t" name="text" maxlength="280" autocomplete="off" placeholder="Where is my order? Can I have a refund?" aria-label="Your message"><button id="b" type="submit">Send</button></form>
 <p id="status" class="note" role="status"></p>
 </main>

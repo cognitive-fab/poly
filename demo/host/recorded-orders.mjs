@@ -33,3 +33,13 @@ export function recordedOrdersOf(fixture) {
     return personaOf(n).orders;
   };
 }
+
+/**
+ * DF28 item 2: the recorded messages each guest may send, as the runbook's step 2.5 assigns them. Guest n gets the texts of the
+ * fixture's messages from `wa-<n>`, in the fixture's order, and a guest with no sender of that name gets none.
+ */
+export function recordedMessagesOf(fixture) {
+  return function messagesOf({ n }) {
+    return fixture.messages.filter((m) => m.from === `wa-${n}`).map((m) => m.text);
+  };
+}
