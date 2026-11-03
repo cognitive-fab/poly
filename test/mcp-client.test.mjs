@@ -170,6 +170,44 @@ test('clientInfo and the scheme are checked too', () => {
   assert.throws(make({ url: 'http://gateway.example.test/mcp' }), /https/);
 });
 
+// The owner's ruling 1 of 2026-11-02 (PT10g, PL6825): the name and version of clientInfo are checked for the
+// authentication-scheme shape of item 1, as header values are, and refused with a message that says "authentication
+// scheme". The values are kept short so that none is also an HTTP credential (ruling 2): the spec does not place the
+// clientInfo check in the order of the configuration checks, so a value with both shapes would test an unstated order.
+const withInfo = (clientInfo) => () => mcpClient({ url: URL, tools: TOOLS, transport: recordedMcp().transport, clientInfo });
+for (const value of ['Bearer abc', 'bearer abc', 'BEARER abc', 'Basic x', 'basic x', 'Token x', 'negotiate YII', 'DPoP x', 'ApiKey x', 'aws4-hmac-sha256 x', '  Bearer abc', '\tBasic x', 'Bearer\tabc']) {
+  test(`ruling 1: a clientInfo name that starts with an authentication scheme is refused: ${JSON.stringify(value)}`, () => {
+    assert.throws(withInfo({ name: value, version: '1' }), /authentication scheme/);
+  });
+  test(`ruling 1: a clientInfo version that starts with an authentication scheme is refused: ${JSON.stringify(value)}`, () => {
+    assert.throws(withInfo({ name: 'poly', version: value }), /authentication scheme/);
+  });
+}
+
+test('ruling 1: the case the ruling names, clientInfo { name: "Bearer abc", version: "1" }, is refused', () => {
+  assert.throws(withInfo({ name: 'Bearer abc', version: '1' }), /authentication scheme/);
+});
+
+// Item 1's shape does not refuse a scheme name alone or one inside a longer word, so neither does ruling 1.
+for (const clientInfo of [
+  { name: 'poly', version: '1' },
+  { name: 'poly-lab desk', version: '1.4.0' },
+  { name: 'Bearer', version: '1' },
+  { name: 'Bearerish x', version: '1' },
+  { name: 'poly', version: 'TokenRing 2' },
+]) {
+  test(`ruling 1: an innocent clientInfo is accepted: ${JSON.stringify(clientInfo)}`, () => {
+    assert.doesNotThrow(withInfo(clientInfo));
+  });
+}
+
+test('ruling 1: a client made with an innocent clientInfo initializes', async () => {
+  const server = recordedMcp();
+  const client = mcpClient({ url: URL, tools: TOOLS, transport: server.transport, clientInfo: { name: 'poly', version: '1.4.0' } });
+  const init = await client.initialize();
+  assert.equal(init.ok, true, `initialize: ${JSON.stringify(init)}`);
+});
+
 test('a connection dropped after the request is sent is a failure with no answer and no retry', async () => {
   const { server, client } = await open({ dropAfterSend: true });
   const r = await client.callTool('update_customer', { id: 'C001', field: 'email', value: 'x@example.test' });
