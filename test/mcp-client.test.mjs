@@ -186,10 +186,14 @@ test('a 403 from the gateway is permanent and names the status', async () => {
   assert.match(r.error, /403/);
 });
 
-test('an answer with neither result nor error is a failure, not an empty success', async () => {
-  const { client } = await open({ emptyCall: true });
+// The owner's ruling 3 of 2026-11-02: a tools/call reply whose JSON-RPC message holds neither result nor error is no
+// answer. The single attempt is spent and its outcome is not known. This replaced the first reading of item 3, under which
+// this test asserted answered: true.
+test('an answer with neither result nor error is a failure with no answer, not an empty success (ruling 3)', async () => {
+  const { server, client } = await open({ emptyCall: true });
   const r = await client.callTool('find_customers', { query: 'a' });
-  assert.deepEqual([r.ok, r.answered], [false, true]);
+  assert.deepEqual([r.ok, r.answered, r.permanent], [false, false, false]);
+  assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1, 'one attempt, no retry');
 });
 
 test('a 5xx is a failure with no answer', async () => {
@@ -429,6 +433,28 @@ for (const result of [
     assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1);
   });
 }
+
+// The owner's ruling 3 of 2026-11-02: a result that is not an object is no answer too. Each of these is not a JSON
+// object under any reading, an array included, and the fixture sends each as it is, the falsy ones too. Each is sent as a
+// JSON answer and as a single-event SSE answer.
+for (const result of ['done', '', 42, 0, true, false, null, [], [{ type: 'text', text: 'x' }]]) {
+  for (const sse of [false, true]) {
+    test(`ruling 3: a tools/call result of ${JSON.stringify(result)} is a failure with no answer${sse ? ' (SSE)' : ''}`, async () => {
+      const { server, client } = await open({ callResult: result, sse });
+      const r = await client.callTool('find_customers', { query: 'a' });
+      assert.deepEqual([r.ok, r.answered, r.permanent], [false, false, false]);
+      assert.equal(server.requests.filter((q) => q.message.method === 'tools/call').length, 1, 'one attempt, no retry');
+    });
+  }
+}
+
+// The fixture's change for ruling 3 sends a present callResult whatever its value: a falsy result reaches the client as
+// that result, and not as the customer-records tool's own answer.
+test('ruling 3: the fixture sends a falsy callResult as it is', async () => {
+  const server = recordedMcp({ callResult: null });
+  const answered = await server.transport.request({ method: 'POST', url: URL, headers: { 'mcp-session-id': 'sess-0123456789abcdef' }, body: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'find_customers', arguments: { query: 'a' } } }) });
+  assert.deepEqual(JSON.parse(answered.body), { jsonrpc: '2.0', id: 7, result: null });
+});
 
 test('item 3: a tools/call result with a content of [] is a result with empty text', async () => {
   const { client } = await open({ callResult: { content: [] } });

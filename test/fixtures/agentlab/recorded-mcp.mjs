@@ -28,7 +28,8 @@ const found = (customers) => ({ ...text(JSON.stringify({ customers })), structur
  * opts.sse: answer requests as a single-event text/event-stream;
  * opts.initializedStatus: answer only notifications/initialized with this status (item 2 of the review of 2026-11-02);
  * opts.initializedDrop: throw on notifications/initialized after it is recorded, as a request that gets no answer;
- * opts.callResult: answer tools/call with this JSON-RPC result, whatever the tool (item 3 of the review of 2026-11-02);
+ * opts.callResult: answer tools/call with this JSON-RPC result, whatever the tool, whenever the option is present, a
+ *   falsy result included (item 3 of the review of 2026-11-02, and the owner's ruling 3 of the same day);
  * opts.requireVersion: refuse every request after initialize whose mcp-protocol-version (any letter case) is not this
  *   version, a missing header included, with HTTP 400 and the JSON-RPC error -32022 "Unsupported protocol version"
  *   (version negotiation, rule 4);
@@ -117,7 +118,8 @@ export function recordedMcp(opts = {}) {
     if (r.headers['mcp-session-id'] !== sessionId) return { status: 400, headers: {}, body: '' };
     if (message.method === 'notifications/initialized') return { status: 202, headers: {}, body: '' };
     if (message.method === 'tools/list') return reply(message.id, { tools: LISTED });
-    if (message.method === 'tools/call' && opts.callResult) return reply(message.id, opts.callResult);
+    // Present, not truthy: the owner's ruling 3 of 2026-11-02 needs a result of null, false, 0 or '' sent as it is.
+    if (message.method === 'tools/call' && Object.hasOwn(opts, 'callResult')) return reply(message.id, opts.callResult);
     if (message.method === 'tools/call') {
       const result = call(message.params.name, message.params.arguments ?? {});
       return result
