@@ -21,9 +21,10 @@ import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { pinnedStd } from './std-pins.js';
-import { expandChannels, expandCredentials, expandRoutes, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
+import { checkExposure, optsIn, riskWarnings, type RiskWarning } from './risk.js';
+import { expandChannels, expandCredentials, expandRoutes, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, loadCatalogs, type Catalogs, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
-import { lowerMachine } from '@poly/lower';
+import { lowerMachine, type PolicyFault } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { handlerClosure } from './handlers.js';
@@ -204,6 +205,8 @@ export interface CheckOptions {
   refProgram?: Module[];
   /** For one test each (ruled on M8 plan step 10): a deliberately broken check of poly-ref's (REF_FAULTS). */
   refFault?: RefFault;
+  /** For the tests of PT34.3 (RT7): a deliberately broken policy lowering of poly-lower's POLICY_FAULTS, which policy-tv must catch. */
+  policyFault?: PolicyFault;
   /** PS15, set by checkFile: the machine as poly-ref names it (c.Conversation for a channel's conversation). */
   refMachine?: string;
   /** PS15, set by checkFile: each channel's expansion, for its descriptor. */
@@ -324,7 +327,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const calibrations = original.decls.flatMap((d) => (d.kind !== 'Route' ? [] : d.tiers.flatMap((t) => { const m = t.calibration === null ? undefined : routing.maps[t.calibration]; const why = m ? calibrationWarning(m.map) : null; return why ? [{ kind: 'calibration' as const, route: d.name, tier: t.name, map: t.calibration!, why }] : []; })));
   if (calibrations.length) report.warnings = [...(report.warnings ?? []), ...calibrations];
   opts = { ...opts, isStd: pinnedStd(file, opts.std ?? STD), uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers, routing, sourceDir: dirname(resolve(file)) };
-  const checked = checkModule(module, { program, providers, routing });
+  const checked = checkModule(module, { program, providers, routing, policyTags: false });
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
   // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
@@ -333,7 +336,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const useDecls = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use');
   for (const m of program) {
     if (m === module) continue;
-    const errors = checkModule(m, { program, providers }).diagnostics.filter((d) => d.severity === 'error');
+    const errors = checkModule(m, { program, providers, policyTags: false }).diagnostics.filter((d) => d.severity === 'error');
     const use = useDecls.find((d) => d.path.join('.') === m.name || d.path.slice(0, -1).join('.') === m.name) ?? useDecls[0];
     const at = { module: module.name, ...(use ? { node: use.id, line: use.span?.line, col: use.span?.col } : {}) };
     report.diagnostics.push(...errors.map((d) => ({ ...d, at, message: `in module ${m.name}${d.at.line !== undefined ? `, line ${d.at.line}` : ''}, which this program uses: ${d.message}` })));
@@ -362,7 +365,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       const cr = expandCredentials(copy, uses.program);
       const ro = expandRoutes(copy, uses.program);
       const prog = [...uses.program.filter((m) => m !== original), ex.module, ...ex.extra, ...cr.extra, ...ro.extra];
-      return [...ex.diagnostics, ...cr.diagnostics, ...ro.diagnostics, ...checkModule(ex.module, { program: prog, providers, routing }).diagnostics];
+      return [...ex.diagnostics, ...cr.diagnostics, ...ro.diagnostics, ...checkModule(ex.module, { program: prog, providers, routing, policyTags: false }).diagnostics];
     });
   }
   // PT14a: what the cache keys read: whether another machine may be read as its interface, and each machine's children.
@@ -410,7 +413,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // PS15: each channel's conversation, the machine Conversation of the module m.c, reported as c.Conversation.
   for (const x of expansion.extra) {
     const channel = x.name.slice(module.name.length + 1);
-    const checkedX = checkModule(x, { program, providers });
+    const checkedX = checkModule(x, { program, providers, policyTags: false });
     for (const machine of checkedX.machines.keys()) {
       const mc: MachineCheck = { machine: `${channel}.${machine}`, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
       report.machines.push(mc);
@@ -464,7 +467,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
         if (!pf.module.decls.some((d) => d.kind === 'Channel')) continue;
         for (const x of resolveUses(pf.module, pf.file, opts.programFiles, ...(opts.std ? [opts.std] : [])).program) if (!base.some((y) => y.name === x.name) && !stdModules.some((y) => y.name === x.name)) stdModules.push(x);
       }
-      try { report.policies.push(...await policyReports(module, [...base, ...stdModules], resolve(opts.root ?? process.cwd()))); } catch (e) {
+      try { report.policies.push(...await policyReports(module, [...base, ...stdModules], resolve(opts.root ?? process.cwd()), { std: opts.std ?? STD, ...(opts.policyFault ? { policyFault: opts.policyFault } : {}) })); } catch (e) {
         finish(report, original);
         report.error = `policies: ${(e as Error).message}`;
         report.verdict = 'ERROR';
@@ -609,7 +612,7 @@ function machineKey(module: Module, machine: string, files: Record<string, strin
 
 /** The options a result depends on, for its key (PT14a). The source's directory only when a route or budget may read it. */
 function keyOptions(opts: CheckOptions): Record<string, unknown> {
-  return { isolation: opts.isolation ?? null, refFault: opts.refFault ?? null, isStd: opts.isStd === true, std: opts.std ?? null, providers: opts.providers ?? null, routing: opts.routing ?? null, sourceDir: opts.narrow ? null : (opts.sourceDir ?? null) };
+  return { isolation: opts.isolation ?? null, refFault: opts.refFault ?? null, isStd: opts.isStd === true, std: opts.std ?? null, providers: opts.providers ?? null, routing: opts.routing ?? null, sourceDir: opts.narrow ? null : (opts.sourceDir ?? null), ...(opts.policyFault ? { policyFault: opts.policyFault } : {}) };
 }
 
 /** What the cache stores of a machine: everything its stages from validate() on recorded, as JSON (PT14a). */
@@ -1312,6 +1315,8 @@ export interface ProjectReport {
   project: string;
   name: string;
   files: CheckReport[];
+  /** PT34.2, S586: the risk warnings of a project that opts in (PT12.3a); absent in one that has not. */
+  warnings?: RiskWarning[];
   /** PT28.1d, PT10h: the host check, when --host named a tsconfig; null otherwise. */
   host?: HostCheck | null;
   /**
@@ -1369,6 +1374,9 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
     if (m) { program.push(m); programFiles.push({ file: f, module: m }); }
   }
+  // PT34.2, S586: an exposure id that is not a MIT subdomain refuses the project, as an error of its manifest (PL6507).
+  const risky = optsIn(manifest, program);
+  if (manifest.exposure) { let c: Catalogs | null = null; checkExposure(manifest, () => (c ??= loadCatalogs(opts.std ?? STD)), join(dir, 'poly.json')); }
   for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(opts.std ? { std: opts.std } : {}), ...(opts.cache ? { cache: opts.cache } : {}) }));
   // PT8.2: a scope's policies lower to one document, so they live in one module.
   const scopes = new Map<string, CheckReport>();
@@ -1425,5 +1433,7 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   const hostVerdict: Verdict[] = host ? [host.status === 'ran' ? verdictOf(host.diagnostics) : 'INCONCLUSIVE'] : [];
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
   const verdict = special ? special.verdict : fold([...reports.map((r) => r.verdict as Verdict), ...lintVerdict, ...hostVerdict]);
-  return { project: dir, name: manifest.name, files: reports, handlers, host, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
+  // PT34.2: beside the verdict, never in it.
+  const warnings = risky ? riskWarnings(manifest, program) : [];
+  return { project: dir, name: manifest.name, files: reports, handlers, host, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict], ...(warnings.length ? { warnings } : {}) };
 }

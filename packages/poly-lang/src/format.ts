@@ -184,6 +184,10 @@ class Printer {
   /** PT8.1: one canonical text per policy. */
   private policy(p: A.Policy): void {
     const q = (s: string) => JSON.stringify(s);
+    // PT8.6, S586: each list sorted by the string, repeats removed, mitigates before implements, on the item's first line.
+    // An item with no tags gets no text, so its line is the one v1.5.1 wrote (RT15).
+    const list = (ts: A.Tag[] | undefined) => [...new Set((ts ?? []).map((t) => t.tag))].sort().map(q).join(', ');
+    const tags = (it: A.Tags) => `${it.mitigates?.length ? ` mitigates ${list(it.mitigates)}` : ''}${it.implements?.length ? ` implements ${list(it.implements)}` : ''}`;
     this.emit(p, '', [`policy ${p.name} {`]);
     this.out.push(`${INDENT}scope ${q(p.scope)}${p.requiresAttribution ? ' requires attribution' : ''}`);
     for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
@@ -192,7 +196,7 @@ class Printer {
         // B13: each line of a body carries the comments of the expression on it, before it and at its end.
         case 'RuleObligation': {
           this.lead(it, INDENT);
-          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} rule {`);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} rule {`);
           if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
           this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
           if (it.onUnknown) this.emit(lineOf(it, 'onUnknown'), INDENT + INDENT, [`on unknown ${it.onUnknown}`]);
@@ -201,7 +205,7 @@ class Printer {
         }
         case 'MachineObligation': {
           this.lead(it, INDENT);
-          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} machine {`);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} machine {`);
           this.emit(lineOf(it, 'states'), INDENT + INDENT, [`states ${it.states.join(', ')}`]);
           this.emit(lineOf(it, 'initial'), INDENT + INDENT, [`initial ${it.initial}`]);
           for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
@@ -211,13 +215,13 @@ class Printer {
           break;
         }
         case 'InvariantObligation':
-          this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)} invariant { ${this.expr(it.expr, 0)} }`]);
+          this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)}${tags(it)} invariant { ${this.expr(it.expr, 0)} }`]);
           break;
         case 'Recalled':
-          this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}`]);
+          this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}${tags(it)}`]);
           break;
         case 'Never':
-          this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}: allow when ${this.expr(it.when, 0)}`]);
+          this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}${tags(it)}: allow when ${this.expr(it.when, 0)}`]);
           break;
       }
     }

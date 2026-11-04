@@ -558,10 +558,44 @@ export function checkNever(s: PolicyScope, facts: PolicyFacts, at: (node: string
 }
 
 /**
+ * PT8.6, PT34.3, written from the specification: the tags an obligation of the lowered document carries for an item,
+ * risks first and then controls, each sorted and without repeats, prefixed risk: or control:. Only the obligation named
+ * after the item carries them; a rule's unknown companion and the scope's attribution rule carry none.
+ */
+export function expectedTags(s: PolicyScope): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const sorted = (xs: { tag: string }[] | undefined) => [...new Set((xs ?? []).map((x) => x.tag))].sort();
+  for (const p of s.policies) for (const it of p.items) {
+    if (it.kind === 'Never') continue;
+    const tags = [...sorted(it.mitigates).map((t) => 'risk:' + t), ...sorted(it.implements).map((t) => 'control:' + t)];
+    out.set(p.name + '.' + it.name, tags);
+  }
+  return out;
+}
+
+/** Why the document's tags differ from the sources', or null. `got` is each obligation's tags, by id. */
+export function tagMismatch(s: PolicyScope, got: Record<string, string[]>): string | null {
+  const want = expectedTags(s);
+  for (const id of [...new Set([...Object.keys(got), ...want.keys()])].sort()) {
+    const g = JSON.stringify(got[id] ?? []);
+    const w = JSON.stringify(want.get(id) ?? []);
+    if (!(id in got) && want.has(id)) continue; // an obligation the document lacks is the decisions' to catch
+    if (g !== w) return `the obligation ${id} carries the tags ${g} in the lowered document, and its source names ${w} (PT34.3)`;
+  }
+  return null;
+}
+
+/**
  * Translation validation of a lowered policy: over every reachable pair of Σ (poly-ref's, and the engine's own
  * model) and every proposal of the table, the engine's decision is PS8's. `engine` steps the lowered document.
  */
-export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { initial: () => unknown; step: (model: unknown, proposal: Record<string, any>, opts?: { approved?: boolean }) => { decision: Decision; next: unknown } }, opts: { maxStates?: number; evaluate?: typeof decide } = {}): { mismatch: WitnessStep[] | null; detail: string; pairs: number; rows: number; capHit: boolean } {
+export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { initial: () => unknown; step: (model: unknown, proposal: Record<string, any>, opts?: { approved?: boolean }) => { decision: Decision; next: unknown }; tags?: () => Record<string, string[]> }, opts: { maxStates?: number; evaluate?: typeof decide } = {}): { mismatch: WitnessStep[] | null; detail: string; pairs: number; rows: number; capHit: boolean } {
+  // PT34.3, S586: the tags the lowered document gives each obligation are those of its source item, read back before
+  // any decision is compared (a tag decides nothing, PS8.10, so no row of the table could catch a tag fault).
+  if (engine.tags) {
+    const bad = tagMismatch(s, engine.tags());
+    if (bad) return { mismatch: [], detail: bad, pairs: 0, rows: 0, capHit: false };
+  }
   const table = proposalTable(s, facts);
   const maxStates = opts.maxStates ?? 10_000;
   const start = { sigma: initialSigma(s), model: engine.initial(), path: [] as WitnessStep[] };

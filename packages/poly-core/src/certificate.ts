@@ -118,6 +118,15 @@ export interface Certificate {
     vaults?: { credential: string; store: 'dev-keychain' | 'kms'; package: string; version: string; digest: string }[];
     /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */
     policyEngine?: { name: 'polyaxion'; commit: string };
+    /**
+     * PT34.3, S586: in a project that opts in to risk reporting, the catalogs, the exposure and every policy item with
+     * its tags; read back by poly-ref against the sources. Absent in a project that has not opted in.
+     */
+    risk?: {
+      catalogs: { catalog: string; version: string; digest: string }[];
+      exposure: string[];
+      items: Record<string, { scope: string; kind: 'rule' | 'machine' | 'invariant' | 'recalled' | 'never'; risks: string[]; controls: string[] }>;
+    };
     /** S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. */
     adapters?: { channel: string; adapter: string; package: string; version: string; digest: string }[];
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */

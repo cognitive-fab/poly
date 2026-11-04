@@ -45,5 +45,8 @@ export function policyEngine(px: any, plan: any) {
     }
     return { decision, reason: r.reject as string | null, next: decision === 'allow' ? { ...model, ...r.next } : model };
   };
-  return { initial, step };
+  // PT34.3, S586: each obligation's tags as the compiled plan carries them, which policy-tv reads back (Polyaxion
+  // normalises an absent field to []).
+  const tags = () => Object.fromEntries((plan.obligations ?? []).map((o: { id: string; tags?: unknown }) => [o.id, Array.isArray(o.tags) ? o.tags.map(String) : []]));
+  return { initial, step, tags };
 }

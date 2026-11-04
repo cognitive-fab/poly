@@ -203,8 +203,17 @@ export interface PolicyVar extends NodeBase { kind: 'PolicyVar'; name: string; t
 
 export type PolicyItem = RuleObligation | MachineObligation | InvariantObligation | Recalled | Never;
 
+/** A risk or control tag, `"<catalog>:<id>"`, with the position of its opening quote (PT8.6, S586). */
+export interface Tag { tag: string; line: number; col: number }
+
+/**
+ * PT8.6, S586: the risks an item mitigates and the controls it implements, as written, repeats included. A field is
+ * absent when its clause is, so an untagged item is the object it was before S586 (PT34.3, RT15).
+ */
+export interface Tags { mitigates?: Tag[]; implements?: Tag[] }
+
 /** `obligation o "text" rule { when W require Q else s on unknown u }` (PS8.2). */
-export interface RuleObligation extends NodeBase {
+export interface RuleObligation extends NodeBase, Tags {
   kind: 'RuleObligation';
   name: string;
   text: string;
@@ -216,7 +225,7 @@ export interface RuleObligation extends NodeBase {
 }
 
 /** `obligation o "text" machine { states … initial … from … deny in … end … }` (PT8.1, PT8.2). */
-export interface MachineObligation extends NodeBase {
+export interface MachineObligation extends NodeBase, Tags {
   kind: 'MachineObligation';
   name: string;
   text: string;
@@ -230,13 +239,13 @@ export interface MachineObligation extends NodeBase {
 }
 
 /** `obligation o "text" invariant { e }` over the policy's vars. */
-export interface InvariantObligation extends NodeBase { kind: 'InvariantObligation'; name: string; text: string; expr: Expr }
+export interface InvariantObligation extends NodeBase, Tags { kind: 'InvariantObligation'; name: string; text: string; expr: Expr }
 
 /** `recalled o "text"`: durable text, not enforced. */
-export interface Recalled extends NodeBase { kind: 'Recalled'; name: string; text: string }
+export interface Recalled extends NodeBase, Tags { kind: 'Recalled'; name: string; text: string }
 
 /** `never n "text": allow when e` (S149): the gate never allows a proposal for which e holds; proved, never lowered. */
-export interface Never extends NodeBase { kind: 'Never'; name: string; text: string; when: Expr }
+export interface Never extends NodeBase, Tags { kind: 'Never'; name: string; text: string; when: Expr }
 
 /**
  * `configuration c { … }` (PS13, PT7a): named instances of machines of this module, the inputs the

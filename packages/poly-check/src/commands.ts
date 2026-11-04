@@ -110,6 +110,9 @@ async function checkOutcome(target: string, o: { root?: string; host?: string; c
       lines.push(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
     } else if (p.handlers) lines.push(`handlers: lint not run (${p.handlers.reason})\n`);
     if (p.host) lines.push(hostText(p.host));
+    // PT34.2, PT12.3a: the risk warnings of a project that opts in, beside the verdict.
+    for (const w of p.warnings ?? []) lines.push(`warning: ${w.text}
+`);
     lines.push(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
     return { exit: p.exit, result: { report, files: report.files, ...(p.host ? { host: hostJson(p.host) } : {}), verdict: p.verdict, exit: p.exit }, text: lines.join('') };
   }

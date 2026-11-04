@@ -196,6 +196,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL6504: { name: 'POLICY_SCOPE_UNMATCHED', stage: 'policy', severity: 'error' },
   // PT8.4 (language findings 24): a policy scope with a star; a glob over module names is not a scope.
   PL6505: { name: 'POLICY_SCOPE_GLOB', stage: 'policy', severity: 'error' },
+  // PT34.2, S586: a tag no bundled catalog holds in its clause, and an exposure id that is not a MIT subdomain.
+  PL6506: { name: 'POLICY_TAG_UNKNOWN', stage: 'policy', severity: 'error' },
+  PL6507: { name: 'EXPOSURE_TAG_UNKNOWN', stage: 'policy', severity: 'error' },
   // S149: a policy allows a proposal its own `never` statement forbids.
   PL6503: { name: 'NEVER_VIOLATED', stage: 'policy', severity: 'finding' },
   // PS20.7, PT30.6: a promotion the sources, the record or the corpus kind do not bear out.

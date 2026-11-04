@@ -13,6 +13,7 @@ import { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from '../reserved.js';
 import { profileProblem, underBase, type ProviderEntry, type ProviderProfile } from '../credentials.js';
 import { priceTableProblem, reservationOf, type PriceTable } from '../money.js';
 import { mapProblem, routePathOk, routedDecisions, type CalibrationFile, type RoutingFiles } from '../routing.js';
+import { checkPolicyTags, type Catalogs } from '../catalogs.js';
 
 // ── semantic types ─────────────────────────────────────────────────────────
 
@@ -199,6 +200,11 @@ export interface CheckOptions {
   providers?: Readonly<Record<string, ProviderEntry>>;
   /** PS18.3, PT10r: the price tables and calibration maps the module's routes name, found by poly-check beside the source. */
   routing?: Readonly<RoutingFiles>;
+  /**
+   * PT34.2, S586: the catalogs a policy tag is checked against (default: the repository's std). `false` leaves the tags
+   * to the caller: poly-check checks them in the policy-types stage, so a bad tag refuses the scope, not the module.
+   */
+  policyTags?: false | (() => Catalogs);
 }
 
 export function checkModule(module: A.Module, opts: CheckOptions = {}): CheckResult {
@@ -437,6 +443,7 @@ class Checker {
         if (body(first) !== body(e)) this.err('PL1002', e, `effect ${e.name} reads or writes the source as ${first.name} does, with kind "${k}", and differs from it; a machine holds one retrieval or remember per source and kind (PS17.2, S41 with S451)`);
       }
     }
+    if (this.opts.policyTags !== false) this.diags.push(...checkPolicyTags(this.module, this.opts.policyTags));
     return { diagnostics: this.diags, env: this.env, machines };
   }
 

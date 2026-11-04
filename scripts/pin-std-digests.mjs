@@ -1,4 +1,5 @@
-// Writes std/PINS.json: the digest of each .poly file of the standard library (PS23.4, G4). Run it after any change to a library file; the pins are committed with
+// Writes std/PINS.json: the digest of each .poly file of the standard library (PS23.4, G4), and of each risk and control
+// catalog under std/catalogs/ (PT34.1, S586), which the check reads only as pinned. Run it after any change to a library file; the pins are committed with
 // the change. A file that is not pinned is not the library, and may not declare an effect idempotent by nature.
 // usage: node scripts/pin-std-digests.mjs
 import { createHash } from 'node:crypto';
@@ -12,7 +13,7 @@ const walk = (dir) => {
   for (const name of readdirSync(dir).sort()) {
     const f = join(dir, name);
     if (statSync(f).isDirectory()) walk(f);
-    else if (name.endsWith('.poly')) files.push(f);
+    else if (name.endsWith('.poly') || (relative(STD, dir) === 'catalogs' && name.endsWith('.json'))) files.push(f);
   }
 };
 walk(STD);

@@ -16,6 +16,8 @@ import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
 import { STD } from './uses.js';
+import { optsIn, riskRecord } from './risk.js';
+import { riskProblems } from '@poly/ref';
 import { secretShapes } from './secrets.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
 import { KeyringError, keyringChain } from './keyrings.js';
@@ -181,14 +183,18 @@ function moduleOf(file: string): A.Module | null {
 }
 
 /** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files, the keyrings. */
-interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell'; credentials?: Record<string, { store: 'dev-keychain' | 'kms' }> }
+interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell'; credentials?: Record<string, { store: 'dev-keychain' | 'kms' }>; risk?: { program: A.Module[]; exposure?: string[] } }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
 async function checkTarget(target: string, root?: string, std?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(manifest.credentials ? { credentials: manifest.credentials } : {}) };
+    const report = await checkProject(abs, { root: abs, ...(std ? { std } : {}) });
+    // PT34.3: a project that opts in records poly.risk, from its sources as checked.
+    const program = files.map(moduleOf).filter((m): m is A.Module => !!m);
+    const risk = optsIn(manifest, program) ? { program, ...(manifest.exposure ? { exposure: manifest.exposure.risks } : {}) } : undefined;
+    return { dir: abs, name: manifest.name, files, report, keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(manifest.credentials ? { credentials: manifest.credentials } : {}), ...(risk ? { risk } : {}) };
   }
   const dir = resolve(root ?? dirname(abs));
   const r = await checkFile(abs, { root: dir, ...(std ? { std } : {}) });
@@ -628,7 +634,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(promos.list.length ? { promotions: promos.list, promotionFiles: promos.files } : {}), ...(props.list.length ? { proposals: props.list } : {}), ...(refits.list.length ? { refits: refits.list } : {}), ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(routes.length ? [ROUTING_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], ...(assumptions.length ? { assumptions } : {}), handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c, i) => ({ name: opts.fault === 'rename-route' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(promos.list.length ? { promotions: promos.list, promotionFiles: promos.files } : {}), ...(props.list.length ? { proposals: props.list } : {}), ...(refits.list.length ? { refits: refits.list } : {}), ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(routes.length ? [ROUTING_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], ...(assumptions.length ? { assumptions } : {}), handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c, i) => ({ name: opts.fault === 'rename-route' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}), ...(c.risk ? { risk: riskRecord(c.risk.exposure, c.risk.program, opts.std) } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -690,6 +696,10 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const ok = q.signature && engine && policyFile.has(q.scope) && verifyRecord(q.signature, back.poly.keyrings, { kind: 'policy', subject: policySubject(policyParts(q.scope, q.sequence ?? 0, sha256OfBytes(readFileSync(join(dir, q.path))), back.poly.sources, engine)) }).ok;
     if (!ok) problems.push({ name: 'policies', problem: `scope ${q.scope}'s signature does not verify over its document, source and engine` });
   }
+  // PT34.3, S586: poly.risk read back by poly-ref against the sources, the exposure and the pinned catalogs; and absent
+  // from a project that has not opted in.
+  if (c.risk) for (const p of riskProblems(back.poly.risk, c.risk.program, c.risk.exposure, opts.std ?? STD)) problems.push({ name: 'risk', problem: p });
+  else if (back.poly.risk) problems.push({ name: 'risk', problem: 'poly.risk is certified for a project that has not opted in to risk reporting (PT34.3)' });
   // S194: the chain read back is the one on disk now, anchor and head.
   if (JSON.stringify(back.poly.keyringChain ?? null) !== JSON.stringify(chainOf(projectDir))) problems.push({ name: 'keyrings', problem: 'the certified keyring chain is not the chain on disk' });
   // S150: the keyrings read back are the ones the manifest names now.

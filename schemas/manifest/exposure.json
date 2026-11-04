@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "description": "the risks the project considers itself exposed to (PT34.2, S586); declaring it opts the project in to risk reporting",
+  "additionalProperties": false,
+  "required": [
+    "risks"
+  ],
+  "properties": {
+    "risks": {
+      "type": "array",
+      "description": "each a subdomain of the bundled MIT AI Risk Repository catalog, \"mit:<d>.<s>\"",
+      "items": {
+        "type": "string",
+        "pattern": "^mit:[0-9]+[.][0-9]+$"
+      }
+    }
+  }
+}

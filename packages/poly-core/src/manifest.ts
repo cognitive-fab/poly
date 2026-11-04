@@ -42,6 +42,8 @@ export interface Manifest {
   run?: RunConfig;
   /** PT10f, S200: the vault store each credential keeps its tokens in. */
   credentials?: Record<string, { store: 'dev-keychain' | 'kms' }>;
+  /** PT34.2, S586: the risks the project considers itself exposed to, each a MIT subdomain; declaring it opts in to risk reporting. */
+  exposure?: { risks: string[] };
 }
 
 export interface RunConfig {
@@ -70,9 +72,20 @@ export const RUN_SCHEMA = {
   },
 } as const;
 
+/** PT34.2, S586: the published schema of poly.json's `exposure` field (schemas/manifest/exposure.json); parseManifest enforces its shape, and poly check each id (PL6507). */
+export const EXPOSURE_SCHEMA = {
+  type: 'object',
+  description: 'the risks the project considers itself exposed to (PT34.2, S586); declaring it opts the project in to risk reporting',
+  additionalProperties: false,
+  required: ['risks'],
+  properties: {
+    risks: { type: 'array', description: 'each a subdomain of the bundled MIT AI Risk Repository catalog, "mit:<d>.<s>"', items: { type: 'string', pattern: '^mit:[0-9]+[.][0-9]+$' } },
+  },
+} as const;
+
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation', 'run', 'credentials']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation', 'run', 'credentials', 'exposure']);
 const RUN_FIELDS = new Set(Object.keys(RUN_SCHEMA.properties));
 
 /** S188: poly.json's `run` field, held to RUN_SCHEMA. */
@@ -101,8 +114,15 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
   const m = raw as Record<string, unknown>;
   // S210, D9: production is a property of the keyring anchor, which poly.json can neither set nor clear.
   if (Object.hasOwn(m, 'production')) throw new ManifestError(`${where}: "production" is set on the project's keyring anchor with poly anchor production, never in poly.json (PT12.5, S210)`);
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation, run, credentials)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation, run, credentials, exposure)`);
   if (m.run !== undefined) checkRun(m.run, where);
+  if (m.exposure !== undefined) {
+    // PT34.2: the shape is refused here, as under run; each id is poly check's, against the catalog (PL6507).
+    const e = m.exposure as Record<string, unknown>;
+    if (e === null || typeof e !== 'object' || Array.isArray(e)) throw new ManifestError(`${where}: "exposure" must be { "risks": [ ... ] } (PT34.2)`);
+    for (const k of Object.keys(e)) if (k !== 'risks') throw new ManifestError(`${where}: unknown field "${k}" under "exposure" (PT34.2 lists risks)`);
+    if (!Array.isArray(e.risks) || !e.risks.every((r) => typeof r === 'string')) throw new ManifestError(`${where}: "exposure.risks" must be a list of strings, each "mit:<d>.<s>" (PT34.2)`);
+  }
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {

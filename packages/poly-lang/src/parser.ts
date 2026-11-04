@@ -577,6 +577,7 @@ class Parser {
         this.next();
         const oname = this.dashedName();
         const text = this.str('the obligation\'s text');
+        const tags = this.tags();
         if (this.at('rule')) {
           this.next();
           this.expect('{');
@@ -600,7 +601,7 @@ class Parser {
             this.lineAnchor(at, 'onUnknown', anchors);
           }
           this.expect('}');
-          const rule = this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, when, require, severity: sev, onUnknown }, true);
+          const rule = this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, ...tags, when, require, severity: sev, onUnknown }, true);
           for (const a of anchors) this.lineAnchors.push({ owner: rule, ...a });
           items.push(rule);
         } else if (this.at('machine')) {
@@ -643,7 +644,7 @@ class Parser {
           const end = this.identList('a state');
           this.lineAnchor(atEnd, 'end', anchors);
           this.expect('}');
-          const machine = this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, states, initial, transitions, guards, end }, true);
+          const machine = this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, ...tags, states, initial, transitions, guards, end }, true);
           for (const a of anchors) this.lineAnchors.push({ owner: machine, ...a });
           items.push(machine);
         } else if (this.at('invariant')) {
@@ -651,24 +652,47 @@ class Parser {
           this.expect('{');
           const expr = this.expr();
           this.expect('}');
-          items.push(this.node<A.InvariantObligation>(s, { kind: 'InvariantObligation', name: oname, text, expr }, true));
+          items.push(this.node<A.InvariantObligation>(s, { kind: 'InvariantObligation', name: oname, text, ...tags, expr }, true));
         } else this.fail('expected rule, machine or invariant');
       } else if (this.at('recalled')) {
         this.next();
         const rname = this.dashedName();
-        items.push(this.node<A.Recalled>(s, { kind: 'Recalled', name: rname, text: this.str('the recalled text') }, true));
+        const text = this.str('the recalled text');
+        items.push(this.node<A.Recalled>(s, { kind: 'Recalled', name: rname, text, ...this.tags() }, true));
       } else if (this.at('never')) {
         this.next();
         const nname = this.dashedName();
         const text = this.str('the statement\'s text');
+        const tags = this.tags();
         this.expect(':');
         this.expect('allow');
         this.expect('when');
-        items.push(this.node<A.Never>(s, { kind: 'Never', name: nname, text, when: this.expr() }, true));
+        items.push(this.node<A.Never>(s, { kind: 'Never', name: nname, text, ...tags, when: this.expr() }, true));
       } else this.fail('expected var, obligation, recalled or never');
     }
     this.next();
     return this.node<A.Policy>(start, { kind: 'Policy', name, scope, ...(requiresAttribution ? { requiresAttribution: true as const } : {}), vars, items }, true);
+  }
+
+  /**
+   * PT8.6, S586: `[ mitigates Tag { , Tag } ] [ implements Tag { , Tag } ]` after an item's text. The two words are
+   * keywords only here, so no name is reserved. Each tag keeps the position of its opening quote, for PL6506, and repeats
+   * are kept: the formatter sorts and removes them, the parser does not.
+   */
+  private tags(): A.Tags {
+    const list = (): A.Tag[] => {
+      const out: A.Tag[] = [];
+      do {
+        if (out.length) this.next();
+        const tok = this.peek();
+        out.push({ tag: this.str('a tag, "<catalog>:<id>"'), line: tok.line, col: tok.col });
+      } while (this.atPunct(','));
+      return out;
+    };
+    const out: A.Tags = {};
+    if (this.at('mitigates')) { this.next(); out.mitigates = list(); }
+    if (this.at('implements')) { this.next(); out.implements = list(); }
+    return out;
   }
 
   private identList(what: string): string[] {

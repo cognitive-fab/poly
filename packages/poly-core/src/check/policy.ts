@@ -8,6 +8,7 @@
 import type * as A from '../ast.js';
 import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
 import { effectKind, effectLabels, effectClass, LABELS } from './check.js';
+import { checkPolicyTags, type Catalogs } from '../catalogs.js';
 
 /** The type of a policy expression. Every input is optional, so `tri` is the type of a comparison (PS8.0). */
 export type PType =
@@ -159,8 +160,8 @@ export interface PolicyCheck {
 }
 
 /** Checks the policies of a module against the program; `module` names the file's module for diagnostics. */
-export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyCheck {
-  const diagnostics: Diagnostic[] = [];
+export function checkPolicies(module: A.Module, program: PolicyProgram, opts: { catalogs?: () => Catalogs } = {}): PolicyCheck {
+  const diagnostics: Diagnostic[] = checkPolicyTags(module, opts.catalogs);
   const reads = new Map<string, string[]>();
   const at = (n: A.NodeBase): NodeAt => ({ module: module.name, node: n.id, line: n.span?.line, col: n.span?.col });
   const err = (code: string, n: A.NodeBase, msg: string) => diagnostics.push(diag(code, at(n), msg));

@@ -12,8 +12,8 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict, type WitnessStep } from '@poly/core';
-import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
+import { checkPolicies, policyProgram, loadCatalogs, diag, type Diagnostic, type Module, type Policy, type Verdict, type WitnessStep } from '@poly/core';
+import { lowerPolicyScope, type PolicyDoc, type PolicyFault } from '@poly/lower';
 import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, dischargeCheck, unattributedEffects, type PolicyFacts } from '@poly/ref';
 
 export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'regions' | 'policy-tv' | 'never';
@@ -221,11 +221,12 @@ export function mandatesPerMode(scope: string, policies: Policy[], facts: Policy
 }
 
 /** The policies of `module`, checked against `program` (the project's modules), one report per scope. */
-export async function policyReports(module: Module, program: Module[], root: string): Promise<PolicyReport[]> {
+export async function policyReports(module: Module, program: Module[], root: string, opts: { std?: string; policyFault?: PolicyFault } = {}): Promise<PolicyReport[]> {
   const policies = module.decls.filter((d): d is Policy => d.kind === 'Policy');
   if (!policies.length) return [];
   const facts = policyProgram(program);
-  const typed = checkPolicies(module, facts);
+  // PT34.2: a tag is checked in this stage, against the catalogs of the std the build reads (catalog-unpinned throws).
+  const typed = checkPolicies(module, facts, { catalogs: () => loadCatalogs(opts.std) });
   const scopes = new Map<string, Policy[]>();
   for (const p of policies) { if (!scopes.has(p.scope)) scopes.set(p.scope, []); scopes.get(p.scope)!.push(p); }
   const { polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolycheck, policyEngine } = await import('@poly/runtime');
@@ -259,7 +260,7 @@ export async function policyReports(module: Module, program: Module[], root: str
       continue;
     }
     // policy-lower: one document per scope, written where admission certifies it.
-    const lowered = lowerPolicyScope(scope, ps, 'sha256:' + createHash('sha256').update(JSON.stringify(ps)).digest('hex').slice(0, 16));
+    const lowered = lowerPolicyScope(scope, ps, 'sha256:' + createHash('sha256').update(JSON.stringify(ps)).digest('hex').slice(0, 16), opts.policyFault);
     withExamples(lowered, { scope, policies: ps }, refFacts);
     const text = JSON.stringify(lowered, null, 2) + '\n';
     const rel = `.poly/build/policies/${policySlug(scope)}.policy.json`;

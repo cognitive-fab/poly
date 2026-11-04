@@ -83,7 +83,7 @@ export const defaultOnUnknown = (s: A.RuleObligation['severity']) => (s === 'war
  * Deliberately broken policy lowerings, for one test only (the standing rule on artefacts): translation validation
  * must catch each with PL2501. `poly check` never sets one.
  */
-export const POLICY_FAULTS = ['drop-unknown-rule', 'deny-as-warn', 'drop-guard'] as const;
+export const POLICY_FAULTS = ['drop-unknown-rule', 'deny-as-warn', 'drop-guard', 'policy-tag-dropped', 'policy-tag-moved'] as const;
 export type PolicyFault = (typeof POLICY_FAULTS)[number];
 
 /**
@@ -104,6 +104,31 @@ function transitionsOf(it: A.MachineObligation, names: Set<string>): { from: str
     });
   }
   return out;
+}
+
+/**
+ * PT34.3, S586: an item's tags as its obligation carries them: risks first, then controls, each sorted by the string and
+ * without repeats (the formatter's order), prefixed `risk:` or `control:`. An untagged item gets no field at all, never
+ * `tags: []`, so its document and digest are v1.5.1's (RT15). Polyaxion's format v2 carries the field and decides
+ * nothing by it (PS8.10).
+ */
+function tagsOf(it: A.Tags): { tags: string[] } | Record<string, never> {
+  const list = (ts: A.Tag[] | undefined) => [...new Set((ts ?? []).map((t) => t.tag))].sort();
+  const tags = [...list(it.mitigates).map((t) => `risk:${t}`), ...list(it.implements).map((t) => `control:${t}`)];
+  return tags.length ? { tags } : {};
+}
+
+/** RT7: the two broken tag lowerings, applied to the document's obligations in order. */
+function breakTags(obligations: Record<string, unknown>[], fault: 'policy-tag-dropped' | 'policy-tag-moved'): void {
+  const from = obligations.find((o) => Array.isArray(o.tags) && (o.tags as string[]).length);
+  if (!from) return;
+  const tags = from.tags as string[];
+  if (fault === 'policy-tag-dropped') { from.tags = tags.slice(0, -1); return; }
+  const tag = tags[0];
+  const to = obligations.find((o) => o !== from && !((o.tags as string[] | undefined) ?? []).includes(tag));
+  if (!to) return;
+  from.tags = tags.slice(1);
+  to.tags = [...((to.tags as string[] | undefined) ?? []), tag];
 }
 
 export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDigest: string, fault?: PolicyFault): PolicyDoc {
@@ -128,14 +153,14 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
         const W = it.when ? px(it.when, names) : null;
         const Q = px(it.require, names);
         const severity = fault === 'deny-as-warn' && it.severity === 'deny' ? 'warn' : it.severity;
-        rules.push({ rank: rank[it.severity], o: { id, kind: 'rule', text: it.text, severity, when: W ? `${PROPOSAL} && coalesce(${W}, false)` : PROPOSAL, require: `coalesce(${Q}, false)`, source } });
+        rules.push({ rank: rank[it.severity], o: { id, kind: 'rule', text: it.text, ...tagsOf(it), severity, when: W ? `${PROPOSAL} && coalesce(${W}, false)` : PROPOSAL, require: `coalesce(${Q}, false)`, source } });
         const u = it.onUnknown ?? defaultOnUnknown(it.severity);
         if (W && u !== 'skip' && fault !== 'drop-unknown-rule') rules.push({ rank: rank[u], o: { id: `${id}.unknown`, kind: 'rule', text: `${it.text} (its condition is unknown, PS8.2)`, severity: u, when: `${PROPOSAL} && isNull(${W})`, require: 'false', source: { ...source, unknown: true } } });
         break;
       }
       case 'MachineObligation':
         others.push({
-          id, kind: 'machine', text: it.text, source,
+          id, kind: 'machine', text: it.text, ...tagsOf(it), source,
           machine: {
             states: it.states, initial: it.initial,
             transitions: transitionsOf(it, names),
@@ -145,10 +170,10 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
         });
         break;
       case 'InvariantObligation':
-        others.push({ id, kind: 'invariant', text: it.text, invariant: px(it.expr, names), source });
+        others.push({ id, kind: 'invariant', text: it.text, ...tagsOf(it), invariant: px(it.expr, names), source });
         break;
       case 'Recalled':
-        others.push({ id, kind: 'recalled', text: it.text, source });
+        others.push({ id, kind: 'recalled', text: it.text, ...tagsOf(it), source });
         break;
       case 'Never':
         break; // proved by poly-ref over the decision table (S149); nothing to enforce
@@ -157,5 +182,6 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
   // S156, PD5.2.3: a scope that requires attribution denies a compensable or irreversible effect whose origin has no claims.
   if (policies.some((p) => p.requiresAttribution)) rules.push({ rank: rank.deny, o: { id: `${scope}.attribution`, kind: 'rule', text: 'A compensable or irreversible effect has an origin with claims (PD5.2.3).', severity: 'deny', when: `${PROPOSAL} && (action.proposal == 'effect') && (action.effect.class in ['compensable', 'irreversible'])`, require: 'coalesce(!isNull(action.lineage.origin), false)', source: { policy: policies.find((p) => p.requiresAttribution)!.name, obligation: '$attribution' } } });
   const obligations = [...rules.sort((a, b) => a.rank - b.rank).map((r) => r.o), ...others];
+  if (fault === 'policy-tag-dropped' || fault === 'policy-tag-moved') breakTags(obligations, fault);
   return { polyaxion: '2', id: `poly/${scope}`, version: sourceDigest, scope, description: `The policies of scope ${scope}: ${policies.map((p) => p.name).join(', ')}.`, vars, obligations };
 }
