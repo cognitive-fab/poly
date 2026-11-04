@@ -1,0 +1,157 @@
+{
+  "catalog": "mit",
+  "version": "Version 4 (2025-12-04)",
+  "source": "MIT AI Risk Repository, Domain Taxonomy of AI Risks, https://airisk.mit.edu/risks",
+  "retrieved": "2026-11-04",
+  "sourceDigest": "sha256:f6e0c698fc9ccb55d71e80f0aa41411d56f5ce2ab8a20c7a3b3777bd14fb25e8",
+  "entries": [
+    {
+      "id": "1",
+      "label": "Discrimination & Toxicity"
+    },
+    {
+      "id": "1.1",
+      "label": "Unfair discrimination and misrepresentation",
+      "parent": "1"
+    },
+    {
+      "id": "1.2",
+      "label": "Exposure to toxic content",
+      "parent": "1"
+    },
+    {
+      "id": "1.3",
+      "label": "Unequal performance across groups",
+      "parent": "1"
+    },
+    {
+      "id": "2",
+      "label": "Privacy & Security"
+    },
+    {
+      "id": "2.1",
+      "label": "Compromise of privacy by obtaining, leaking or correctly inferring sensitive information",
+      "parent": "2"
+    },
+    {
+      "id": "2.2",
+      "label": "AI system security vulnerabilities and attacks",
+      "parent": "2"
+    },
+    {
+      "id": "3",
+      "label": "Misinformation"
+    },
+    {
+      "id": "3.1",
+      "label": "False or misleading information",
+      "parent": "3"
+    },
+    {
+      "id": "3.2",
+      "label": "Pollution of information ecosystem and loss of consensus reality",
+      "parent": "3"
+    },
+    {
+      "id": "4",
+      "label": "Malicious Actors"
+    },
+    {
+      "id": "4.1",
+      "label": "Disinformation, surveillance, and influence at scale",
+      "parent": "4"
+    },
+    {
+      "id": "4.2",
+      "label": "Cyberattacks, weapons development or use and mass harm",
+      "parent": "4"
+    },
+    {
+      "id": "4.3",
+      "label": "Fraud, scams, and targeted manipulation",
+      "parent": "4"
+    },
+    {
+      "id": "5",
+      "label": "Human-Computer Interaction"
+    },
+    {
+      "id": "5.1",
+      "label": "Overreliance and unsafe use",
+      "parent": "5"
+    },
+    {
+      "id": "5.2",
+      "label": "Loss of human agency and autonomy",
+      "parent": "5"
+    },
+    {
+      "id": "6",
+      "label": "Socioeconomic & Environmental"
+    },
+    {
+      "id": "6.1",
+      "label": "Power centralization and unfair distribution of benefits",
+      "parent": "6"
+    },
+    {
+      "id": "6.2",
+      "label": "Increased inequality and decline in employment quality",
+      "parent": "6"
+    },
+    {
+      "id": "6.3",
+      "label": "Economic and cultural devaluation of human effort",
+      "parent": "6"
+    },
+    {
+      "id": "6.4",
+      "label": "Competitive dynamics",
+      "parent": "6"
+    },
+    {
+      "id": "6.5",
+      "label": "Governance failure",
+      "parent": "6"
+    },
+    {
+      "id": "6.6",
+      "label": "Environmental harm",
+      "parent": "6"
+    },
+    {
+      "id": "7",
+      "label": "AI System Safety, Failures, & Limitations"
+    },
+    {
+      "id": "7.1",
+      "label": "AI pursuing its own goals in conflict with human goals or values",
+      "parent": "7"
+    },
+    {
+      "id": "7.2",
+      "label": "AI possessing dangerous capabilities",
+      "parent": "7"
+    },
+    {
+      "id": "7.3",
+      "label": "Lack of capability or robustness",
+      "parent": "7"
+    },
+    {
+      "id": "7.4",
+      "label": "Lack of transparency or interpretability",
+      "parent": "7"
+    },
+    {
+      "id": "7.5",
+      "label": "AI welfare and rights",
+      "parent": "7"
+    },
+    {
+      "id": "7.6",
+      "label": "Multi-agent risks",
+      "parent": "7"
+    }
+  ]
+}

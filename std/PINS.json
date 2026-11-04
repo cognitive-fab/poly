@@ -1,6 +1,9 @@
 {
   "v": 1,
   "files": {
+    "catalogs/iso-42001.json": "sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f",
+    "catalogs/mit-ai-risk.json": "sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b",
+    "catalogs/nist-ai-rmf.json": "sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc",
     "channels/email.poly": "sha256:7b98b2dbed491fb9c3e66b5ae08096638b72c6e92b5db3585c41c37762cbd401",
     "channels/slack.poly": "sha256:c8bedda9c6a85e1d1dfa877ef561a54b912ace092246d840c5bcca24ce7d2800",
     "channels/sms.poly": "sha256:e6e9a2a367e531a8dc609e81064a835148e98009acdd43b53fc053d1a3a3d062",

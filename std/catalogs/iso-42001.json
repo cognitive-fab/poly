@@ -1,0 +1,245 @@
+{
+  "catalog": "iso",
+  "version": "ISO/IEC 42001:2023",
+  "source": "ISO/IEC 42001:2023, Annex A (control ids only; ids checked against a public listing, https://riskprofs.com/iso-42001-annex-a-controls-list/)",
+  "retrieved": "2026-11-04",
+  "sourceDigest": "sha256:0053924ea7019df23c3ebf88eccf30ea0aa0c97caf24eb5487acf630358aa65e",
+  "entries": [
+    {
+      "id": "A.10",
+      "label": "Working with other parties"
+    },
+    {
+      "id": "A.10.2",
+      "label": "Duties are shared out with others",
+      "parent": "A.10"
+    },
+    {
+      "id": "A.10.3",
+      "label": "Suppliers",
+      "parent": "A.10"
+    },
+    {
+      "id": "A.10.4",
+      "label": "Customers",
+      "parent": "A.10"
+    },
+    {
+      "id": "A.2",
+      "label": "The organisation's AI policy"
+    },
+    {
+      "id": "A.2.2",
+      "label": "An AI policy is written",
+      "parent": "A.2"
+    },
+    {
+      "id": "A.2.3",
+      "label": "The AI policy agrees with the other policies",
+      "parent": "A.2"
+    },
+    {
+      "id": "A.2.4",
+      "label": "The AI policy is reviewed",
+      "parent": "A.2"
+    },
+    {
+      "id": "A.3",
+      "label": "How AI work is organised"
+    },
+    {
+      "id": "A.3.2",
+      "label": "People hold named AI duties",
+      "parent": "A.3"
+    },
+    {
+      "id": "A.3.3",
+      "label": "Concerns about AI can be raised",
+      "parent": "A.3"
+    },
+    {
+      "id": "A.4",
+      "label": "What AI systems need"
+    },
+    {
+      "id": "A.4.2",
+      "label": "The resources are listed",
+      "parent": "A.4"
+    },
+    {
+      "id": "A.4.3",
+      "label": "The data used is listed",
+      "parent": "A.4"
+    },
+    {
+      "id": "A.4.4",
+      "label": "The tools used are listed",
+      "parent": "A.4"
+    },
+    {
+      "id": "A.4.5",
+      "label": "The computing used is listed",
+      "parent": "A.4"
+    },
+    {
+      "id": "A.4.6",
+      "label": "The skills needed are listed",
+      "parent": "A.4"
+    },
+    {
+      "id": "A.5",
+      "label": "Effects of AI systems"
+    },
+    {
+      "id": "A.5.2",
+      "label": "A way to assess effects",
+      "parent": "A.5"
+    },
+    {
+      "id": "A.5.3",
+      "label": "Assessments of effects are kept",
+      "parent": "A.5"
+    },
+    {
+      "id": "A.5.4",
+      "label": "Effects on people and groups are assessed",
+      "parent": "A.5"
+    },
+    {
+      "id": "A.5.5",
+      "label": "Effects on society are assessed",
+      "parent": "A.5"
+    },
+    {
+      "id": "A.6",
+      "label": "Building and running AI systems"
+    },
+    {
+      "id": "A.6.1",
+      "label": "Guidance for building",
+      "parent": "A.6"
+    },
+    {
+      "id": "A.6.1.2",
+      "label": "Aims for building responsibly",
+      "parent": "A.6.1"
+    },
+    {
+      "id": "A.6.1.3",
+      "label": "Steps for building responsibly",
+      "parent": "A.6.1"
+    },
+    {
+      "id": "A.6.2",
+      "label": "The stages of a system's life",
+      "parent": "A.6"
+    },
+    {
+      "id": "A.6.2.2",
+      "label": "What the system must do is written",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.3",
+      "label": "How it was designed and built is written",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.4",
+      "label": "It is verified and validated",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.5",
+      "label": "It is put into service",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.6",
+      "label": "It is run and watched",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.7",
+      "label": "Its technical documents are kept",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.6.2.8",
+      "label": "Its events are logged",
+      "parent": "A.6.2"
+    },
+    {
+      "id": "A.7",
+      "label": "Data for AI systems"
+    },
+    {
+      "id": "A.7.2",
+      "label": "Data for building and improving",
+      "parent": "A.7"
+    },
+    {
+      "id": "A.7.3",
+      "label": "How data is obtained",
+      "parent": "A.7"
+    },
+    {
+      "id": "A.7.4",
+      "label": "Data is good enough",
+      "parent": "A.7"
+    },
+    {
+      "id": "A.7.5",
+      "label": "Where data came from is known",
+      "parent": "A.7"
+    },
+    {
+      "id": "A.7.6",
+      "label": "How data is prepared",
+      "parent": "A.7"
+    },
+    {
+      "id": "A.8",
+      "label": "Telling those concerned"
+    },
+    {
+      "id": "A.8.2",
+      "label": "Users are given what they need to know",
+      "parent": "A.8"
+    },
+    {
+      "id": "A.8.3",
+      "label": "Others can report problems",
+      "parent": "A.8"
+    },
+    {
+      "id": "A.8.4",
+      "label": "Incidents are told",
+      "parent": "A.8"
+    },
+    {
+      "id": "A.8.5",
+      "label": "Those concerned are told what they are owed",
+      "parent": "A.8"
+    },
+    {
+      "id": "A.9",
+      "label": "Using AI systems"
+    },
+    {
+      "id": "A.9.2",
+      "label": "Steps for using responsibly",
+      "parent": "A.9"
+    },
+    {
+      "id": "A.9.3",
+      "label": "Aims for using responsibly",
+      "parent": "A.9"
+    },
+    {
+      "id": "A.9.4",
+      "label": "Use stays within what was intended",
+      "parent": "A.9"
+    }
+  ]
+}
