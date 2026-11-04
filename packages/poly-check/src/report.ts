@@ -118,10 +118,12 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
   const trust = trustOf(input.trust);
   const certs = input.certificates.map((f) => readCertificate(f, input.build, trust));
   // PT34.4 item 2: each certificate's policy set, computed by declaring its documents in a fresh engine, as replay does.
-  const px = certs.some((c) => c.docs.length) ? await loadPolyaxion() : null;
+  const px = await loadPolyaxion();
   for (const c of certs) {
-    if (!c.docs.length) continue;
-    try { c.policySets = await PolicyGate.policySets(px, c.docs, [...new Set(c.docs.map((d) => d.scope))].sort()); } catch (e) { throw new ReportUsageError(`the policy set of ${c.file} cannot be computed: ${(e as Error).message}; the journal naming its certificate is then a precondition of the report (PT34.4, S586 Q6)`); }
+    // Every module of the program, governed or open: a module no policy governs has the open gate's policy set, which its
+    // runs record too (measured on the concierge's channel conversations and route, 2026-11-04).
+    const modules = [...new Set([...c.docs.map((d) => d.scope), ...(c.cert.subject?.machines ?? []).map((m) => m.id.slice(0, m.id.lastIndexOf('.')))])].sort();
+    try { c.policySets = await PolicyGate.policySets(px, c.docs, modules); } catch (e) { throw new ReportUsageError(`the policy set of ${c.file} cannot be computed: ${(e as Error).message}; the journal naming its certificate is then a precondition of the report (PT34.4, S586 Q6)`); }
   }
 
   // The store is copied, and only the copy is opened: the report writes nothing to the store (PT34.4).
@@ -159,7 +161,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       const matches = certs.filter((c) => !c.problem && [...versions].every((x) => c.moduleDigests.has(x)) && [...sets].every((s) => Object.values(c.policySets).includes(s)));
       if (!matches.length) { unidentified.push({ run: r.run }); continue; }
       if (matches.length > 1) { ambiguous.push({ run: r.run, certificates: matches.map((c) => c.digest).sort() }); continue; }
-      counted.push({ run: r.run, module: r.ns, c: matches[0], events: chain.map((e) => ({ kind: e.kind, at: e.at, body: (e.body ?? {}) as Record<string, any> })) });
+      counted.push({ run: r.run, module: r.wf.slice(0, r.wf.lastIndexOf('.')), c: matches[0], events: chain.map((e) => ({ kind: e.kind, at: e.at, body: (e.body ?? {}) as Record<string, any> })) });
     }
     const after: Record<string, string | null> = {};
     for (const r of await store.runs()) after[r.run] = (await store.chain(r.run)).at(-1)?.hash ?? null;
@@ -181,7 +183,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       items.set(id, { id, scope: x.scope, kind: x.kind, risks: x.risks, controls: x.controls, signer, signerName: signer ? people.get(signer) ?? null : null, sequence: pol?.sequence ?? null, counts: zero(), approvedBy: new Map(), unknownOutcomes: [] });
     }
   }
-  const scopes = new Map<string, { scope: string; allowed: number; unknownOutcomes: UnknownOutcome[] }>();
+  const scopes = new Map<string, { scope: string; allowed: number; unknownOutcomes: UnknownOutcome[]; open?: true }>();
   for (const c of countedCerts) for (const p of c.cert.poly?.policies ?? []) if (!scopes.has(p.scope)) scopes.set(p.scope, { scope: p.scope, allowed: 0, unknownOutcomes: [] });
   const runtime = new Map<string, { kind: 'refused' | 'escalated'; reason: string; endedBy?: string; count: number }>();
   const bump = (kind: 'refused' | 'escalated', reason: string, endedBy?: string) => {
@@ -219,7 +221,8 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       const named = itemOf(b.reason, r.c);
       switch (b.outcome) {
         case 'allowed': {
-          const s = scopes.get(r.module) ?? { scope: r.module, allowed: 0, unknownOutcomes: [] };
+          // A module no policy of the certificate governs is an open scope (PT9), and is said to be one.
+          const s = scopes.get(r.module) ?? { scope: r.module, allowed: 0, unknownOutcomes: [], ...(r.c.docs.some((d) => d.scope === r.module) ? {} : { open: true as const }) };
           s.allowed++;
           scopes.set(r.module, s);
           allowedIntents.add(intent);
@@ -355,13 +358,13 @@ export function reportMarkdown(j: any): string {
       out.push(`| ${cell(i.id)} | ${i.kind} | ${cell(i.controls.join(', ') || 'none')} | ${cell(signer(i))} | ${decides ? [c.refused, c.escalated, c.approved, c.timedOut, c.open, c.onUnknown].join(' | ') : 'declared | | | | |'} |`);
     }
     out.push('');
-    for (const i of r.items) for (const a of i.approvedBy) out.push(`- ${i.id}: approved ${a.count} time(s) by ${a.name ? `${a.name} (${a.keyId})` : a.keyId}`);
+    const approvals = r.items.flatMap((i: any) => i.approvedBy.map((a: any) => `- ${i.id}: approved ${a.count} time(s) by ${a.name ? `${a.name} (${a.keyId})` : a.keyId}`));
+    if (approvals.length) out.push(...approvals, '');
     const unknown = r.items.flatMap((i: any) => i.unknownOutcomes.map((u: any) => ({ ...u, item: i.id })));
-    if (unknown.length) { out.push('', 'Outcomes possibly executed and unknown (PS23):', ...unknown.map((u: any) => `- ${u.item}: ${u.outcome}, intent \`${u.intent}\` (${u.effectKind}), run ${u.run}`)); }
-    out.push('');
+    if (unknown.length) out.push('Outcomes possibly executed and unknown (PS23):', ...unknown.map((u: any) => `- ${u.item}: ${u.outcome}, intent \`${u.intent}\` (${u.effectKind}), run ${u.run}`), '');
   }
   out.push('## Allowed in each scope', '', 'An allow names no rule, so allows are counted per scope and no item is credited with one.', '', '| Scope | Allowed |', '|---|---|');
-  for (const s of j.scopes) out.push(`| ${cell(s.scope)} | ${s.allowed} |`);
+  for (const s of j.scopes) out.push(`| ${cell(s.scope)}${s.open ? ' (open: no policy governs it)' : ''} | ${s.allowed} |`);
   const scopeUnknown = j.scopes.flatMap((s: any) => s.unknownOutcomes);
   if (scopeUnknown.length) out.push('', 'Outcomes possibly executed and unknown (PS23):', ...outcomes(scopeUnknown));
   out.push('', '## Refused by the runtime (no rule)', '');
@@ -388,7 +391,7 @@ export function reportMarkdown(j: any): string {
   if (j.store.notCounted.length) out.push(...j.store.notCounted.map((x: any) => `- ${x.run}: ${x.problem}`)); else out.push('None: every run with a gate record verified.');
   out.push('', '## How the counts are made', '',
     '- Every run of the store is verified as `poly journal verify` verifies it; a run that does not verify is not counted.',
-    '- A run is counted under the certificate whose module digests and policy set it recorded, and its tags come from that certificate, never from the sources on disk.',
+    '- A run is counted under the certificate whose machine versions and policy set it recorded, and its tags come from that certificate, never from the sources on disk.',
     '- Allows are counted per scope: an allow names no rule, so no item is credited with one.',
     '- One item per refusal: the engine reports the first item that refused a proposal, so another item that would also have refused it is not credited.',
     '- An escalation is followed through the intent\'s later events in the period: approved, refused at its timeout, or open at the end of the period.',
