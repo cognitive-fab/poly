@@ -99,7 +99,7 @@ An allowed effect reaches the MCP client through a handler the host will provide
 
 The demo composes two signers: the gateway signs what it decided about each request, and poly signs what happened over the run. It also promises that poly holds no key of the Lab. This diagram shows where each key lives and what crosses between them.
 
-The Lab's API key lives only in surface B; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet.
+The key of the Lab's customer-records server lives only in surface B, as the Hello server's key lives only in the Hello surface; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet.
 
 [Open the diagram](trust.architecture.html). 10 components.
 
@@ -116,7 +116,7 @@ The Lab's API key lives only in surface B; the gateway's signing key only behind
 | **Box keys** *(planned)* | Holds the ledger signer and the approver's key on the box, outside the checkout, mode 600 (G0 step 5); the box has neither yet. |
 | **Signed ledger** | Keeps the signed, replayable record of the run. |
 
-**Deliberately not shown.** The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on; the channel, the Desk and the policy, drawn by the run-time questions.
+**Deliberately not shown.** The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on; the channel, the Desk and the policy, drawn by the run-time questions. The Hello surface, which holds the Hello server's key and is drawn by the status question.
 
 #### The long read
 

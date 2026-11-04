@@ -856,7 +856,7 @@
       "title": "Where the keys are, and who signs what",
       "ask": "Which component holds which key or signature, and what does poly trust?",
       "context": "The demo composes two signers: the gateway signs what it decided about each request, and poly signs what happened over the run. It also promises that poly holds no key of the Lab. This diagram shows where each key lives and what crosses between them.",
-      "answer": "The Lab's API key lives only in surface B; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet.",
+      "answer": "The key of the Lab's customer-records server lives only in surface B, as the Hello server's key lives only in the Hello surface; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet.",
       "involves": [
         "surfaceA",
         "gwdid",
@@ -879,7 +879,7 @@
         "email-escalated",
         "one-attempt"
       ],
-      "omits": "The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on; the channel, the Desk and the policy, drawn by the run-time questions.",
+      "omits": "The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on; the channel, the Desk and the policy, drawn by the run-time questions. The Hello surface, which holds the Hello server's key and is drawn by the status question.",
       "narrative": "Read the gateway box first. Surface B holds the Lab's API key and adds it to each call it forwards to customer-records. Surface A signs a verifiable presentation for each request, with the gateway's Ed25519 key, whose public half is published in the gateway's DID log.\n\nThe VP adapter trusts that one key and nothing else. The DID log is pinned in the project's trust, so a presentation signed by any other key is refused, and a key rotation is a new pinned log signed in like any keyring change.\n\nThe MCP client is the one path from poly to the Lab, and it carries no credential. It refuses a configuration that holds one, under any header name, and the checker's PL6825 scan refuses a token-shaped value in any file the certificate binds.\n\npoly's own keys are on the right. The policy says an email change waits for a person; the gate holds it until a record signed with the approver's key arrives through poly approve. The ledger is signed with a key kept outside the checkout. Both keys are to live in ~/.poly-keys on the box, which has neither yet."
     },
     {

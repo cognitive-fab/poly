@@ -17,7 +17,7 @@
           "keys",
           "mcpclient"
         ],
-        "note": "The Lab's API key lives only in surface B; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys…"
+        "note": "The key of the Lab's customer-records server lives only in surface B, as the Hello server's key lives only in the Hello surface; the gatewa…"
       },
       {
         "id": "gw",
@@ -351,7 +351,7 @@
       "dot": "cyan",
       "title": "The short answer",
       "items": [
-        "The Lab's API key lives only in surface B",
+        "The key of the Lab's customer-records server lives only in surface B, as the Hello server's key lives only in the Hello surface",
         "the gateway's signing key only behind its DID log, which poly pins",
         "On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet"
       ]
@@ -362,7 +362,7 @@
       "items": [
         "The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on",
         "the channel, the Desk and the policy, drawn by the run-time questions",
-        "Connected but out of scope: OAuth discovery proxy, 2Dee tunnel, Agent Lab host, gateway channel, Desk machine, Desk policy"
+        "The Hello surface, which holds the Hello server's key and is drawn by the status question"
       ]
     },
     {
