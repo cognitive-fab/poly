@@ -127,6 +127,19 @@ Accepted as built: `PL1208` renamed `RESERVED_NAME`, reserving `runtime<m>` as w
 
 **PT18's M5 row is amended** to carry what M4 and PD5 placed there: PD5 (S112), session replay in `sseq` order (S118), PD3-A2 (S131), bound capabilities (S134), starting an instance from a configuration's initial values (S141), hashing the installed dependencies of handlers (S142), and the opt-in OpenShell sandbox (PT6.5).
 
+## S585 M4-0 is retired, and the tree guard with it (owner, 2026-11-03)
+
+**What was found.** On 2026-11-03 the worktrees were brought back into one checkout: `C:\Users\jjdub\code\poly` on `main`, the release line since v1.5.0. The release run for v1.5.1 on that checkout failed two tests, and both failures were the tree guard doing what M4-0 asked: `test/tree-guard.test.mjs` ("this checkout is allowed") and `test/check-memory.test.mjs` (M6 step 1, whose script `scripts/measure-check-repeat.mjs` refused to run). The guard refuses a script that writes files when the repository's top level is `C:\Users\jjdub\code\poly` or when the branch is `main`, at any path. So since `m4` was merged, every script that calls it has refused to run on `main` anywhere, `poly-e3` included, and the suite passed only on release branches.
+
+**Why the rule no longer holds.** M4-0 protected M3's runs: the runner copied the toolchain from the experiment's tree, and S100 froze it. M3 closed on 2026-10-04 (`decisions-m3.md`), and its results are reproduced from the freeze commit `b8a8cfb` and the analysis commands in its report, not from `main` and not from any path. The experiments now live in the `poly-experiments` submodule. Nothing reads the toolchain from `C:\Users\jjdub\code\poly` any longer, and `main` takes every kind of work.
+
+**Ruling.**
+
+1. M4-0 rules 1, 2 and 5 are retired: no path is the experiment's tree, `main` is not reserved for M3 work, and `freeze.mjs --check` is no longer a standing check of a tree. Rules 3, 4 and 6 were spent when M4 and M5 closed; rule 4 (engines are vendored, never forked) stands as a standing rule of `CLAUDE.md`, not as part of M4-0.
+2. The tree guard is removed. `scripts/tree-guard.mjs` is deleted, and no script under `scripts/` imports it, calls `assertNotExperimentTree`, or refuses to run because of the path or the branch of the checkout it runs in. Each script that called it (`bench-check-speed`, `build-outbox-models`, `ex-gmail-traffic`, `measure-check-memory`, `measure-check-repeat`, `measure-check-stages`, `measure-verdicts`, `pin-model-digests`, `pin-polycheck`, `pin-std-digests`, `publish-schemas`, `suite-summary`, `vendor-polyaxion`) is otherwise unchanged.
+3. `test/tree-guard.test.mjs` tested the retired rule and is replaced by a test of this ruling, written under rule 7a by a separate writer: a checkout on `main`, at any path, runs these scripts; no script under `scripts/` refers to the guard.
+4. The documents that describe M4-0 (`plan-m4.md`, the handoffs) are history and are not edited. This entry is the record that the rule ended.
+
 ## Conclusion
 
 Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
