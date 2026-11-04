@@ -333,6 +333,13 @@ The ten examples were written on a branch cut from v1.1.0, which never had v1.2 
   3. **Code.** The worker keeps the escalation it replaces and adds `gateDecision` and `escalatedBy` to the `denied` event; an engine record, if present, is kept with it. The three tests pass, and so do the gate, approval, replay and budget files beside them (`review-m10`, `stale-approval`, `session-replay`, `policy-gate`, `gate-outage`, `budget`, `workflow-budget`, `cross-scope`, `person-keys`): 73 of 73.
 - **Consequence for the risk report** (`docs/proposals/risk-tags.md`). An `escalate-once` denial is a refusal of the runtime (fact 4 of that plan), not of a policy rule, whatever is decided here.
 
+### 35. A policy reads a machine that is neither the emitter nor a service machine, and gets its snapshot (open)
+
+- **What was measured.** While writing the S586 tests on branch `risk-tags`, the separate writer gave the risk desk (`test/fixtures/s586/riskdesk.poly`) a rule that reads `machine("riskdesk.Clerk").phase` for a mail's proposal. `Clerk` is not a `service machine`, and the mail is not its effect. With one `Clerk` instance in the store, the mail's proposal was decided on that instance's snapshot, recorded under `singletons` (`reads: {"c-1": 2}`), not on unknown input.
+- **What the specification says.** PT8.3: `machine("m.M")` reads the emitter's snapshot as of the step that emitted the effect, or, for a `service machine`, its latest snapshot. "Otherwise the value is unknown (Kleene) when the proposal is not an effect of that machine." So the rule should have been decided on unknown input, by its `on unknown` clause.
+- **Workaround in the meantime.** The desk sends its mail before any clerk exists, so the read is unknown, and the airline desk (`examples/airline-desk`) reaches its `on unknown` branch through a step with no claims instead, so its kept store will not change when this is fixed.
+- **Ruled (owner, 2026-11-04).** Recorded as finding 35, to be handled after risk-tags, with its own failing test first (rule 7a).
+
 ## Conclusion
 
 After two batches there are twelve entries. Most are the cost of a check or an admission (3, 7), a silent failure the toolchain could name (2), a rule whose workaround is arbitrary (1), or a spelling the language refuses (5, 10). Item 4 is a difference that the specification states in two places, and a test now holds it. Items 8, 9 and 12 are rules that are right but not said where an author looks. Item 11 is about the tests, not the language. The second batch ran nowhere near the memory limit: its largest instance was 126 global states.
