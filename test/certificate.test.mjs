@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { admit, AdmitError, CERTIFICATE_FAULTS } from '@poly/check';
 import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core';
 import { ROOT } from './helpers.mjs';
-import { ADAPTER_CERTIFICATE_FAULTS, CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS, ROUTE_CERTIFICATE_FAULTS, VAULT_CERTIFICATE_FAULTS, MEMORY_CERTIFICATE_FAULTS, DECLASSIFY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
+import { ADAPTER_CERTIFICATE_FAULTS, CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS, ROUTE_CERTIFICATE_FAULTS, VAULT_CERTIFICATE_FAULTS, MEMORY_CERTIFICATE_FAULTS, DECLASSIFY_CERTIFICATE_FAULTS, RISK_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
 import { polyaxionPeer } from '@poly/runtime';
 import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
@@ -82,15 +82,16 @@ test('each broken certificate writer is caught by the read-back, and nothing is 
   assert.deepEqual([...CERTIFICATE_FAULTS].sort(), [...CERTIFICATE_FAULT_LIST].sort());
   for (const fault of CERTIFICATE_FAULTS) {
     // A policy fault acts on a lowered policy, which needs the gate engine to admit (S145): not run without it.
-    if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
-    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/text-desk.poly'] : VAULT_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/stripe-refund.poly'] : MEMORY_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m10/concierge-memory.poly'] : DECLASSIFY_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m10/concierge-verdict.poly'] : ROUTE_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m11/desk.poly'] : ['conformance/m1/effects.poly'], key);
+    if ((POLICY_CERTIFICATE_FAULTS.includes(fault) || RISK_CERTIFICATE_FAULTS.includes(fault)) && !polyaxionPeer().ok) continue;
+    // S586 (RT20): a risk fault acts on a project whose policy carries tags, so its certificate records poly.risk.
+    const dir = project(`fault-${fault}`, RISK_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/s586/policy-tags.poly'] : POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/text-desk.poly'] : VAULT_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/stripe-refund.poly'] : MEMORY_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m10/concierge-memory.poly'] : DECLASSIFY_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m10/concierge-verdict.poly'] : ROUTE_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m11/desk.poly'] : ['conformance/m1/effects.poly'], key);
     // PT10r: a route's fault acts on the desk, with its price tables and maps beside it.
     if (ROUTE_CERTIFICATE_FAULTS.includes(fault)) for (const sub of ['prices', 'maps']) cpSync(join(ROOT, 'test', 'fixtures', 'm11', sub), join(dir, 'src', sub), { recursive: true });
     // PT10f: a vault fault acts on a credential whose store poly.json names.
     if (VAULT_CERTIFICATE_FAULTS.includes(fault)) writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: { payments: { store: 'kms' } } }, null, 2));
     if (PACKAGE_CERTIFICATE_FAULTS.includes(fault)) withPackage(dir);
     // S194, Q8: a policy is admitted only signed by a person, so each policy fault acts on a signed scope.
-    if (POLICY_CERTIFICATE_FAULTS.includes(fault)) await signPolicies(dir);
+    if (POLICY_CERTIFICATE_FAULTS.includes(fault) || RISK_CERTIFICATE_FAULTS.includes(fault)) await signPolicies(dir);
     await assert.rejects(admit(dir, { fault }), (e) => e instanceof AdmitError && /read-back/.test(e.message), fault);
     assert.throws(() => readFileSync(join(dir, '.poly', 'certificate.json')), fault);
   }

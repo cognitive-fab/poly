@@ -130,7 +130,7 @@ export function toolchainFaults(diagnostics) {
 
 // S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
 // is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
-export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify', 'swap-tier-model', 'rename-route'];
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify', 'swap-tier-model', 'rename-route', 'drop-risk-item'];
 // Review C7 (M11): the faults that need a project with a route to act on: a tier's model, and a route's name.
 export const ROUTE_CERTIFICATE_FAULTS = ['swap-tier-model', 'rename-route'];
 // PT10f: the faults that need a project with a credential and its vault to act on.
@@ -147,6 +147,9 @@ export const ADAPTER_CERTIFICATE_FAULTS = ['stale-adapter-digest', 'swap-adapter
 export const POLICY_CERTIFICATE_FAULTS = ['stale-policy-digest', 'omit-policy', 'wrong-policy-engine', 'omit-policy-signature', 'stale-policy-signature', 'swap-policy-source'];
 // Review of M5b, D: the faults that need a handler importing an installed package (S154).
 export const PACKAGE_CERTIFICATE_FAULTS = ['omit-package-file'];
+// S586, PT34.3 (RT20): the fault that needs a project that opts in to risk reporting, whose certificate records
+// poly.risk: an item of poly.risk left out, which poly-ref's read-back of poly.risk refuses at admission.
+export const RISK_CERTIFICATE_FAULTS = ['drop-risk-item'];
 
 // PT33.5 (ruled after Step 3): the seeded RUNTIME faults of the retry-safety rule, one per layer, so that neither
 // layer hides behind the other. They live in RUNTIME_FAULTS of @poly/runtime, not in poly-lower, and each has its own test

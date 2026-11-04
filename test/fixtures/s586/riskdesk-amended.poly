@@ -1,0 +1,147 @@
+// S586 (RT21 to RT23): the amended criteria's desk. A refund is escalated on unknown input and a wire refused on
+// unknown input: their rules read the clerk, and no clerk instance is ever created, so the read is unknown (PT8.3; a
+// clerk read once one exists was measured to read its snapshot, finding 35). A ping is refused by a rule a never
+// statement relies on. A case whose note is exhausted may be resolved by a person's step with claims (PT34.4 item 5).
+module riskdesk2
+
+enum Phase { Idle, Working, Done, Failed }
+enum CaseState { Opened, Busy, Stuck, Resolved, Closed }
+
+claims Staff {
+  principal: Principal
+}
+
+machine Wire {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit send(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect send(n: 0..1) {
+    kind "desk2.wire"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Refund {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit pay(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect pay(n: 0..1) {
+    kind "desk2.refund"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Clerk {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit ping(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect ping(n: 0..1) {
+    kind "clerk2.ping"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Case {
+  state {
+    at    : CaseState = Opened
+    notes : 0..2      = 0
+  }
+  terminal at in { Resolved, Closed }
+  action Go()
+  action Worked()
+  action Gave()
+  action Note()
+  action Resolve()
+  on Go {
+    require at == Opened else reject "started"
+    at' = Busy
+    emit write(1)
+  }
+  on Worked {
+    require at == Busy else reject "not-working"
+    at' = Closed
+  }
+  on Gave {
+    require at == Busy else reject "not-working"
+    at' = Stuck
+  }
+  // A step with no claims after the outcome: accepted, and no resolution (PT34.4 item 5).
+  on Note {
+    require at == Stuck else reject "not-stuck"
+    require notes < 2 else reject "full"
+    notes' = notes + 1
+  }
+  on Resolve by staff: Staff {
+    require at == Stuck else reject "not-stuck"
+    at' = Resolved
+  }
+  effect write(n: 0..1) {
+    kind "desk2.note"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
