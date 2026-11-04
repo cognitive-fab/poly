@@ -5,6 +5,7 @@
 import type { Module } from '@poly/core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkNever, policyFacts } from './policy.js';
 
 const FILES: Record<string, string> = { iso: 'iso-42001.json', mit: 'mit-ai-risk.json', nist: 'nist-ai-rmf.json' };
 const KINDS: Record<string, string> = { RuleObligation: 'rule', MachineObligation: 'machine', InvariantObligation: 'invariant', Recalled: 'recalled', Never: 'never' };
@@ -17,10 +18,21 @@ export function expectedRisk(program: readonly Module[], exposure: readonly stri
     return { catalog: doc.catalog, version: doc.version, digest: pins[`catalogs/${FILES[c]}`] };
   });
   const tags = (xs: { tag: string }[] | undefined) => Array.from(new Set((xs ?? []).map((x) => x.tag))).sort();
+  // Each never statement's verdict, by poly-ref's own check over each scope's decision table (S149).
+  const verdicts = new Map<string, string>();
+  const policies = program.flatMap((m) => m.decls.filter((d) => d.kind === 'Policy'));
+  if (policies.some((p) => p.kind === 'Policy' && p.items.some((i) => i.kind === 'Never'))) {
+    const facts = policyFacts([...program]);
+    for (const scope of Array.from(new Set(policies.map((p) => (p as { scope: string }).scope)))) {
+      const nv = checkNever({ scope, policies: policies.filter((p) => (p as { scope: string }).scope === scope) as never }, facts, () => ({}));
+      for (const v of nv.vacuous) verdicts.set(v.property, 'vacuous');
+      for (const p of nv.runtimeOnly) verdicts.set(p, 'runtime-only');
+    }
+  }
   const items: Record<string, unknown> = {};
   for (const m of program) for (const d of m.decls) {
     if (d.kind !== 'Policy') continue;
-    for (const it of d.items) items[`${d.name}.${it.name}`] = { scope: d.scope, kind: KINDS[it.kind], risks: tags(it.mitigates), controls: tags(it.implements) };
+    for (const it of d.items) items[`${d.name}.${it.name}`] = { scope: d.scope, kind: KINDS[it.kind], risks: tags(it.mitigates), controls: tags(it.implements), ...(it.kind === 'Never' ? { verdict: verdicts.get(`${d.name}.${it.name}`) ?? 'proved' } : {}) };
   }
   return { catalogs, exposure: Array.from(new Set(exposure ?? [])).sort(), items };
 }

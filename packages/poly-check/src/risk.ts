@@ -10,7 +10,20 @@ export interface RiskWarning { kind: 'risk'; warning: 'untagged' | 'no-control' 
 export interface RiskRecord {
   catalogs: { catalog: string; version: string; digest: string }[];
   exposure: string[];
-  items: Record<string, { scope: string; kind: 'rule' | 'machine' | 'invariant' | 'recalled' | 'never'; risks: string[]; controls: string[] }>;
+  items: Record<string, { scope: string; kind: 'rule' | 'machine' | 'invariant' | 'recalled' | 'never'; risks: string[]; controls: string[]; verdict?: NeverVerdict }>;
+}
+
+/** PT34.3: what the never stage gave a `never` statement; one with a finding is not admitted. */
+export type NeverVerdict = 'proved' | 'vacuous' | 'runtime-only';
+
+/** Each `never` statement's verdict, by `<policy>.<item>`, from the policy stages of a check. */
+export function neverVerdicts(policies: readonly { vacuous: { property: string }[]; notRun: { property: string; reason: string }[] }[]): Map<string, NeverVerdict> {
+  const out = new Map<string, NeverVerdict>();
+  for (const p of policies) {
+    for (const v of p.vacuous) out.set(v.property, 'vacuous');
+    for (const n of p.notRun) if (/^runtime-only: it reads a value with no finite domain/.test(n.reason)) out.set(n.property, 'runtime-only');
+  }
+  return out;
 }
 
 const KIND: Record<PolicyItem['kind'], RiskRecord['items'][string]['kind']> = {
@@ -58,10 +71,10 @@ export function riskWarnings(manifest: Manifest, program: readonly Module[]): Ri
 }
 
 /** PT34.3: the certificate's `poly.risk`, for a project that opts in. */
-export function riskRecord(exposure: readonly string[] | undefined, program: readonly Module[], std?: string): RiskRecord {
+export function riskRecord(exposure: readonly string[] | undefined, program: readonly Module[], std?: string, nevers: ReadonlyMap<string, NeverVerdict> = new Map()): RiskRecord {
   const catalogs = loadCatalogs(std);
   const items: RiskRecord['items'] = {};
-  for (const x of itemsOf(program)) items[x.id] = { scope: x.scope, kind: KIND[x.item.kind], risks: x.risks, controls: x.controls };
+  for (const x of itemsOf(program)) items[x.id] = { scope: x.scope, kind: KIND[x.item.kind], risks: x.risks, controls: x.controls, ...(x.item.kind === 'Never' ? { verdict: nevers.get(x.id) ?? 'proved' } : {}) };
   return {
     catalogs: Object.values(catalogs).map((c) => ({ catalog: c.catalog, version: c.version, digest: c.digest })).sort((a, b) => (a.catalog < b.catalog ? -1 : 1)),
     exposure: [...new Set(exposure ?? [])].sort(),

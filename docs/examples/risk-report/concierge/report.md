@@ -5,7 +5,6 @@
 Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 (2025-12-04), airisk.mit.edu, licensed under CC BY 4.0.
 
 - Period: 2026-09-21 to 2026-09-21 (the first and last day of the counted events, UTC)
-- Store: `docs/examples/risk-report/concierge/store.db`
 - Runs: 9 with a gate record; 9 counted, 0 not verified, 0 with no certificate identified, 0 with two
 - Keys trusted: test-risk-report-concierge, test-risk-report-concierge-ledger
 - Certificate `docs/examples/risk-report/concierge/certificate.json`: build cert-eb1690537e84, sha256:7c90d52015f7ca0a6847d91beac78343352203ec5dcde594bfe2ba2715d0c354, signed by test-risk-report-concierge; 9 run(s) matched

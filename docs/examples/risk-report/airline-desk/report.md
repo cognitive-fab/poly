@@ -5,7 +5,6 @@
 Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 (2025-12-04), airisk.mit.edu, licensed under CC BY 4.0.
 
 - Period: 2026-09-21 to 2026-09-22 (the first and last day of the counted events, UTC)
-- Store: `docs/examples/risk-report/airline-desk/store.db`
 - Runs: 11 with a gate record; 11 counted, 0 not verified, 0 with no certificate identified, 0 with two
 - Keys trusted: test-risk-report-airline-desk, test-risk-report-airline-desk-ledger
 - Certificate `docs/examples/risk-report/airline-desk/certificate.json`: build cert-de2b54050636, sha256:7ced6299c729e0a87faf6d3cfdbc49db6e5ffc5400bfb1cc130defc7cad3ef3c, signed by test-risk-report-airline-desk; 11 run(s) matched
@@ -17,7 +16,7 @@ Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 
 
 | Item | Kind | Controls | Signer | Refused | Sent to a person | Approved | Timed out | Open | On unknown input |
 |---|---|---|---|---|---|---|---|---|---|
-| airline.cancel-requested | rule | iso:A.9.4 | ops (key-ops), sequence 1 | 2 | 0 | 0 | 0 | 0 | 1 |
+| airline.cancel-requested | rule | iso:A.9.4 | ops (key-ops), sequence 1 | 3 | 0 | 0 | 0 | 0 | 1 |
 
 ## mit:5.2 Loss of human agency and autonomy
 
@@ -29,13 +28,13 @@ Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 
 
 | Item | Kind | Controls | Signer | Refused | Sent to a person | Approved | Timed out | Open | On unknown input |
 |---|---|---|---|---|---|---|---|---|---|
-| airline.cancel-requested | rule | iso:A.9.4 | ops (key-ops), sequence 1 | 2 | 0 | 0 | 0 | 0 | 1 |
+| airline.cancel-requested | rule | iso:A.9.4 | ops (key-ops), sequence 1 | 3 | 0 | 0 | 0 | 0 | 1 |
 | airline.large-certificate-reviewed | rule | iso:A.9.2, nist:MAP-3.5 | ops (key-ops), sequence 1 | 0 | 4 | 2 | 1 | 1 | 0 |
 
 - airline.large-certificate-reviewed: approved 2 time(s) by ops (key-ops)
 
 Outcomes possibly executed and unknown (PS23):
-- airline.large-certificate-reviewed: exhausted, intent `d64dfd060f71c3c064762afba0fca526` (airline.certificate), run cert-approved-failing
+- airline.large-certificate-reviewed: exhausted, intent `d64dfd060f71c3c064762afba0fca526` (airline.certificate), run cert-approved-failing; no resolution recorded
 
 ## Allowed in each scope
 
@@ -46,7 +45,7 @@ An allow names no rule, so allows are counted per scope and no item is credited 
 | airline_desk | 5 |
 
 Outcomes possibly executed and unknown (PS23):
-- exhausted: intent `9240e125ba071d89366d9a420bc582e5` (airline.certificate), run cert-small
+- exhausted: intent `9240e125ba071d89366d9a420bc582e5` (airline.certificate), run cert-small; no resolution recorded
 
 ## Refused by the runtime (no rule)
 

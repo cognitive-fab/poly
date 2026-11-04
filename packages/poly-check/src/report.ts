@@ -27,7 +27,7 @@ export interface RiskReportInput {
 }
 
 interface Counts { refused: number; escalated: number; approved: number; timedOut: number; open: number; onUnknown: number }
-interface UnknownOutcome { intent: string; run: string; effectKind: string; outcome: 'lost' | 'lapsed' | 'exhausted' }
+interface UnknownOutcome { intent: string; run: string; effectKind: string; outcome: 'lost' | 'lapsed' | 'exhausted'; resolution?: { action: string; seq: number } }
 const zero = (): Counts => ({ refused: 0, escalated: 0, approved: 0, timedOut: 0, open: 0, onUnknown: 0 });
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const by = <T>(key: (x: T) => string) => (a: T, b: T) => cmp(key(a), key(b));
@@ -91,9 +91,9 @@ function readCertificate(file: string, build: string, trust: Record<string, stri
   }
   const obligations = new Set(docs.flatMap((d) => ((d.doc.obligations ?? []) as { id: string }[]).map((o) => o.id)));
   const kinds = new Map(docs.flatMap((d) => ((d.doc.obligations ?? []) as { id: string; kind: string }[]).map((o) => [o.id, { kind: o.kind, scope: d.scope }] as const)));
-  // A step records its machine's version as polyrun names it, the first twelve hex digits of the digest of the machine's
-  // certified next.cjs (measured on 2026-11-04); a module digest is accepted as well, as PT34.4 item 2 words it.
-  const versions = new Set([...Object.values(cert.poly?.moduleDigests ?? {}), ...(cert.subject?.machines ?? []).flatMap((m) => { const d = cert.artefacts?.[`${m.dir}/next.cjs`]; return d ? [d.replace(/^sha256:/, '').slice(0, 12)] : []; })]);
+  // PT34.4 item 2: a step records its machine's version as the first twelve hex digits of the SHA-256 of the machine's
+  // certified next.cjs, and that form alone is matched.
+  const versions = new Set((cert.subject?.machines ?? []).flatMap((m) => { const d = cert.artefacts?.[`${m.dir}/next.cjs`]; return d ? [d.replace(/^sha256:/, '').slice(0, 12)] : []; }));
   return { file, cert, digest: cert.digest, buildId: cert.buildId, signers, problem, docs, obligations, kinds, policySets: {}, moduleDigests: versions };
 }
 
@@ -135,7 +135,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
   const notCounted: { run: string; problem: string }[] = [];
   const unidentified: { run: string }[] = [];
   const ambiguous: { run: string; certificates: string[] }[] = [];
-  const counted: { run: string; module: string; c: ReadCertificate; events: { kind: string; at: number; body: Record<string, any> }[] }[] = [];
+  const counted: { run: string; module: string; c: ReadCertificate; events: { kind: string; at: number; body: Record<string, any> }[]; lineage: Map<number, { origin: unknown; prev: string | null }> }[] = [];
   let runs = 0;
   try {
     const before: Record<string, string | null> = {};
@@ -153,7 +153,8 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       runs++;
       if (!Object.keys(trust).length) { notCounted.push({ run: r.run, problem: 'no key was given with --trust, so the run is not verified' }); continue; }
       const heads = await store.heads(r.run);
-      const v = verifyRun(chain, heads, trust, await store.journal(r.run), await store.lineage(r.run), await store.evidence(r.run));
+      const lineage = await store.lineage(r.run);
+      const v = verifyRun(chain, heads, trust, await store.journal(r.run), lineage, await store.evidence(r.run));
       v.problems.push(...ledgerProblems(r.run, heads, latest, trust));
       if (v.problems.length) { notCounted.push({ run: r.run, problem: v.problems.join('; ') }); continue; }
       const versions = new Set(steps.map((e) => String((e.body as { machineVersion?: unknown }).machineVersion)));
@@ -161,7 +162,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       const matches = certs.filter((c) => !c.problem && [...versions].every((x) => c.moduleDigests.has(x)) && [...sets].every((s) => Object.values(c.policySets).includes(s)));
       if (!matches.length) { unidentified.push({ run: r.run }); continue; }
       if (matches.length > 1) { ambiguous.push({ run: r.run, certificates: matches.map((c) => c.digest).sort() }); continue; }
-      counted.push({ run: r.run, module: r.wf.slice(0, r.wf.lastIndexOf('.')), c: matches[0], events: chain.map((e) => ({ kind: e.kind, at: e.at, body: (e.body ?? {}) as Record<string, any> })) });
+      counted.push({ run: r.run, module: r.wf.slice(0, r.wf.lastIndexOf('.')), c: matches[0], events: chain.map((e) => ({ kind: e.kind, at: e.at, body: (e.body ?? {}) as Record<string, any> })), lineage });
     }
     const after: Record<string, string | null> = {};
     for (const r of await store.runs()) after[r.run] = (await store.chain(r.run)).at(-1)?.hash ?? null;
@@ -173,14 +174,14 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
 
   // The certificates counted runs matched: their items, the risks they name and the catalogs they record.
   const countedCerts = certs.filter((c) => counted.some((r) => r.c === c));
-  const items = new Map<string, { id: string; scope: string; kind: string; risks: string[]; controls: string[]; signer: string | null; signerName: string | null; sequence: number | null; counts: Counts; approvedBy: Map<string, { keyId: string; name: string | null; count: number }>; unknownOutcomes: UnknownOutcome[] }>();
+  const items = new Map<string, { id: string; scope: string; kind: string; risks: string[]; controls: string[]; verdict?: string; signer: string | null; signerName: string | null; sequence: number | null; counts: Counts; approvedBy: Map<string, { keyId: string; name: string | null; count: number }>; unknownOutcomes: UnknownOutcome[] }>();
   for (const c of countedCerts) {
     const people = new Map((c.cert.poly?.keyrings?.people ?? []).map((p) => [p.keyId, p.name]));
     for (const [id, x] of Object.entries(c.cert.poly?.risk?.items ?? {})) {
       if (items.has(id)) continue;
       const pol = (c.cert.poly?.policies ?? []).find((p) => p.scope === x.scope);
       const signer = pol?.signature?.by ?? null;
-      items.set(id, { id, scope: x.scope, kind: x.kind, risks: x.risks, controls: x.controls, signer, signerName: signer ? people.get(signer) ?? null : null, sequence: pol?.sequence ?? null, counts: zero(), approvedBy: new Map(), unknownOutcomes: [] });
+      items.set(id, { id, scope: x.scope, kind: x.kind, risks: x.risks, controls: x.controls, ...(x.verdict ? { verdict: x.verdict } : {}), signer, signerName: signer ? people.get(signer) ?? null : null, sequence: pol?.sequence ?? null, counts: zero(), approvedBy: new Map(), unknownOutcomes: [] });
     }
   }
   const scopes = new Map<string, { scope: string; allowed: number; unknownOutcomes: UnknownOutcome[]; open?: true }>();
@@ -209,7 +210,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
     current = r.c;
     const people = new Map((r.c.cert.poly?.keyrings?.people ?? []).map((p) => [p.keyId, p.name]));
     // Per intent: the escalation still open (by an item, or by the runtime), what sent it to a person, and whether it was allowed.
-    const open = new Map<string, { item: string | null; unknown?: true }>();
+    const open = new Map<string, { item: string | null }>();
     const sentByItem = new Map<string, string>();
     const allowedIntents = new Set<string>();
     const kinds = new Map<string, string>();
@@ -231,21 +232,21 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
         case 'denied': {
           if (b.reason === 'escalate-once') { bump('escalated', typeof b.escalatedBy === 'string' ? b.escalatedBy : 'not recorded', 'escalate-once'); break; }
           if (b.reason === 'escalation-timeout') {
-            // The timeout of an item's escalation is the item's; of one made on unknown input, the unknown decision's
-            // (already counted); of one the runtime made, the runtime's (PT34.4 item 4).
+            // The timeout of an item's escalation, on unknown input or not, is the item's; of one the runtime made, the
+            // runtime's (PT34.4 item 4).
             const o = open.get(intent);
             open.delete(intent);
-            if (o?.item && !o.unknown) credit(o.item, 'timedOut');
-            else if (!o?.unknown) bump('refused', 'escalation-timeout');
+            if (o?.item) credit(o.item, 'timedOut');
+            else bump('refused', 'escalation-timeout');
             break;
           }
-          if (named) { credit(named.item, named.unknown ? 'onUnknown' : 'refused'); break; }
+          if (named) { if (named.unknown) credit(named.item, 'onUnknown'); credit(named.item, 'refused'); break; }
           bump('refused', String(b.reason ?? 'denied'));
           break;
         }
         case 'escalated': {
           if (named) {
-            if (named.unknown) { credit(named.item, 'onUnknown'); open.set(intent, { item: named.item, unknown: true }); break; }
+            if (named.unknown) credit(named.item, 'onUnknown');
             credit(named.item, 'escalated');
             open.set(intent, { item: named.item });
             sentByItem.set(intent, named.item);
@@ -258,7 +259,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
         case 'approved': {
           const o = open.get(intent);
           open.delete(intent);
-          if (!o?.item || o.unknown) break;
+          if (!o?.item) break;
           credit(o.item, 'approved');
           const it = items.get(o.item);
           if (!it) break;
@@ -272,7 +273,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       }
       days.push(new Date(e.at).toISOString().slice(0, 10));
     }
-    for (const [, o] of open) if (o.item && !o.unknown) credit(o.item, 'open');
+    for (const [, o] of open) if (o.item) credit(o.item, 'open');
     // PT34.4 item 5: the outcomes PS23 calls possibly executed and unknown, of an intent a person approved after an item sent
     // it, or of one allowed in its scope: an attempt lost or lapsed, and an exhausted completion.
     const approvedIntents = new Set([...sentByItem.keys()].filter((i) => r.events.some((e) => e.kind === 'verdict' && e.body.stage === 'gate' && e.body.outcome === 'approved' && String(e.body.intent) === i && period.holds(e.at))));
@@ -284,7 +285,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
       if (e.kind === 'observation' && e.body.stage === 'handler' && (e.body.outcome === 'lost' || e.body.outcome === 'lapsed')) { intent = String(e.body.intent); outcome = e.body.outcome; }
       if (e.kind === 'step' && typeof e.body.actionId === 'string' && e.body.actionId.endsWith(':exhausted')) { intent = e.body.actionId.slice(0, -':exhausted'.length); outcome = 'exhausted'; }
       if (!intent || !outcome || seen.has(`${intent}\u0000${outcome}`)) continue;
-      const u: UnknownOutcome = { intent, run: r.run, effectKind: kinds.get(intent) ?? '', outcome };
+      const u: UnknownOutcome = { intent, run: r.run, effectKind: kinds.get(intent) ?? '', outcome, ...resolutionAfter(r.events, r.events.indexOf(e), r.lineage) };
       if (approvedIntents.has(intent)) { const it = items.get(sentByItem.get(intent)!); if (it) { it.unknownOutcomes.push(u); seen.add(`${intent}\u0000${outcome}`); } }
       else if (allowedIntents.has(intent)) { scopes.get(r.module)?.unknownOutcomes.push(u); seen.add(`${intent}\u0000${outcome}`); }
     }
@@ -299,7 +300,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
   const catalogs = [...new Map(countedCerts.flatMap((c) => c.cert.poly?.risk?.catalogs ?? []).map((c) => [`${c.catalog}\u0000${c.version}\u0000${c.digest}`, c])).values()].sort(by((c) => `${c.catalog}\u0000${c.version}`));
   const riskIds = [...new Set([...items.values()].flatMap((i) => i.risks))].sort();
   const itemJson = (i: NonNullable<ReturnType<typeof items.get>>) => ({
-    id: i.id, kind: i.kind, controls: [...i.controls].sort(), signer: i.signer, signerName: i.signerName, sequence: i.sequence, counts: i.counts,
+    id: i.id, kind: i.kind, controls: [...i.controls].sort(), signer: i.signer, signerName: i.signerName, sequence: i.sequence, ...(i.verdict ? { verdict: i.verdict } : {}), counts: i.counts,
     approvedBy: [...i.approvedBy.values()].sort(by((a) => a.keyId)),
     unknownOutcomes: [...i.unknownOutcomes].sort(by((u) => `${u.intent}\u0000${u.outcome}`)),
   });
@@ -315,7 +316,7 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
     meaning: MEANING,
     attribution: attributionLine(mit?.version ?? bundled.mit.version),
     period: { asked: period.asked, from: period.from ?? sortedDays[0] ?? null, to: period.to ?? sortedDays.at(-1) ?? null },
-    store: { path: input.db, runs, counted: counted.length, notCounted: notCounted.sort(by((x) => x.run)), trusted: Object.keys(trust).sort() },
+    store: { runs, counted: counted.length, notCounted: notCounted.sort(by((x) => x.run)), trusted: Object.keys(trust).sort() },
     certificates: certs.map((c) => ({ file: c.file, digest: c.digest, buildId: c.buildId, signers: c.signers, verified: c.problem === null, ...(c.problem ? { problem: c.problem } : {}), counted: counted.filter((r) => r.c === c).length })).sort(by((c) => c.digest)),
     catalogs,
     risks,
@@ -328,6 +329,19 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
   };
 }
 
+/**
+ * PT34.4 item 5: the person's resolution of an unknown outcome, the first accepted step of the run after it that was
+ * dispatched from outside with claims: its lineage starts a chain and its origin holds claims. By action and seq only.
+ */
+function resolutionAfter(events: { kind: string; body: Record<string, any> }[], at: number, lineage: Map<number, { origin: unknown; prev: string | null }>): { resolution?: { action: string; seq: number } } {
+  for (const e of events.slice(at + 1)) {
+    if (e.kind !== 'step' || e.body.stepKind !== 'accepted') continue;
+    const l = lineage.get(Number(e.body.seq));
+    if (l && l.prev === null && l.origin !== null && typeof l.origin === 'object') return { resolution: { action: String(e.body.action), seq: Number(e.body.seq) } };
+  }
+  return {};
+}
+
 /** The JSON form: RFC 8785, one line. */
 export const reportJson = (j: Record<string, unknown>): string => canonicalize(j) + '\n';
 
@@ -336,11 +350,11 @@ export function reportMarkdown(j: any): string {
   const out: string[] = [];
   const cell = (s: unknown) => String(s ?? '').replace(/\|/g, '\\|');
   const signer = (i: any) => (i.signer ? `${i.signerName ? `${i.signerName} (${i.signer})` : i.signer}${i.sequence !== null ? `, sequence ${i.sequence}` : ''}` : 'not signed');
-  const outcomes = (list: any[]) => list.map((u) => `- ${u.outcome}: intent \`${u.intent}\` (${u.effectKind}), run ${u.run}`);
+  const resolved = (u: any) => (u.resolution ? `; resolved by ${u.resolution.action} at seq ${u.resolution.seq}` : '; no resolution recorded');
+  const outcomes = (list: any[]) => list.map((u) => `- ${u.outcome}: intent \`${u.intent}\` (${u.effectKind}), run ${u.run}${resolved(u)}`);
   out.push('# Risk report', '', `*${j.meaning}*`, '');
   out.push(j.attribution, '');
   out.push(`- Period: ${j.period.asked ? `${j.period.asked} (${j.period.from} to ${j.period.to}, UTC)` : j.period.from ? `${j.period.from} to ${j.period.to} (the first and last day of the counted events, UTC)` : 'no event counted'}`);
-  out.push(`- Store: \`${j.store.path}\``);
   out.push(`- Runs: ${j.store.runs} with a gate record; ${j.store.counted} counted, ${j.store.notCounted.length} not verified, ${j.unidentified.length} with no certificate identified, ${j.ambiguous.length} with two`);
   if (!j.store.trusted.length) out.push('- No key was given with --trust, so no run verifies and no run is counted.');
   else out.push(`- Keys trusted: ${j.store.trusted.join(', ')}`);
@@ -355,13 +369,13 @@ export function reportMarkdown(j: any): string {
     for (const i of r.items) {
       const c = i.counts;
       const decides = i.kind !== 'recalled' && i.kind !== 'never';
-      out.push(`| ${cell(i.id)} | ${i.kind} | ${cell(i.controls.join(', ') || 'none')} | ${cell(signer(i))} | ${decides ? [c.refused, c.escalated, c.approved, c.timedOut, c.open, c.onUnknown].join(' | ') : 'declared | | | | |'} |`);
+      out.push(`| ${cell(i.id)} | ${i.kind} | ${cell(i.controls.join(', ') || 'none')} | ${cell(signer(i))} | ${decides ? [c.refused, c.escalated, c.approved, c.timedOut, c.open, c.onUnknown].join(' | ') : i.kind === 'never' ? `${i.verdict ?? 'proved'} by the check | | | | |` : 'declared | | | | |'} |`);
     }
     out.push('');
     const approvals = r.items.flatMap((i: any) => i.approvedBy.map((a: any) => `- ${i.id}: approved ${a.count} time(s) by ${a.name ? `${a.name} (${a.keyId})` : a.keyId}`));
     if (approvals.length) out.push(...approvals, '');
     const unknown = r.items.flatMap((i: any) => i.unknownOutcomes.map((u: any) => ({ ...u, item: i.id })));
-    if (unknown.length) out.push('Outcomes possibly executed and unknown (PS23):', ...unknown.map((u: any) => `- ${u.item}: ${u.outcome}, intent \`${u.intent}\` (${u.effectKind}), run ${u.run}`), '');
+    if (unknown.length) out.push('Outcomes possibly executed and unknown (PS23):', ...unknown.map((u: any) => `- ${u.item}: ${u.outcome}, intent \`${u.intent}\` (${u.effectKind}), run ${u.run}${resolved(u)}`), '');
   }
   out.push('## Allowed in each scope', '', 'An allow names no rule, so allows are counted per scope and no item is credited with one.', '', '| Scope | Allowed |', '|---|---|');
   for (const s of j.scopes) out.push(`| ${cell(s.scope)}${s.open ? ' (open: no policy governs it)' : ''} | ${s.allowed} |`);
