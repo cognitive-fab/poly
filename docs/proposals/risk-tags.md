@@ -6,15 +6,15 @@ Status: a plan for the owner's review. Nothing is specified in the spec document
 
 ## 0. What this covers and the ids it uses
 
-A policy rule says which AI risk it mitigates and which control it implements. `poly check` refuses an unknown tag and warns on an untagged rule. A project may list the risks it considers itself exposed to. A new command, `poly report risks`, reads the verified journal and says, for each risk, what each tagged rule did. It answers the finding of MIT FutureTech's working paper *Unmitigated? How are the world's largest companies responding to AI risks?* (October 2026) that a mitigation is rarely linked to the risk it addresses, and it gives a buyer the audit trail the ITX guide asks for.
+A policy rule says which AI risk it mitigates and which control it implements. `poly check` refuses an unknown tag and warns on an untagged rule. A project may list the risks it considers itself exposed to. A new command, `poly report risks`, reads the verified journal and says, for each risk, what each tagged rule did. The owner's brief sets it against MIT FutureTech's working paper *Unmitigated? How are the world's largest companies responding to AI risks?* (October 2026), read by the owner as finding that companies rarely link a mitigation to the risk it addresses; the paper's published summary reports that 32% of the world's 100 largest companies and 62% of the 1,000 largest acknowledge no AI risk at all. The brief also asks for the audit trail the ITX guide asks of a seller.
 
 | Prefix | Meaning | Proposed here |
 |---|---|---|
 | S | spec ruling | **S586** (the next free number in sequence: S584 is on `proposal-extensions`, S585 on `retire-tree-guard`) |
 | PS | semantics | **PS8.10** Tags never change a decision |
 | PT | technical spec | **PT8.7** the tag clauses; **PT34** catalogs, exposure, the report; rows in PT1.2, PT12.2, PT14 |
-| PL | diagnostic codes | **PL6506** `POLICY_TAG_UNKNOWN`, **PL6507** `EXPOSURE_TAG_UNKNOWN`, **PL6508** `CATALOG_UNPINNED` (free slots of PL65xx, checked against `packages/poly-core/src/diagnostics.ts`) |
-| RT | acceptance criteria of this feature | RT1 to RT14 (section 9) |
+| PL | diagnostic codes | **PL6506** `POLICY_TAG_UNKNOWN`, **PL6507** `EXPOSURE_TAG_UNKNOWN` (free slots of PL65xx, checked against `packages/poly-core/src/diagnostics.ts`) |
+| RT | acceptance criteria of this feature | RT1 to RT15 (section 9) |
 
 ## 1. What was read, and what was found before planning
 
@@ -60,7 +60,7 @@ Tag         = String ;                                                          
 
 - **Why strings.** The ids have dots and dashes (`7.3`, `MANAGE-2.4`, `A.6.2.8`) that the lexer reads as numbers and dashed names. A string is one token, and the check gives it its meaning. The precedent is an effect's `kind "payments.refund"`.
 - **Why these words.** `mitigates` takes risks and `implements` takes controls, so a reader sees which is which without a prefix rule. Both are contextual: they are keywords only in this position, so no existing name becomes reserved.
-- **Order and duplicates.** The formatter writes `mitigates` before `implements` and each list sorted and without repeats; a repeat in the source is accepted and removed by `poly fmt`, as for labels.
+- **Order and duplicates.** The formatter writes `mitigates` before `implements` and each list sorted and without repeats; a repeat in the source is accepted and removed by `poly fmt` (new behaviour of the formatter; labels have no such rule today).
 - **What a tag may be.** A risk is a subdomain of the MIT taxonomy (`mit:7.3`), never a domain alone (`mit:7` is `PL6506`), so coverage is exact. A control is a NIST AI RMF 1.0 subcategory (`nist:MANAGE-2.4`) or an ISO/IEC 42001 Annex A control (`iso:A.9.2`). `mitigates` takes only `mit:` ids and `implements` only `nist:` and `iso:` ids.
 - **Where tags go.** On every policy item that has a text: rule, machine and invariant obligations, `recalled` items and policy `never` statements. A `recalled` item is unenforced, so its tags are reported as declared, with no decisions (section 6). A policy `never` is proved, not run, so it is reported with its check verdict. Machine `never emit` and machine actions are not tagged in v1 (question Q1).
 
@@ -74,7 +74,7 @@ Three catalogs ship in `std/catalogs/`, one JSON file each, with one `std/catalo
 | `nist-ai-rmf.json` | NIST AI 100-1, AI Risk Management Framework 1.0 (January 2023), from the Core as NIST publishes it (the AI RMF Playbook data, checked against NIST AI 100-1) | 1.0 | the 4 functions, their categories and the subcategory ids written `FUNCTION-n.m` (NIST writes `MANAGE 2.4`), with NIST's text | a work of the US government, not under copyright in the US |
 | `iso-42001.json` | ISO/IEC 42001:2023, Annex A | 2023 | the 38 control ids from `A.2.2` to `A.10.4` under their 9 objectives, each with **our own short label**, never the standard's text or titles | the standard is copyrighted: only the ids, which are facts, and labels we wrote |
 
-Each file is `{ catalog, version, source, retrieved, sourceDigest, entries: [{ id, label, parent? }] }`, sorted by id. `PROVENANCE.md` gives, per catalog, the URL, the version, the date it was read, the digest of what was read, the licence, and for ISO the statement that the labels are ours. A catalog is updated by a commit that changes the file, its pin and its provenance together, so a version change is visible in the certificate's digest and in every report (`PL6508` if a catalog's digest is not in `std/PINS.json`).
+Each file is `{ catalog, version, source, retrieved, sourceDigest, entries: [{ id, label, parent? }] }`, sorted by id. `PROVENANCE.md` gives, per catalog, the URL, the version, the date it was read, the digest of what was read, the licence, and for ISO the statement that the labels are ours. A catalog is updated by a commit that changes the file, its pin and its provenance together, so a version change is visible in the certificate's digest and in every report. A catalog whose digest is not in `std/PINS.json` is a toolchain fault, held by the existing `std` pin test and added to `test/toolchain-faults.mjs` as `catalog-unpinned`, not a diagnostic an author can meet.
 
 ## 4. The check (PT34.2)
 
@@ -84,7 +84,7 @@ Each file is `{ catalog, version, source, retrieved, sourceDigest, entries: [{ i
 
 ## 5. Lowering, signing and the toolchain checks (PT8.7, PT34.3)
 
-- **Lowering.** Each lowered obligation gains `tags: ["risk:mit:7.3", "control:nist:MAP-3.5", …]` in the Polyaxion document, in the formatter's order. A policy `never` and its tags go into the policy build's own record (`never` is proved, not lowered), and the certificate's entry for the scope gains `tags: { "<policy>.<item>": { risks, controls } }`.
+- **Lowering.** Each tagged obligation gains `tags: ["risk:mit:7.3", "control:nist:MAP-3.5", …]` in the Polyaxion document, in the formatter's order. **An untagged obligation lowers with no `tags` field at all**, never `tags: []`, so the lowered document, its digest and the signed subject of every untagged policy are byte-identical to v1.5.0's, and no existing signature breaks (RT15). A policy `never` and its tags go into the policy build's own record (`never` is proved, not lowered), and the certificate's entry for the scope gains `tags: { "<policy>.<item>": { risks, controls } }`.
 - **Signing.** No change to PT12.5: the tags are in the sources and the document, so they are in the signed subject. A tagged policy whose signature predates its tags is `PL6409`, as for any changed policy.
 - **Translation validation.** `policy-tv` reads the lowered document back and compares each obligation's tags with the source's. The broken lowerings `policy-tag-dropped` and `policy-tag-moved` (a tag on the wrong obligation) join `test/toolchain-faults.mjs`, as the standing rule asks of any change to an artefact the runtime reads.
 - **PS8.10, the semantic rule.** A policy's decisions do not depend on its tags: for every proposal, the policy with its tags and the policy with every tag removed give the same outcome, the same reason and the same witness. poly-ref checks it on the decision table it already builds for policy `never` statements, and a runtime test replays one journal with the tagged and the untagged build.
@@ -97,6 +97,8 @@ Each file is `{ catalog, version, source, retrieved, sourceDigest, entries: [{ i
 
 1. Every run of the store is verified as `poly journal verify` does: chain, signed heads, closure, journal binding and anchor. A run that fails is not counted and is listed under *Runs not counted*, with its problem, as `poly cost` lists runs not summed. Without `--trust` no run verifies and the report says so: nothing is counted silently.
 2. Each verified run is matched to a certificate: its steps' `machineVersion` must be in the certificate's `poly.moduleDigests`, and its gate records' `policySet` must be the one the certificate's policies give. A run that matches none is listed under *Certificate not identified* and not counted. One that matches two is listed under *Certificate ambiguous* and not counted.
+
+   **A precondition, not yet established.** Re-signing a tagged policy gives a new certificate with the same `moduleDigests`, so `policySet` is what tells the two builds apart. Polyaxion computes it as the digest of the sorted `policy_digest` of its admitted rows (`runtime/gate.mjs:53`). The plan has not yet shown that the report can compute each admitted row's `policy_digest` from what the certificate holds (`poly.policies[]` and the lowered documents under `artefacts`). The spec commit must either show it, with a test that a certificate's policies give the `policySet` its runs record, or make Q6 (the certificate named in each run) a precondition of the report.
 3. The tags come from the matched certificate, never from the source on disk, so the report shows what was admitted and signed.
 
 **What it counts, per rule.** For each gate decision of the period:
@@ -179,15 +181,15 @@ The JSON has the same content: `{ v: 1, meaning, period, store: { verified, notC
 - **PS8.10** in `04-semantics.md`: tags never change a decision (section 5).
 - **PT8.1 and PT8.7** in `03-technical-spec.md`: the grammar and the tag clauses (section 2).
 - **PT34** in `03-technical-spec.md`: PT34.1 catalogs, PT34.2 the check, PT34.3 lowering and the certificate, PT34.4 the report, PT34.5 the examples.
-- **Rows:** PT1.2 (`exposure`), PT12.2 (`PL6506` to `PL6508`), PT12.3a (the three warnings), PT14 (`poly report risks`, and the MCP tool if Q5 says yes).
+- **Rows:** PT1.2 (`exposure`), PT12.2 (`PL6506`, `PL6507`), PT12.3a (the three warnings), PT14 (`poly report risks`, and the MCP tool if Q5 says yes).
 - **Not changed:** PT12.5 (signing already covers tags), the journal format (fact 6 is handled by matching, question Q6), Polyaxion (fact 1).
 
 ## 9. Order of work (rule 7a) and acceptance criteria
 
-1. **Spec commit, alone.** S586, PS8.10, PT8.1, PT8.7, PT34 and the rows above, with RT1 to RT14.
+1. **Spec commit, alone.** S586, PS8.10, PT8.1, PT8.7, PT34 and the rows above, with RT1 to RT15.
 2. **Catalog commit.** The three files, `PROVENANCE.md` and their pins. Data, not code; the writer's tests read it.
 3. **Tests, by a separate writer** on the session's model, who has read only the spec commit and the catalogs. They fail first. One commit, with the writer's list of what was read.
-4. **Code**, in this order, each a commit: parser, formatter and AST (`poly-lang`, `poly-core`); the check and `PL6506` to `PL6508` with their `conformance/m0/errors/PL650x-*.poly` cases; lowering, the certificate entry and `policy-tv` with the two toolchain faults; PS8.10 in poly-ref (written from `04-semantics.md`, sharing no code with the compiler); the report in `poly-check`; the examples and their generated reports.
+4. **Code**, in this order, each a commit: parser, formatter and AST (`poly-lang`, `poly-core`); the check, with a `conformance/m0/errors/PL6506-*.poly` case for `PL6506` and, for `PL6507` (an error of `poly.json`, which no `.poly` case can hold), the exemption with its own test file that `PL6504` and `PL6505` use; lowering, the certificate entry and `policy-tv` with the two toolchain faults; PS8.10 in poly-ref (written from `04-semantics.md`, sharing no code with the compiler); the report in `poly-check`; the examples and their generated reports.
 5. **Runs.** Only the new test files and the files the change touches (listed in the plan's record as they are found). The full suite only at the owner's word.
 
 Acceptance criteria:
@@ -196,7 +198,7 @@ Acceptance criteria:
 - **RT2** Each kind of unknown tag is `PL6506` at its position, and the verdict is REFUSED.
 - **RT3** An untagged item and an item with no control give their warnings and change no verdict.
 - **RT4** An unknown exposure id is `PL6507`; an uncovered exposure gives its warning.
-- **RT5** A catalog whose digest is not pinned is `PL6508`.
+- **RT5** A catalog whose digest is not pinned is caught as the toolchain fault `catalog-unpinned`.
 - **RT6** Lowered obligations carry their tags; the certificate carries tags, exposure and catalog digests.
 - **RT7** `policy-tag-dropped` and `policy-tag-moved` are caught by translation validation.
 - **RT8** A tagged policy signed before its tags is `PL6409`.
@@ -206,6 +208,7 @@ Acceptance criteria:
 - **RT12** The report holds no value the journal keeps as a digest, and its first line and `meaning` are the exact sentence of section 6.
 - **RT13** The same store gives the same bytes, twice, for both formats; `--period` selects by the event's UTC day.
 - **RT14** The two examples' reports regenerate byte for byte from their kept stores.
+- **RT15** An untagged policy's lowered document and signed subject are byte-identical to v1.5.0's, for every policy in `examples/`, `demo/` and `conformance/`.
 
 ## 10. Open questions for the owner
 
@@ -214,7 +217,7 @@ Acceptance criteria:
 - **Q3. Exposure by sector or by role (deployer, developer), following MIT's tiered proposal?** Recommended: later. v1's exposure is one flat list per project. The format leaves room: `exposure: { risks, profile? }`, where a later `profile` names a bundled list by sector or role that the project's list extends.
 - **Q4. Which τ²-bench-style example?** The poly-tau2 session's airline translation copied into `examples/airline`, or a new example written for this feature. Copying needs that session's agreement and its provenance; the airline policy's five obligations are a good spread of risks (confirmation, eligibility, reasons).
 - **Q5. Serve the report over MCP?** It reads only, as `poly_cost` does. Recommended: yes.
-- **Q6. Name the certificate in the journal?** The report matches runs to certificates (fact 6). Writing the certificate's digest into each run's first event would make it read, not inferred, but it changes the journal format and replay. Recommended: not in this feature; a proposal for the next one if matching proves ambiguous in use.
+- **Q6. Name the certificate in the journal?** The report matches runs to certificates (fact 6). Writing the certificate's digest into each run's first event would make it read, not inferred, but it changes the journal format and replay. Recommended: not in this feature **if** the precondition of section 6 step 2 holds (a certificate's policies give the `policySet` its runs record); if it does not, this becomes part of the feature, since every run after a re-sign would otherwise be ambiguous.
 - **Q7. Allows per rule?** An allow names no rule (fact 3). Counting, per rule, the allows where its `when` held needs Polyaxion to return the obligations whose condition held, an engine change made in Polyaxion's repository and vendored again. Recommended: not in v1; the report says *allowed in the scope* and why.
 - **Q8. Finding 34 (escalate-once drops the engine record).** Recommended: record it as a finding now and fix it under rule 7a before or with this feature, since the report then attributes those refusals to a rule.
 - **Q9. Are the warnings opt-out?** A project with many untagged rules gets a warning per rule. Recommended: no option in v1; the warnings are printed, not certified, and the count is the point.
@@ -222,13 +225,14 @@ Acceptance criteria:
 ## 11. Risks
 
 - **The concierge's policy changes.** Its digest, its signature and every demo admission change, and tests that pin them (the demo-copy test, the diagrams, the shared demo admission) must be found and updated with it. The demo's heavy files run long; they run as two commands, and only at the owner's word if they are the full serial group.
+- **The untagged warning fires on every existing policy.** All 13 example policies, their `-defect` copies and the conformance policies are untagged, so `poly check` prints new warning lines for each. Anything that compares rendered check output byte for byte changes with them, for example `docs/demo/part4/*.check.txt` and any test that asserts there are no warnings. Before the code, a grep for checks of rendered output lists those files; they are among "the files the change touches", and either the examples are tagged in the same change or the expected outputs are updated with the warnings.
 - **Catalog drift.** MIT revises its taxonomy (Version 4 now). A new version is a catalog commit; a tag valid in one version and not in the next is `PL6506` when the catalog is updated, which is the intended signal.
 - **ISO labels.** Our labels must stay our words. A review of `iso-42001.json` against the rule "ids and our labels only" is part of the catalog commit.
 - **Over-reading the report.** The wording rule (RT12) is tested, and the Markdown has no word such as *mitigated*, *covered* or *safe* next to a count.
 
 ## Conclusion
 
-The tags cost little because the parts already exist. Polyaxion carries tags on obligations and ignores them, the signature already covers the source, translation validation already reads the policy document back, and `poly cost` already shows how to report from a verified journal and list what it did not count. What is new is three catalogs with their provenance, two clauses in the grammar, three diagnostics, one semantic rule that tags never decide, and a report that counts what each rule did and says plainly that a count is evidence of application, not proof of mitigation. Two gaps in the journal shape the report and are stated, not papered over: an allow names no rule, and a run names no certificate.
+The tags cost little because the parts already exist. Polyaxion carries tags on obligations and ignores them, the signature already covers the source, translation validation already reads the policy document back, and `poly cost` already shows how to report from a verified journal and list what it did not count. What is new is three catalogs with their provenance, two clauses in the grammar, two diagnostics, one semantic rule that tags never decide, and a report that counts what each rule did and says plainly that a count is evidence of application, not proof of mitigation. Two gaps in the journal shape the report and are stated, not papered over: an allow names no rule, and a run names no certificate.
 
 ## Glossary
 
