@@ -331,6 +331,20 @@ export class PolicyGate implements Gate {
   }
 
   /**
+   * PT34.4 item 2, S586: the policy set the gate computes for each governed module from these certified documents, read
+   * from a fresh engine opened as replay opens one. `poly report risks` matches a run's recorded policySet against it.
+   */
+  static async policySets(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[]): Promise<Record<string, string>> {
+    const none: ProgramView = { singleton: () => null, decisions: () => ({}), nextSseq: () => 0 };
+    const fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:' });
+    const out: Record<string, string> = {};
+    try {
+      for (const m of modules) out[m] = String((await fresh.engine.begin({ run_id: `poly-report:${m}`, scope: m })).policy_set);
+    } finally { fresh.engine.close?.(); }
+    return out;
+  }
+
+  /**
    * S118, S146: each session's recorded events, re-applied in sseq order on a fresh engine with the certified
    * policies; every decision and every Σ digest must be reproduced. A gap in the sequence stops that session's
    * replay, listed as not run, since Σ after it cannot be known.

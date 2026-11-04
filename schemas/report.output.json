@@ -1,0 +1,65 @@
+{
+  "type": "object",
+  "properties": {
+    "v": {
+      "type": "integer"
+    },
+    "meaning": {
+      "type": "string",
+      "description": "the sentence of PT34.4 item 6"
+    },
+    "attribution": {
+      "type": "string",
+      "description": "the MIT attribution line"
+    },
+    "period": {
+      "type": "object"
+    },
+    "store": {
+      "type": "object"
+    },
+    "certificates": {
+      "type": "array"
+    },
+    "catalogs": {
+      "type": "array"
+    },
+    "risks": {
+      "type": "array"
+    },
+    "scopes": {
+      "type": "array"
+    },
+    "runtime": {
+      "type": "array"
+    },
+    "uncovered": {
+      "type": "array"
+    },
+    "untagged": {
+      "type": "array"
+    },
+    "unidentified": {
+      "type": "array"
+    },
+    "ambiguous": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "v",
+    "meaning",
+    "attribution",
+    "period",
+    "store",
+    "certificates",
+    "catalogs",
+    "risks",
+    "scopes",
+    "runtime",
+    "uncovered",
+    "untagged",
+    "unidentified",
+    "ambiguous"
+  ]
+}

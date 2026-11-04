@@ -52,6 +52,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
        poly try <file> --machine <M> --ops <file.json> [--out <trace.json>]   (a playground: nothing is admitted, run or written)
        poly cost --db <store> [--run <id>] [--scope <module>] [--period YYYY-MM-DD | YYYY-MM] [--prices <file>]
+       poly report risks --db <store> --build <dir> --certificate <file>... --trust <keyId>=<file>... [--period YYYY-MM | YYYY-MM-DD] [--format md | json] [--out <file>]
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -151,6 +152,12 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     const db = option(args, '--db');
     if (!db) throw new UsageError('cost needs --db <store>');
     return { name: 'cost', input: { db, ...Object.fromEntries(['run', 'scope', 'period', 'prices'].flatMap((k) => { const v = option(args, `--${k}`); return v ? [[k, v]] : []; })) } };
+  }
+  // PT34.4: poly report risks --db --build --certificate <file>… --trust k=f … [--period p] [--format md|json] [--out <file>].
+  if (cmd === 'report' && a === 'risks' && positional.length === 2) {
+    const all = (name: string) => args.flatMap((x, i) => (x === name && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : []));
+    const need = (name: string) => option(args, name) ?? (() => { throw new UsageError(`report risks needs ${name} <value>`); })();
+    return { name: 'report', input: { db: need('--db'), build: need('--build'), certificate: all('--certificate'), trust: all('--trust'), ...Object.fromEntries(['period', 'format', 'out'].flatMap((k) => { const v = option(args, `--${k}`); return v ? [[k, v]] : []; })) } };
   }
   // PT29.1: poly export traces --db --build --certificate --trust k=f … --out <file> [--run id …].
   if (cmd === 'export' && a === 'traces' && positional.length === 2) {
@@ -266,7 +273,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1, args.indexOf('--config') + 1, args.indexOf('--goals') + 1, args.indexOf('--defects') + 1, args.indexOf('--only') + 1, args.indexOf('--cache') + 1].filter((i) => i > 0));
   // PT29.1: options that repeat or are new with export traces, whose values are no positional argument.
-  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output', '--polyness', '--polyness-pin', '--step', '--transcripts', '--runs', '--refine', '--reason', '--event', '--correct', '--decision', '--model', '--verdicts', '--previous'].includes(x)) valued.add(i + 1); });
+  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output', '--polyness', '--polyness-pin', '--step', '--transcripts', '--runs', '--refine', '--reason', '--event', '--correct', '--decision', '--model', '--verdicts', '--previous', '--format'].includes(x)) valued.add(i + 1); });
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

@@ -36,6 +36,7 @@ import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
 import { costCalls, costReport, periodProblem, readPriceTable, type CostOrder } from './cost.js';
 import { trySession, type TryOp } from './try.js';
+import { reportJson, reportMarkdown, ReportUsageError, riskReport } from './report.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
 export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
@@ -516,6 +517,34 @@ export const COMMANDS: Command[] = [
         const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...(report.orders.attempts ? [`${report.orders.attempts} work-order attempt${report.orders.attempts === 1 ? '' : 's'} (reconciled: ${Object.entries(report.orders.reconciled).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ')})`] : []), ...report.refused.map((x) => `not summed: run ${x.run}, whose chain does not verify (${x.reason})`), ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
         return { exit: report.refused.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN, result: report as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
       } finally { await store.close(); }
+    },
+  },
+  {
+    // PT34.4, S586 (Q5): read-only, so it is a tool; it writes nothing to the store.
+    name: 'report', mcp: 'poly_report_risks', lsp: false,
+    summary: 'The risk report: for each risk a counted certificate names, what each policy item that names it did, counted from the verified journal; allows per scope, one item per refusal, nothing written to the store (PT34.4, S586).',
+    input: obj({
+      db: str('the store'), build: str('the build directory the certificates certify'),
+      certificate: { type: 'array', items: { type: 'string' }, description: 'each certificate a run may have been admitted under' },
+      trust: { type: 'array', items: { type: 'string' }, description: 'keyId=public key file, the key of the ledger and of the admission, as journal verify takes them' },
+      period: str('only this UTC day, YYYY-MM-DD, or month, YYYY-MM'),
+      format: { type: 'string', enum: ['md', 'json'], description: 'the text printed: Markdown (default) or the JSON' },
+      out: str('write the report here instead of printing it'),
+    }, ['db', 'build', 'certificate']),
+    output: obj({ v: { type: 'integer' }, meaning: str('the sentence of PT34.4 item 6'), attribution: str('the MIT attribution line'), period: { type: 'object' }, store: { type: 'object' }, certificates: { type: 'array' }, catalogs: { type: 'array' }, risks: { type: 'array' }, scopes: { type: 'array' }, runtime: { type: 'array' }, uncovered: { type: 'array' }, untagged: { type: 'array' }, unidentified: { type: 'array' }, ambiguous: { type: 'array' } }, ['v', 'meaning', 'attribution', 'period', 'store', 'certificates', 'catalogs', 'risks', 'scopes', 'runtime', 'uncovered', 'untagged', 'unidentified', 'ambiguous']),
+    async run(input) {
+      const list = (k: string) => (Array.isArray(input[k]) ? (input[k] as unknown[]).map(String) : typeof input[k] === 'string' ? [input[k] as string] : []);
+      const format = opt(input, 'format') ?? 'md';
+      if (format !== 'md' && format !== 'json') throw new CommandUsageError(`--format is md or json, not ${format}`);
+      let j: Record<string, unknown>;
+      try { j = await riskReport({ db: need(input, 'db'), build: need(input, 'build'), certificates: list('certificate'), trust: list('trust'), ...(opt(input, 'period') ? { period: opt(input, 'period') } : {}) }); } catch (e) { if (e instanceof ReportUsageError) throw new CommandUsageError(e.message); throw e; }
+      const text = format === 'json' ? reportJson(j) : reportMarkdown(j);
+      const out = opt(input, 'out');
+      if (out) writeFileSync(out, text);
+      // Not clean while a run with a gate record is left uncounted: no silent clean.
+      const left = (j.store as { notCounted: unknown[] }).notCounted.length + (j.unidentified as unknown[]).length + (j.ambiguous as unknown[]).length;
+      return { exit: left ? EXIT_CODES.INCONCLUSIVE : EXIT_CODES.CLEAN, result: j, text: out ? `poly report risks: wrote ${out}
+` : text };
     },
   },
   {

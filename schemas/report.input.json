@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "properties": {
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "build": {
+      "type": "string",
+      "description": "the build directory the certificates certify"
+    },
+    "certificate": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "each certificate a run may have been admitted under"
+    },
+    "trust": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "keyId=public key file, the key of the ledger and of the admission, as journal verify takes them"
+    },
+    "period": {
+      "type": "string",
+      "description": "only this UTC day, YYYY-MM-DD, or month, YYYY-MM"
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "md",
+        "json"
+      ],
+      "description": "the text printed: Markdown (default) or the JSON"
+    },
+    "out": {
+      "type": "string",
+      "description": "write the report here instead of printing it"
+    }
+  },
+  "required": [
+    "db",
+    "build",
+    "certificate"
+  ]
+}
