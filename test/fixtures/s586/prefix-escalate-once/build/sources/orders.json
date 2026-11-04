@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "module": "concierge_memory",
+  "source": "orders",
+  "kind": "records",
+  "adapter": "postgres",
+  "audience": "customer",
+  "class": 1,
+  "owned": true,
+  "freshnessMs": 3600000,
+  "stale": "escalate"
+}

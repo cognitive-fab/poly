@@ -1,0 +1,68 @@
+// S586 (RT7, RT9): conformance/m5/policy-faults.poly with its two obligations tagged, each with its own risk and control,
+// so a tag dropped from one or moved to the other changes the lowered document (policy-tag-dropped, policy-tag-moved in
+// test/toolchain-faults.mjs), and a never statement for the decision table of PS8.10.
+module pf
+
+enum Level { Low, High }
+
+machine Meter {
+  state { level : Level = Low }
+  terminal level in { High }
+  action Raise()
+  action Alarm()
+  on Raise {
+    require level == Low else reject "high"
+    level' = High
+    emit ping(1)
+  }
+  on Alarm {
+    require level == Low else reject "high"
+    level' = High
+    emit alarm(1)
+  }
+  effect ping(n: 0..1) {
+    kind "meter.ping"
+    labels { exec }
+    class none
+  }
+  effect alarm(n: 0..1) {
+    kind "meter.alarm"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
+  }
+}
+
+machine Pump {
+  state { on : bool = false }
+  terminal on
+  action Start()
+  on Start {
+    require !on else reject "on"
+    on' = true
+    emit run(1)
+  }
+  effect run(n: 0..1) {
+    kind "pump.run"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
+  }
+}
+
+policy pf-policy {
+  scope "pf"
+  obligation high-blocks "No irreversible effect while the meter is high." mitigates "mit:7.3" implements "nist:MANAGE-2.4" rule {
+    when machine("pf.Meter").level == High
+    require effect.class != "irreversible" else deny
+  }
+  obligation ping-first "The pump runs only after a ping." mitigates "mit:6.1", "mit:2.2" implements "iso:A.6.2.8" machine {
+    states idle, pinged
+    initial idle
+    from idle when effect.kind == "meter.ping" -> pinged
+    deny in idle when effect.kind == "pump.run" reason "no-ping"
+    end idle, pinged
+  }
+  never no-alarm-while-high "No alarm is allowed while the meter is high." mitigates "mit:7.3"
+    : allow when effect.kind == "meter.alarm" && machine("pf.Meter").level == High
+}

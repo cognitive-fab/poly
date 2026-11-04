@@ -1,0 +1,144 @@
+{
+  "polyaxion": "2",
+  "id": "poly/concierge_memory",
+  "version": "sha256:a9086a13f669d815",
+  "scope": "concierge_memory",
+  "description": "The policies of scope concierge_memory: review-answers.",
+  "vars": {},
+  "obligations": [
+    {
+      "id": "review-answers.person-reviews",
+      "kind": "rule",
+      "text": "Every answer waits for a person.",
+      "severity": "escalate",
+      "when": "(action.kind in ['custom.poly.effect', 'custom.poly.send']) && coalesce(((action.proposal == 'effect') && (action.effect.kind == 'decision.answer')), false)",
+      "require": "coalesce(false, false)",
+      "source": {
+        "policy": "review-answers",
+        "obligation": "person-reviews"
+      },
+      "examples": {
+        "allow": [
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "source.orders.retrieve",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "read:private"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ],
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "support.reply",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "egress:external"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ]
+        ],
+        "deny": [
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "decision.answer",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "egress:external",
+                "read:private"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "review-answers.person-reviews.unknown",
+      "kind": "rule",
+      "text": "Every answer waits for a person. (its condition is unknown, PS8.2)",
+      "severity": "escalate",
+      "when": "(action.kind in ['custom.poly.effect', 'custom.poly.send']) && isNull(((action.proposal == 'effect') && (action.effect.kind == 'decision.answer')))",
+      "require": "false",
+      "source": {
+        "policy": "review-answers",
+        "obligation": "person-reviews",
+        "unknown": true
+      },
+      "examples": {
+        "allow": [
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "source.orders.retrieve",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "read:private"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ],
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "decision.answer",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "egress:external",
+                "read:private"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ],
+          [
+            {
+              "kind": "custom.poly.effect",
+              "proposal": "effect",
+              "effect": {
+                "kind": "support.reply",
+                "class": "none",
+                "machine": "concierge_memory.Desk"
+              },
+              "effects": [
+                "egress:external"
+              ],
+              "machines": {},
+              "decisions": {}
+            }
+          ]
+        ],
+        "deny": []
+      }
+    }
+  ]
+}

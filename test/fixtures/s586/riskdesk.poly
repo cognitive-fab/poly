@@ -1,0 +1,158 @@
+// S586 (RT9 to RT13, RT16, RT17): the risk report's desk. Each machine emits one effect kind, and the policy beside it
+// gives each kind one row of PT34.4's table: a wire is refused by a rule, a refund is sent to a person, a note is
+// allowed, a mail is decided on unknown input (its rule reads the clerk, which is unknown for a mail's proposal, PT8.3),
+// and a ping is refused by a rule that names no risk. The machines copy conformance/m4/outbox.poly's Job, whose
+// completions end each instance.
+module riskdesk
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Wire {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit send(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect send(n: 0..1) {
+    kind "desk.wire"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Refund {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit pay(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect pay(n: 0..1) {
+    kind "desk.refund"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Note {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit write(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect write(n: 0..1) {
+    kind "desk.note"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Mail {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit post(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect post(n: 0..1) {
+    kind "desk.mail"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Clerk {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit ping(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect ping(n: 0..1) {
+    kind "clerk.ping"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}

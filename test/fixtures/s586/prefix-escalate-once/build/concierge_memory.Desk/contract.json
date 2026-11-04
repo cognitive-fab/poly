@@ -1,0 +1,101 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:72e45b985c01b558d517d00e86e25cbeb576a7d26beff4a303fefad784fdc955",
+  "stateKeys": [
+    {
+      "name": "phase",
+      "type": "'Idle' | 'Looking' | 'Answering'"
+    },
+    {
+      "name": "customer",
+      "type": "principal | null"
+    },
+    {
+      "name": "question",
+      "type": "content | null"
+    }
+  ],
+  "initState": {
+    "phase": "Idle",
+    "customer": null,
+    "question": null
+  },
+  "actions": {
+    "Ask": {
+      "dataFields": {
+        "question": "content | null",
+        "$claims": "{ principal: principal | null }"
+      }
+    },
+    "Found": {
+      "dataFields": {
+        "items": "items"
+      }
+    },
+    "LookupFailed": {
+      "dataFields": {}
+    },
+    "Answered": {
+      "dataFields": {
+        "text": "content | null",
+        "cites": "items"
+      }
+    },
+    "AnswerFailed": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {
+    "Ask": {
+      "question": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+      ],
+      "$claims": [
+        {
+          "principal": "p1"
+        },
+        {
+          "principal": "p2"
+        },
+        {
+          "principal": "p3"
+        }
+      ]
+    },
+    "Found": {
+      "items": [
+        {
+          "count": 0
+        },
+        {
+          "count": 1
+        },
+        {
+          "count": 2
+        }
+      ]
+    },
+    "Answered": {
+      "text": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+      ],
+      "cites": [
+        {
+          "count": 0
+        },
+        {
+          "count": 1
+        },
+        {
+          "count": 2
+        }
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

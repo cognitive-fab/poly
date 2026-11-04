@@ -1,0 +1,254 @@
+{
+  "v": 1,
+  "subject": {
+    "kind": "poly.program",
+    "project": "s586-prefix-once",
+    "machines": [
+      {
+        "id": "concierge_memory.Desk",
+        "module": "concierge_memory",
+        "machine": "Desk",
+        "dir": ".poly/build/concierge_memory.Desk"
+      }
+    ]
+  },
+  "artefacts": {
+    ".poly/build/policies/concierge_memory.policy.json": "sha256:02ae34f0670e8d9bfd9ff12da31de69cc3d71e591f0930aba0c7a10c1738be30",
+    ".poly/build/sources/orders.json": "sha256:9f5e8f60685cbbc65616146bc1e039a2d40e4c76eecbc235285e2ba1f519661d",
+    ".poly/build/flow/concierge_memory.json": "sha256:764488e2480baa6f3b78a6f2c5068dee2650531e2da137963d0869e49041f373",
+    ".poly/build/concierge_memory.Desk/contract.json": "sha256:06ecaa03d2eb000636378c9b54d5b9b097a7ea45b81e8ea60ea7d37c3db7d5a0",
+    ".poly/build/concierge_memory.Desk/next.cjs": "sha256:9999400ad890d50bffeb100aae8ad06621253ab9261aad7cac08151728ddd623",
+    ".poly/build/concierge_memory.Desk/invariants.mjs": "sha256:b3a683a6a5089b886672194a8d44b511f8978aae33cf269d5f04c4309f034352",
+    ".poly/build/concierge_memory.Desk/effects.cjs": "sha256:2f2e848ece863b0cb7da57919beeb3ac632a621cfa1d1c38c666c99b79cc4cc8",
+    ".poly/build/concierge_memory.Desk/effects.manifest.json": "sha256:c15e068c4309b5e44eaf26cc8af5b8354df2755eb3d5e7c4ba6086db8fa005a9",
+    ".poly/build/concierge_memory.Desk/types.d.ts": "sha256:aeb5a3b32f5a1abeee46cc17cdbc3d5cafa768782c64da332784fce06b27f7a6"
+  },
+  "guarantees": [
+    "concierge_memory.Desk:deadlock-free"
+  ],
+  "checks": [
+    {
+      "name": "concierge_memory.Desk:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:flow",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge_memory.Desk:decisions",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    }
+  ],
+  "domains": {
+    "concierge_memory.Desk": [
+      "Ask.question ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Found.items ∈ Items count 0..2",
+      "Answered.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Answered.cites ∈ Items count 0..2",
+      "3 principal representatives (PD5.1.3c)",
+      "2 content representatives and none (PS4.1f)"
+    ]
+  },
+  "boundAccepted": null,
+  "toolchain": {
+    "sam-pattern": "2.3.0",
+    "polygraph": "8.4.0",
+    "polygraph sam-pattern (vendored)": "2.3.0",
+    "poly-ref": "0.0.0"
+  },
+  "issuedAt": "2026-11-04T13:23:03.607Z",
+  "buildId": "cert-6887f965dc77",
+  "poly": {
+    "sources": {
+      "src/concierge-memory.poly": "sha256:f93a3996451d85d3e8a39b76ebf88f0eb9300e2a0104aac8761ff5a0a00e8617",
+      "src/review.policy.poly": "sha256:b7f2ea45b03ef1edb3984ca03bd2224960e09545911ab0186ceaec86276d1214"
+    },
+    "moduleDigests": {
+      "concierge_memory": "sha256:72e45b985c01b558d517d00e86e25cbeb576a7d26beff4a303fefad784fdc955",
+      "concierge_memory_policy": "sha256:0a7ac1f537e564ad8e66e0b046ef0501f16d27d1ab1568917eea09dbc21ea792"
+    },
+    "instances": {
+      "concierge_memory.Desk": {
+        "domains": [
+          "Ask.question ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Found.items ∈ Items count 0..2",
+          "Answered.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Answered.cites ∈ Items count 0..2",
+          "3 principal representatives (PD5.1.3c)",
+          "2 content representatives and none (PS4.1f)"
+        ],
+        "states": 28,
+        "transitions": 644,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K11"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      }
+    },
+    "kernelAssumptions": [
+      "K10",
+      "K11",
+      "K7"
+    ],
+    "decisions": [
+      {
+        "machine": "concierge_memory.Desk",
+        "kind": "decision.answer",
+        "provider": "flash",
+        "result": "content",
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      }
+    ],
+    "limits": [
+      "capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)",
+      "the store is SQLite only; Postgres is not built (S135)",
+      "installed packages are hashed, not linted: a package's own I/O is stopped only by the opt-in sandbox (S154)"
+    ],
+    "handlers": {
+      "roots": [
+        "src/handlers.ts"
+      ],
+      "files": {
+        "src/handlers.ts": "sha256:42934cde35ac62fbf19c338e9e5b1d77be18cdb4810e3524372e16b110706a8f"
+      },
+      "lint": {
+        "version": "poly-lint-handlers 2: PT6.5 over the relative-import closure (S72, S142)",
+        "verdict": "CLEAN"
+      },
+      "packages": [],
+      "packageFiles": {},
+      "lockfile": {
+        "path": "../../../package-lock.json",
+        "digest": "sha256:e133809ff8434572b426a25558181e748c31902a1c18ab21e46b75040149702b"
+      }
+    },
+    "keyrings": {
+      "people": [
+        {
+          "name": "ops",
+          "keyId": "key-ops",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAkHAWVgO6aq4L2seseugDEMA5HnL33b6U7NzMr2edtvA=\n-----END PUBLIC KEY-----"
+        }
+      ],
+      "agents": [
+        {
+          "name": "ci-agent",
+          "keyId": "key-ci-agent",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAyRXmt4OqZuSTQfguvNa5LvF4gVQ74N1AxYbfmJF/bBQ=\n-----END PUBLIC KEY-----"
+        }
+      ]
+    },
+    "keyringChain": {
+      "anchor": "sha256:d7cfd09fcfc3c156bfbd17c2e80d4e9299805d6af9d0ec469678c62736f9e7ce",
+      "head": "sha256:d7cfd09fcfc3c156bfbd17c2e80d4e9299805d6af9d0ec469678c62736f9e7ce",
+      "source": "test"
+    },
+    "policies": [
+      {
+        "scope": "concierge_memory",
+        "policies": [
+          "review-answers"
+        ],
+        "path": ".poly/build/policies/concierge_memory.policy.json",
+        "reads": [],
+        "source": "src/review.policy.poly",
+        "sequence": 1,
+        "signature": {
+          "v": 1,
+          "kind": "policy",
+          "subject": "sha256:f1a18444dabcb3f9b3fddd4cdfdf5eb84e33981f980dc3f09204d6452346e02b",
+          "by": "key-ops",
+          "at": "2026-10-06T00:00:00.000Z",
+          "sig": "EpPB0CQl3oqkj/2pEYAdr+VQvMKaJvGcHGIxdfUjPsv3/NuLQ+sdNEkAI7VNwpkDhF9xWgRcQI0Y8iduEOk1AA=="
+        }
+      }
+    ],
+    "memory": {
+      "sources": [
+        {
+          "name": "orders",
+          "descriptor": ".poly/build/sources/orders.json",
+          "adapter": "postgres",
+          "package": "@poly/io",
+          "version": "0.0.0",
+          "digest": "sha256:30044cc1bcfae48db202358b814e04abaf83d402b8faeed29e839897bf3da7e6"
+        }
+      ],
+      "flows": [
+        {
+          "module": "concierge_memory",
+          "descriptor": ".poly/build/flow/concierge_memory.json"
+        }
+      ]
+    },
+    "policyEngine": {
+      "name": "polyaxion",
+      "commit": "c37c60e"
+    }
+  },
+  "signatures": [
+    {
+      "keyId": "test-s586-prefix-once",
+      "alg": "ed25519",
+      "sig": "/CyYzMZxTIzrY3MVKl/5wpAuvScPcX64PecDyho3RUxae+2C0SCqGPcFeLrtTUy+iHe4YEDp8P+YkGHDpLVdDg=="
+    }
+  ],
+  "digest": "sha256:88160ec0d597e51f2853f59760d37bf9fee0cabb888c38470a85fc31a5ff905a"
+}

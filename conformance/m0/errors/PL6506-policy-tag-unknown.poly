@@ -1,0 +1,7 @@
+// expect: PL6506 (mit:7.9 is no subdomain of the MIT catalog; S586, PT34.2)
+module errors
+
+policy tags {
+  scope "errors"
+  recalled style "Replies are short." mitigates "mit:7.9"
+}

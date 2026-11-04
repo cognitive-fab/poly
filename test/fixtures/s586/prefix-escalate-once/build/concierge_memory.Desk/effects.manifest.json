@@ -1,0 +1,99 @@
+{
+  "effects": {
+    "source.orders.retrieve": {
+      "payloadSchema": {
+        "customer": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "retrieve": {
+        "source": "orders",
+        "owner": "customer",
+        "limit": 2
+      },
+      "onSuccess": {
+        "action": "Found",
+        "map": {
+          "items": "$.result.items"
+        }
+      },
+      "onFailure": {
+        "action": "LookupFailed"
+      },
+      "labels": [
+        "read:private"
+      ],
+      "retry": {
+        "maxAttempts": 5,
+        "baseMs": 500,
+        "timeoutMs": 30000
+      },
+      "class": "none"
+    },
+    "support.reply": {
+      "payloadSchema": {
+        "customer": {
+          "type": "string",
+          "required": true
+        },
+        "body": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "labels": [
+        "egress:external"
+      ],
+      "recipient": {
+        "to": "customer",
+        "audience": "public"
+      },
+      "retry": {
+        "maxAttempts": 5,
+        "baseMs": 500,
+        "timeoutMs": 30000
+      },
+      "class": "none"
+    },
+    "decision.answer": {
+      "payloadSchema": {
+        "question": {
+          "type": "string",
+          "required": true
+        },
+        "context": {
+          "type": "object",
+          "required": true
+        }
+      },
+      "labels": [
+        "egress:external",
+        "read:private"
+      ],
+      "retry": {
+        "maxAttempts": 1,
+        "timeoutMs": 2000
+      },
+      "onSuccess": {
+        "action": "Answered",
+        "map": {
+          "text": "$.result.answer",
+          "cites": "$.result.cites"
+        }
+      },
+      "onFailure": {
+        "action": "AnswerFailed"
+      },
+      "onExhausted": {
+        "action": "AnswerFailed"
+      },
+      "class": "none",
+      "decision": {
+        "provider": "flash",
+        "result": "content",
+        "cites": "context"
+      }
+    }
+  }
+}

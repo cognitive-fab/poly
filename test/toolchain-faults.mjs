@@ -112,7 +112,16 @@ export const POLICY_FAULT_SOURCES = {
   'drop-unknown-rule': ['conformance/m5/policy-faults.poly'],
   'deny-as-warn': ['conformance/m5/policy-faults.poly'],
   'drop-guard': ['conformance/m5/policy-faults.poly'],
+  // S586, PT34.3: the tags of a lowered obligation, which the policy-tv stage reads back against the source: a tag of the
+  // source missing from the document, and a tag written on another obligation. A tag decides nothing (PS8.10), so these
+  // are caught by the read-back of the tags, not by the decisions over the decision table (test/s586-tags-lowering.test.mjs).
+  'policy-tag-dropped': ['test/fixtures/s586/policy-tags.poly'],
+  'policy-tag-moved': ['test/fixtures/s586/policy-tags.poly'],
 };
+
+// S586, PT34.1: a catalog of std/catalogs/ whose digest std/PINS.json does not pin is a toolchain fault, not a diagnostic
+// an author can meet. The broken variant is a std whose catalog differs from its pin (test/s586-tags-lowering.test.mjs).
+export const CATALOG_FAULTS = ['catalog-unpinned'];
 
 /** The toolchain-fault diagnostics among a list (S20: addressed to the toolchain, never to the author). */
 export function toolchainFaults(diagnostics) {
