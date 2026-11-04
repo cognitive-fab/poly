@@ -221,10 +221,10 @@ async function tableOf(text) {
   const px = await loadPolyaxion();
   const engine = policyEngine(px, px.compileToTriple(lowerPolicyScope(scope.scope, pols, 'test')).plan);
   const rows = [];
-  const evaluate = (s, sigma, row) => { const d = decide(s, sigma, row); rows.push(plain([sigma, row, d])); return d; };
+  const evaluate = (s, sigma, row, o) => { const d = decide(s, sigma, row, o); rows.push(plain([sigma, row, o ?? null, d])); return d; };
   const tv = validatePolicy(scope, facts, engine, { evaluate });
   const never = [];
-  const nv = checkNever(scope, facts, () => ({}), { evaluate: (s, sigma, row) => { const d = decide(s, sigma, row); never.push(plain([sigma, row, d])); return d; } });
+  const nv = checkNever(scope, facts, () => ({}), { evaluate: (s, sigma, row, o) => { const d = decide(s, sigma, row, o); never.push(plain([sigma, row, o ?? null, d])); return d; } });
   return { rows, never, mismatch: tv.mismatch, neverResult: plain(nv) };
 }
 
