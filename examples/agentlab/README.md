@@ -40,7 +40,7 @@ handlers: lint CLEAN over 1 file (PT6.5)
 project agentlab-readme: CLEAN (exit 0) over 2 modules
 ```
 
-The teaching variant, `desk-per-request.poly`, has only the per-request rules of the Lab's recipes: no export, an email change refused outright, and no read budget. It keeps the path property. It keeps the field `customersRead: 0..19`, the bound the program with a budget cannot pass. Its first line is `// expected: FINDING PL3102`, and the check gives exactly that. This is Act 1. Output, verbatim:
+The teaching variant, `desk-per-request.poly`, has only the per-request rules of the Lab's recipes: no export, an email change refused outright, and no read budget. Neither file declares a path property: the check prints `no path property` for both Desks. The variant keeps the field `customersRead: 0..19`, the bound the program with a budget cannot pass, and Act 1's finding is that bound broken: `PL3102 DOMAIN_ESCAPE`, `customersRead` past its declared range `0..19`. Its first line is `// expected: FINDING PL3102`, and the check gives exactly that. This is Act 1. Output, verbatim:
 
 ```
 [check] exploring (pass 1)… 1088 states discovered, frontier 320, 10s elapsed
