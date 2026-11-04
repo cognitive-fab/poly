@@ -4,7 +4,7 @@
 
 ## S586 Risk and control tags on policy items, and `poly report risks` (owner, 2026-11-03)
 
-**The plan is accepted** (`docs/proposals/risk-tags.md`, with the owner's answers in its section 10a). The specification is PS8.10 in `04-semantics.md`, and PT8.1, PT8.6 and PT34 in `03-technical-spec.md`, with rows in PT1.2, PT12.2, PT12.3a and PT14. The acceptance criteria are RT1 to RT19 (PT34.6).
+**The plan is accepted** (`docs/proposals/risk-tags.md`, with the owner's answers in its section 10a). The specification is PS8.10 in `04-semantics.md`, and PT8.1, PT8.6 and PT34 in `03-technical-spec.md`, with rows in PT1.2, PT12.2, PT12.3a and PT14. The acceptance criteria are RT1 to RT24 (PT34.6).
 
 **The rulings on the plan's questions.**
 
@@ -21,6 +21,20 @@
 | Q9 The untagged-rule warnings | Only in a project that opts in to risk reporting (it declares an exposure or uses any tag); otherwise no new warning, as RT15 asks. |
 
 **Amendment (owner, 2026-11-04).** On review of the specification: a host-side `escalate-once` denial (finding 34) is counted as an escalation made by the runtime, grouped by its `escalatedBy` cause (RT18); the report and the catalog provenance carry the MIT attribution line with its version and CC BY 4.0 (RT19); the MIT catalog is pinned to Version 4 of 2025-12-04; the PT8.6 example tags `merge-is-never-allowed` with `mit:5.2` (loss of human agency).
+
+**Rulings on the departures of the code (owner, 2026-11-04).** On review of the code at d2f1a5f9:
+
+| Departure | Ruling |
+|---|---|
+| 1. A step's `machineVersion` is the prefix of its machine's `next.cjs` digest, not a `poly.moduleDigests` value | PT34.4 item 2 names the field actually matched, one form only. |
+| 2. Open scopes | Accepted, marked open, and specified (item 2, item 9). |
+| 3. JSON fields beyond item 9 | Accepted and specified in item 9, except `store.path`, which depends on the host and breaks item 8: dropped. |
+| 4. An escalation on unknown input whose approval, timeout or open end was counted nowhere | Not accepted: it is counted like any other escalation (item 4, RT23). |
+| 5. Allows counted per event | Accepted: each `allowed` event counts once. |
+| 6. The exit `INCONCLUSIVE` while a gated run is uncounted | Accepted and specified. |
+| 7. The smaller choices | Accepted, and the specification amended: ids without the `risk:` prefix in `poly.risk`, the formatter's placement, `catalog-unpinned` as `ERROR`, `policyFault`, `file:` stripped on `--trust`, and no tags on the `.unknown` companions. |
+
+The two clauses not built are built: a `never` item reported with the verdict the certificate records (`poly.risk` carries it), and the person's resolution on each unknown outcome (PT34.4 item 5 defines it). The writer adds the test of `poly.risk`'s read-back with its broken certificate `drop-risk-item`, failing first (RT20), beside RT21 to RT24. The runtime's read of a non-service machine's snapshot, found while the tests were written (`riskdesk.Clerk`), is finding 35, handled after risk-tags with its own failing test.
 
 **The citation.** The literature is cited by its own words: Saeri et al., *Unmitigated? How are the world's largest companies responding to AI risks?*, MIT FutureTech, October 2026, Discussion.
 
