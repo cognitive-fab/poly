@@ -27,7 +27,7 @@ Six facts decide the design. Each was read in the code, not assumed.
 5. **A decision taken on unknown input is a rule of its own.** The `on unknown` branch lowers to the id `<policy>.<obligation>.unknown` (`poly-lower/src/policy.ts:133`), so the journal says when a rule decided because its condition could not be read.
 6. **The journal names no certificate.** No event carries `certificate.digest`. A step's `machineVersion` is a module digest the certificate lists (`poly.moduleDigests`), and a gate record's `policySet` is Polyaxion's digest over the loaded policies (`gate.mjs:54`). A run can be matched to a certificate through those, not read from it.
 
-Also found, outside this feature: on an escalate-once refusal the worker replaces the gate result and drops the engine record (`worker.ts:501-503`), so the decision loses its `session`, `sseq` and `engineReason`. That is read from the code, not run. It is proposed as finding 34 and is not fixed here; the report counts such a refusal as the runtime's (fact 4) until it is.
+Also found, outside this feature: finding 34. It first read the escalate-once refusal (`worker.ts:501-503`) as dropping an engine record. Probes on the vendored engine showed that the engine never escalates an approved proposal (`core/step.mjs:153`), so the only escalate-once comes from the host's freshness check before the policy, with no engine record to lose and no `sseq`. The finding is narrowed to the denial not recording its cause (`docs/examples/language-findings.md`, 34). The report counts an escalate-once refusal as the runtime's (fact 4).
 
 ## 2. The syntax (PT8.7)
 
