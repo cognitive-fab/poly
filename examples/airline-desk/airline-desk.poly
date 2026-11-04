@@ -1,0 +1,130 @@
+// expected: CLEAN
+// The airline desk (PT34.5, S586): a small program in the style of an airline customer-service task, written for the
+// risk report's docs. A booking is changed after the customer confirms the change, cancelled with a reason at a
+// customer's request or by the airline for a disruption, and a compensation certificate is issued, which a person
+// approves when it is large. Each machine emits one effect kind, and the policy beside it says which risk each rule
+// answers (airline-desk.policy.poly). The disruption is a step of the airline's own, with no customer's claims, so the
+// cancellation rule, which reads the claims, is decided on unknown input at run time (PS8.2).
+module airline_desk
+
+enum Phase { Open, Working, Done, Failed }
+enum Reason { None, Weather, Illness, Plans }
+enum Check { Verified, Unverified }
+
+// What the desk's verifier asserts about the customer who sent a step (PD5.1): checked or not, and who.
+claims Customer {
+  check: Check
+  principal: Principal
+}
+
+machine Booking {
+  state {
+    phase     : Phase  = Open
+    confirmed : bool   = false
+    reason    : Reason = None
+  }
+  terminal phase in { Done, Failed }
+
+  action Confirm()
+  action Change()
+  action Cancel(r: Reason)
+  action Disrupt()
+  action Worked()
+  action Gave()
+
+  on Confirm() by caller: Customer {
+    require phase == Open else reject "closed"
+    confirmed' = true
+  }
+
+  // A change is proposed whether or not the customer confirmed it: the policy refuses one that was not.
+  on Change() by caller: Customer {
+    require phase == Open else reject "closed"
+    phase' = Working
+    emit change(1)
+  }
+
+  on Cancel(r) by caller: Customer {
+    require phase == Open else reject "closed"
+    phase' = Working
+    reason' = r
+    emit cancel(1)
+  }
+
+  // The airline cancels for a disruption: a step of its own, with no customer's claims.
+  on Disrupt {
+    require phase == Open else reject "closed"
+    phase' = Working
+    reason' = Weather
+    emit cancel(1)
+  }
+
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect change(n: 0..1) {
+    kind "airline.change"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+
+  effect cancel(n: 0..1) {
+    kind "airline.cancel"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Compensation {
+  state {
+    phase : Phase = Open
+    large : bool  = false
+  }
+  terminal phase in { Done, Failed }
+
+  action Issue(big: bool)
+  action Worked()
+  action Gave()
+
+  on Issue(big) {
+    require phase == Open else reject "issued"
+    phase' = Working
+    large' = big
+    emit certificate(1)
+  }
+
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect certificate(n: 0..1) {
+    kind "airline.certificate"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}

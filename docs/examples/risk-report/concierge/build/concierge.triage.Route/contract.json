@@ -1,0 +1,54 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:dfbd5422ea1e562ffbc3aee8d31e1d93039a569a965e011e157d39a4169a555f",
+  "stateKeys": [
+    {
+      "name": "r",
+      "type": "'Ready' | 'Trying' | 'Answered' | 'Exhausted'"
+    },
+    {
+      "name": "tier",
+      "type": "0..1"
+    },
+    {
+      "name": "left",
+      "type": "0..1"
+    }
+  ],
+  "initState": {
+    "r": "Ready",
+    "tier": 0,
+    "left": 1
+  },
+  "actions": {
+    "Start": {
+      "dataFields": {}
+    },
+    "Answer": {
+      "dataFields": {
+        "conf": "conf",
+        "margin": "conf"
+      }
+    },
+    "Fail": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "Answered",
+    "Exhausted"
+  ],
+  "dataDomain": {
+    "Answer": {
+      "conf": [
+        0,
+        800
+      ],
+      "margin": [
+        0,
+        100
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

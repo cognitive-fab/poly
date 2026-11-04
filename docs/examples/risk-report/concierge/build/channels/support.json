@@ -1,0 +1,36 @@
+{
+  "v": 1,
+  "channel": "support",
+  "kind": "whatsapp",
+  "library": {
+    "module": "std.channels.whatsapp",
+    "digest": "sha256:6c428d561936d3d5a4de959d1d393b3eeaec7e62a965f6a6def880383944cd66"
+  },
+  "adapter": "whatsapp",
+  "thread": {
+    "template": "{from}",
+    "fields": [
+      "from"
+    ]
+  },
+  "application": "concierge.Desk",
+  "conversation": "concierge.support.Conversation",
+  "starts": {
+    "action": "Start",
+    "onInbound": true
+  },
+  "inbound": {
+    "to": "conversation",
+    "action": "Inbound"
+  },
+  "peer": {
+    "Message": "Got",
+    "Delivered": "Delivered",
+    "Rejected": "SendRejected",
+    "Failed": "SendFailed"
+  },
+  "effectKind": "channel.support.send",
+  "pending": 3,
+  "audience": "customer",
+  "principal": "principal"
+}

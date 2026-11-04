@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "budget": "spend",
+  "module": "concierge",
+  "machine": "concierge.spend.Budget",
+  "caps": [
+    {
+      "currency": "usd",
+      "amount": 500000,
+      "run": true,
+      "period": null,
+      "scope": false
+    },
+    {
+      "currency": "usd",
+      "amount": 20000000,
+      "run": false,
+      "period": "day",
+      "scope": true
+    }
+  ],
+  "onExhausted": "escalate"
+}

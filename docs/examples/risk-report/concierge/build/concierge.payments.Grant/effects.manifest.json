@@ -1,0 +1,43 @@
+{
+  "effects": {
+    "credential.refresh": {
+      "payloadSchema": {},
+      "labels": [
+        "egress:external"
+      ],
+      "retry": {
+        "maxAttempts": 1,
+        "baseMs": 500,
+        "timeoutMs": 30000
+      },
+      "onSuccess": {
+        "action": "Refreshed",
+        "map": {
+          "valid": "$.result.valid"
+        }
+      },
+      "onFailure": {
+        "action": "RefreshFailed"
+      },
+      "onExhausted": {
+        "action": "RefreshFailed"
+      },
+      "class": "reversible"
+    },
+    "credential.revoke": {
+      "payloadSchema": {},
+      "idempotency": {
+        "nature": "RFC 7009"
+      },
+      "labels": [
+        "egress:external"
+      ],
+      "retry": {
+        "maxAttempts": 5,
+        "baseMs": 500,
+        "timeoutMs": 30000
+      },
+      "class": "irreversible"
+    }
+  }
+}

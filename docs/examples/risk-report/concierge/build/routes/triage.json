@@ -1,0 +1,113 @@
+{
+  "v": 1,
+  "route": "triage",
+  "module": "concierge",
+  "machine": "concierge.triage.Route",
+  "effectKind": "route.triage.call",
+  "decision": {
+    "machine": "concierge.Desk",
+    "name": "classify"
+  },
+  "tiers": [
+    {
+      "name": "small",
+      "provider": "small",
+      "model": "flash-2026-09",
+      "maxInputTokens": 2000,
+      "maxTokens": 4000,
+      "reservation": 1800,
+      "prices": {
+        "path": "prices/small.json",
+        "digest": "sha256:dc6f694f36f071096829f3906a835d67054808c3c938d6510f2f8046255526a4",
+        "currency": "usd",
+        "perMillionTokens": {
+          "input": 100000,
+          "output": 400000
+        }
+      },
+      "calibration": {
+        "path": "maps/small.json",
+        "digest": "sha256:d734c99e13d10fd1ba6a67d8f45b45360b52757b3bac49c7cbcfc75461fabc48",
+        "decision": "classify",
+        "version": 1,
+        "fittedFor": "flash-2026-09",
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            500,
+            400
+          ],
+          [
+            800,
+            700
+          ],
+          [
+            950,
+            880
+          ]
+        ],
+        "mapDigest": "sha256:e20d3b570f8417260534bc40456311a35b6ec2ff95cb66f74f95053d4c840f05"
+      }
+    },
+    {
+      "name": "large",
+      "provider": "large",
+      "model": "opus-2026-08",
+      "maxInputTokens": 2000,
+      "maxTokens": 8000,
+      "reservation": 126000,
+      "prices": {
+        "path": "prices/large.json",
+        "digest": "sha256:58d7a10cd9c0fa69ce096fb93c9308d3871f5b4dedb7465ac538bb59b6588d10",
+        "currency": "usd",
+        "perMillionTokens": {
+          "input": 3000000,
+          "output": 15000000
+        }
+      },
+      "calibration": {
+        "path": "maps/large.json",
+        "digest": "sha256:5ca0a281109ad500ff287f2bf438dc64fd31a36df4fd7f0ce057ef80b1da272a",
+        "decision": "classify",
+        "version": 1,
+        "fittedFor": "opus-2026-08",
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            500,
+            480
+          ],
+          [
+            800,
+            790
+          ],
+          [
+            950,
+            940
+          ]
+        ],
+        "mapDigest": "sha256:2f513ee455885a4563856f48a2fe628dd20922546510c1aa10c6d6884e708f0f"
+      }
+    }
+  ],
+  "escalate": [
+    {
+      "on": "conf",
+      "below": 800
+    },
+    {
+      "on": "margin",
+      "below": 100
+    },
+    {
+      "on": "failed"
+    }
+  ],
+  "budget": "spend"
+}

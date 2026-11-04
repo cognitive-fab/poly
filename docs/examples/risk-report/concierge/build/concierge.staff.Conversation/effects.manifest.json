@@ -1,0 +1,33 @@
+{
+  "effects": {
+    "channel.staff.send": {
+      "payloadSchema": {
+        "body": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "retry": {
+        "maxAttempts": 1,
+        "baseMs": 500,
+        "timeoutMs": 30000
+      },
+      "labels": [
+        "egress:external"
+      ],
+      "onSuccess": {
+        "action": "Sent"
+      },
+      "onFailure": {
+        "action": "SendFailed"
+      },
+      "onExhausted": {
+        "action": "SendFailed"
+      },
+      "class": "irreversible"
+    }
+  },
+  "timerTargets": [
+    "Cooled"
+  ]
+}

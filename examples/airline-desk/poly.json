@@ -1,0 +1,6 @@
+{
+  "poly": "1",
+  "name": "airline-desk",
+  "modules": ["airline-desk.poly", "airline-desk.policy.poly"],
+  "exposure": { "risks": ["mit:2.1", "mit:4.3", "mit:5.2", "mit:7.3"] }
+}

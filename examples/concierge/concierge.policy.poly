@@ -6,22 +6,23 @@
 // reaches is denied when any input is above the customer audience, and the staff's decision when any input is above
 // the staff audience; a decision's taint is the join of its inputs' (PS17.2), so one class names them all. No never
 // statement: S149 reads an escalation an approval would allow as an allow, so "never without a person" is violated by
-// design (decisions-ex.md, a limit after v1); the obligation is the control.
+// design (decisions-ex.md, a limit after v1); the obligation is the control. Each obligation names the AI risk it
+// mitigates and the control it implements (PT8.6, S586); the tags decide nothing (PS8.10).
 module concierge_policy
 
 policy refunds {
   scope "concierge"
-  obligation large-refund-reviewed "A refund above 100 is issued only after a person approves it." rule {
+  obligation large-refund-reviewed "A refund above 100 is issued only after a person approves it." mitigates "mit:4.3", "mit:7.3" implements "iso:A.9.2", "nist:MAP-3.5" rule {
     when proposal.kind == "effect" && effect.kind == "payments.refund" && machine("concierge.Desk").large
     require false else escalate
     on unknown escalate
   }
-  obligation customer-decisions "A model answering a customer is given nothing above the customer audience." rule {
+  obligation customer-decisions "A model answering a customer is given nothing above the customer audience." mitigates "mit:2.1" implements "nist:MEASURE-2.10" rule {
     when proposal.kind == "effect" && effect.kind in { "decision.classify", "decision.amount", "decision.answer", "decision.reply", "decision.ack" } && !(effect.taint.class in { "public", "customer" })
     require false else deny
     on unknown deny
   }
-  obligation staff-decisions "A model answering the staff is given nothing above the staff audience." rule {
+  obligation staff-decisions "A model answering the staff is given nothing above the staff audience." mitigates "mit:2.1" implements "nist:MEASURE-2.10" rule {
     when proposal.kind == "effect" && effect.kind == "decision.noted" && !(effect.taint.class in { "public", "customer", "staff" })
     require false else deny
     on unknown deny

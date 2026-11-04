@@ -1,0 +1,152 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:434089a839daecd4a9a377654d877fc3868a13f0167180c3fd40f60b923055ba",
+  "stateKeys": [
+    {
+      "name": "archived",
+      "type": "boolean"
+    },
+    {
+      "name": "cooling",
+      "type": "boolean"
+    },
+    {
+      "name": "waiting",
+      "type": "0..2"
+    },
+    {
+      "name": "queued",
+      "type": "0..2"
+    },
+    {
+      "name": "queue1",
+      "type": "content | null"
+    },
+    {
+      "name": "queue2",
+      "type": "content | null"
+    },
+    {
+      "name": "slot",
+      "type": "'Free' | 'Sending' | 'Receipt' | 'Waiting'"
+    },
+    {
+      "name": "pending",
+      "type": "0..3"
+    },
+    {
+      "name": "app",
+      "type": "address of concierge.Notice | null"
+    }
+  ],
+  "initState": {
+    "archived": false,
+    "cooling": false,
+    "waiting": 0,
+    "queued": 0,
+    "queue1": null,
+    "queue2": null,
+    "slot": "Free",
+    "pending": 0,
+    "app": null
+  },
+  "actions": {
+    "Open": {
+      "dataFields": {
+        "app": "address of concierge.Notice | null"
+      }
+    },
+    "Inbound": {
+      "dataFields": {
+        "channel": "string",
+        "body": "content | null",
+        "event": "'Posted' | 'Archived' | 'Unarchived'",
+        "$claims": "{ verified: 'Unverified' | 'Verified', principal: principal | null }"
+      }
+    },
+    "Reply": {
+      "dataFields": {
+        "body": "content | null"
+      }
+    },
+    "Template": {
+      "dataFields": {
+        "body": "content | null"
+      }
+    },
+    "Sent": {
+      "dataFields": {}
+    },
+    "Cooled": {
+      "dataFields": {}
+    },
+    "SendFailed": {
+      "dataFields": {}
+    },
+    "Ack": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {
+    "Open": {
+      "app": [
+        null,
+        "concierge.Notice#1",
+        "concierge.Notice#2"
+      ]
+    },
+    "Inbound": {
+      "channel": [
+        "C-1",
+        "C-2"
+      ],
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ],
+      "event": [
+        "Posted",
+        "Archived",
+        "Unarchived"
+      ],
+      "$claims": [
+        {
+          "verified": "Unverified",
+          "principal": "p1"
+        },
+        {
+          "verified": "Unverified",
+          "principal": "p2"
+        },
+        {
+          "verified": "Verified",
+          "principal": "p1"
+        },
+        {
+          "verified": "Verified",
+          "principal": "p2"
+        }
+      ]
+    },
+    "Reply": {
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ]
+    },
+    "Template": {
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

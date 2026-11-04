@@ -1,0 +1,30 @@
+{
+  "effects": {
+    "airline.certificate": {
+      "payloadSchema": {
+        "n": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "labels": [
+        "exec"
+      ],
+      "retry": {
+        "maxAttempts": 3,
+        "baseMs": 10,
+        "timeoutMs": 1000
+      },
+      "onSuccess": {
+        "action": "Worked"
+      },
+      "onFailure": {
+        "action": "Gave"
+      },
+      "onExhausted": {
+        "action": "Gave"
+      },
+      "class": "compensable"
+    }
+  }
+}

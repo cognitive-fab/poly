@@ -1,0 +1,100 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:22cc6265bb16b34ee26b22c56fdc640b0ff51fbc6b08961e60ebc0b422d60c50",
+  "stateKeys": [
+    {
+      "name": "b",
+      "type": "'Closed' | 'Open' | 'Spent'"
+    },
+    {
+      "name": "cap",
+      "type": "number"
+    },
+    {
+      "name": "spent",
+      "type": "number"
+    },
+    {
+      "name": "reserved",
+      "type": "number"
+    },
+    {
+      "name": "overrun",
+      "type": "number"
+    }
+  ],
+  "initState": {
+    "b": "Closed",
+    "cap": 0,
+    "spent": 0,
+    "reserved": 0,
+    "overrun": 0
+  },
+  "actions": {
+    "Open": {
+      "dataFields": {
+        "limit": "number"
+      }
+    },
+    "Reserve": {
+      "dataFields": {
+        "r": "number"
+      }
+    },
+    "Settle": {
+      "dataFields": {
+        "r": "number",
+        "actual": "number"
+      }
+    },
+    "Release": {
+      "dataFields": {
+        "r": "number"
+      }
+    }
+  },
+  "terminalStates": [
+    "Spent"
+  ],
+  "dataDomain": {
+    "Open": {
+      "limit": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "Reserve": {
+      "r": [
+        1,
+        2,
+        3
+      ]
+    },
+    "Settle": {
+      "r": [
+        1,
+        2,
+        3
+      ],
+      "actual": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    "Release": {
+      "r": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

@@ -1,0 +1,339 @@
+{
+  "v": 1,
+  "subject": {
+    "kind": "poly.program",
+    "project": "risk-report-airline-desk",
+    "machines": [
+      {
+        "id": "airline_desk.Booking",
+        "module": "airline_desk",
+        "machine": "Booking",
+        "dir": ".poly/build/airline_desk.Booking"
+      },
+      {
+        "id": "airline_desk.Compensation",
+        "module": "airline_desk",
+        "machine": "Compensation",
+        "dir": ".poly/build/airline_desk.Compensation"
+      }
+    ]
+  },
+  "artefacts": {
+    ".poly/build/policies/airline_desk.policy.json": "sha256:6b81777115f6aa273a5143e19ffa62567be9e948a4caba11cfb75435291d6299",
+    ".poly/build/airline_desk.Booking/contract.json": "sha256:cfd1dc4533c62af1ce1d597f58523f6c2a60e17be78bdfdab75076467f5a6aa3",
+    ".poly/build/airline_desk.Booking/next.cjs": "sha256:9807b390612d1d5d9034a17154b5c00db3467287fcb3b8c2f04fb2e5f265512b",
+    ".poly/build/airline_desk.Booking/invariants.mjs": "sha256:def41893c292aa51634677580916c1d53d76358d9b0463acfe8cc652839c7e33",
+    ".poly/build/airline_desk.Booking/effects.cjs": "sha256:d13325d4236bdaa94cf843013a75567e9bdcac0eb24b0e6bf7e905ca8ea5c1f9",
+    ".poly/build/airline_desk.Booking/effects.manifest.json": "sha256:4e0ad7f62b76b281e2be84e6f160dfff196f3fb2da16e3029d4eaba689e2df88",
+    ".poly/build/airline_desk.Booking/types.d.ts": "sha256:93254d1a2f1ea69f958f2967ae49d917e057cc837c0bcb53698d6b3e0290dba7",
+    ".poly/build/airline_desk.Compensation/contract.json": "sha256:c44fa9e3fc1873c8baa259afee300fe9b1feb596eb0ee844cb225f8b3cc50a4b",
+    ".poly/build/airline_desk.Compensation/next.cjs": "sha256:1287a248c6c0edc5a13f63979b0f87008c76ae71ddd99b0c216a64bdcbb837a6",
+    ".poly/build/airline_desk.Compensation/invariants.mjs": "sha256:7482c10269ce47a3d3b2026c21e7d4a411fe158b64dc259ca15535b2ccad3b59",
+    ".poly/build/airline_desk.Compensation/effects.cjs": "sha256:2b7530cb480e64604265239214ec817c941498f9d7ec93acd452bb164096c1a1",
+    ".poly/build/airline_desk.Compensation/effects.manifest.json": "sha256:e8d11c6519e91edefabd03f57841a7c47e3b866b64d8c359ccff0e633e8db59c",
+    ".poly/build/airline_desk.Compensation/types.d.ts": "sha256:623d7f0daf9b719051a2f6dd14dbce7caa1284e4708bbb15126933cc96a3516b"
+  },
+  "guarantees": [
+    "airline_desk.Booking:deadlock-free",
+    "airline_desk.Compensation:deadlock-free"
+  ],
+  "checks": [
+    {
+      "name": "airline_desk.Booking:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Booking:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "airline_desk.Compensation:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    }
+  ],
+  "domains": {
+    "airline_desk.Booking": [
+      "Cancel.r ∈ Reason",
+      "2 principal representatives (PD5.1.3c)"
+    ],
+    "airline_desk.Compensation": [
+      "Issue.big ∈ bool"
+    ]
+  },
+  "boundAccepted": null,
+  "toolchain": {
+    "sam-pattern": "2.3.0",
+    "polygraph": "8.4.0",
+    "polygraph sam-pattern (vendored)": "2.3.0",
+    "poly-ref": "0.0.0"
+  },
+  "issuedAt": "2026-11-04T16:39:15.869Z",
+  "buildId": "cert-de2b54050636",
+  "poly": {
+    "sources": {
+      "src/airline-desk.policy.poly": "sha256:a522bc6253e0dabb6b50c1c3ef4d5688e164feedb3dee6a4d0361ea39039fc26",
+      "src/airline-desk.poly": "sha256:6e38910d7c1a88cf61690d552b1f54c177ec5350a899e097fca9fd16eb77708d"
+    },
+    "moduleDigests": {
+      "airline_desk_policy": "sha256:f376e1675c52a22f6ce8bbdd23b08647f4c511d2ef39cc63837e1345b602a78d",
+      "airline_desk": "sha256:53e15922d64924f4738d0ae50b68d0e0327addcfdfbeddd9d5d5c341ae0fc9cb"
+    },
+    "instances": {
+      "airline_desk.Booking": {
+        "domains": [
+          "Cancel.r ∈ Reason",
+          "2 principal representatives (PD5.1.3c)"
+        ],
+        "states": 26,
+        "transitions": 390,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K11"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "airline_desk.Compensation": {
+        "domains": [
+          "Issue.big ∈ bool"
+        ],
+        "states": 7,
+        "transitions": 28,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      }
+    },
+    "kernelAssumptions": [
+      "K11",
+      "K7"
+    ],
+    "decisions": [],
+    "limits": [
+      "capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)",
+      "the store is SQLite only; Postgres is not built (S135)",
+      "installed packages are hashed, not linted: a package's own I/O is stopped only by the opt-in sandbox (S154)"
+    ],
+    "handlers": {
+      "roots": [
+        "src/handlers.ts"
+      ],
+      "files": {
+        "src/handlers.ts": "sha256:42934cde35ac62fbf19c338e9e5b1d77be18cdb4810e3524372e16b110706a8f"
+      },
+      "lint": {
+        "version": "poly-lint-handlers 2: PT6.5 over the relative-import closure (S72, S142)",
+        "verdict": "CLEAN"
+      },
+      "packages": [],
+      "packageFiles": {},
+      "lockfile": {
+        "path": "../../../package-lock.json",
+        "digest": "sha256:e133809ff8434572b426a25558181e748c31902a1c18ab21e46b75040149702b"
+      }
+    },
+    "keyrings": {
+      "people": [
+        {
+          "name": "ops",
+          "keyId": "key-ops",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAquqF/j0DS6jugCVM4ZYB4dbeKaWYDqy0+YWaxcujp1w=\n-----END PUBLIC KEY-----"
+        }
+      ],
+      "agents": [
+        {
+          "name": "ci-agent",
+          "keyId": "key-ci-agent",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAr1bd7CM/cUxHqSa4vMamn1ADOp447+DP2YPSzvo8C3I=\n-----END PUBLIC KEY-----"
+        }
+      ]
+    },
+    "keyringChain": {
+      "anchor": "sha256:837b796b06236e50886c5305affe68c40f44c79688f5e95f4d13e61e449142a5",
+      "head": "sha256:837b796b06236e50886c5305affe68c40f44c79688f5e95f4d13e61e449142a5",
+      "source": "test"
+    },
+    "policies": [
+      {
+        "scope": "airline_desk",
+        "policies": [
+          "airline"
+        ],
+        "path": ".poly/build/policies/airline_desk.policy.json",
+        "reads": [
+          "airline_desk.Booking",
+          "airline_desk.Compensation"
+        ],
+        "source": "src/airline-desk.policy.poly",
+        "sequence": 1,
+        "signature": {
+          "v": 1,
+          "kind": "policy",
+          "subject": "sha256:5aceb4a724e1d160ebfa990927440c26d1b0c18ae7f1f6eae85e68c59cb578db",
+          "by": "key-ops",
+          "at": "2026-10-06T00:00:00.000Z",
+          "sig": "LbQ68wgAFGrHywkkz3hBvj9/AJZ5ltsLHTvQKIUPq81rkPRHwMppZzQwxOZ/GARccSpUG4JFZIHONubBNJXZBA=="
+        }
+      }
+    ],
+    "policyEngine": {
+      "name": "polyaxion",
+      "commit": "c37c60e"
+    },
+    "risk": {
+      "catalogs": [
+        {
+          "catalog": "iso",
+          "version": "ISO/IEC 42001:2023",
+          "digest": "sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f"
+        },
+        {
+          "catalog": "mit",
+          "version": "Version 4 (2025-12-04)",
+          "digest": "sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b"
+        },
+        {
+          "catalog": "nist",
+          "version": "AI RMF 1.0 (NIST AI 100-1, January 2023)",
+          "digest": "sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc"
+        }
+      ],
+      "exposure": [
+        "mit:2.1",
+        "mit:4.3",
+        "mit:5.2",
+        "mit:7.3"
+      ],
+      "items": {
+        "airline.change-confirmed": {
+          "scope": "airline_desk",
+          "kind": "rule",
+          "risks": [
+            "mit:5.2"
+          ],
+          "controls": [
+            "nist:MAP-3.5"
+          ]
+        },
+        "airline.cancel-requested": {
+          "scope": "airline_desk",
+          "kind": "rule",
+          "risks": [
+            "mit:4.3",
+            "mit:7.3"
+          ],
+          "controls": [
+            "iso:A.9.4"
+          ]
+        },
+        "airline.large-certificate-reviewed": {
+          "scope": "airline_desk",
+          "kind": "rule",
+          "risks": [
+            "mit:7.3"
+          ],
+          "controls": [
+            "iso:A.9.2",
+            "nist:MAP-3.5"
+          ]
+        }
+      }
+    }
+  },
+  "signatures": [
+    {
+      "keyId": "test-risk-report-airline-desk",
+      "alg": "ed25519",
+      "sig": "j8FT0M4Z7jsoCLfEwVND6PsdC0Sm7wxLWojJmC4CLbShkj7ncdNoVW62H7ZTZ8uWEh7eSO+m21+escFKAbNsBQ=="
+    }
+  ],
+  "digest": "sha256:7ced6299c729e0a87faf6d3cfdbc49db6e5ffc5400bfb1cc130defc7cad3ef3c"
+}

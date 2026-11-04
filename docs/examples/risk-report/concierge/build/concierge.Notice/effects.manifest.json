@@ -1,0 +1,37 @@
+{
+  "effects": {
+    "decision.noted": {
+      "payloadSchema": {
+        "text": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "labels": [
+        "egress:external",
+        "read:private"
+      ],
+      "retry": {
+        "maxAttempts": 1,
+        "timeoutMs": 2000
+      },
+      "onSuccess": {
+        "action": "Noted",
+        "map": {
+          "text": "$.result.answer"
+        }
+      },
+      "onFailure": {
+        "action": "NotNoted"
+      },
+      "onExhausted": {
+        "action": "NotNoted"
+      },
+      "class": "none",
+      "decision": {
+        "provider": "small",
+        "result": "content"
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:ce07da33cf799d5e368b3ae09e746e4eb250df2dbd9a47682cfa218ec8181156",
+  "stateKeys": [
+    {
+      "name": "started",
+      "type": "boolean"
+    },
+    {
+      "name": "acking",
+      "type": "boolean"
+    },
+    {
+      "name": "notifying",
+      "type": "boolean"
+    },
+    {
+      "name": "sending",
+      "type": "0..3"
+    }
+  ],
+  "initState": {
+    "started": false,
+    "acking": false,
+    "notifying": false,
+    "sending": 0
+  },
+  "actions": {
+    "Start": {
+      "dataFields": {}
+    },
+    "Got": {
+      "dataFields": {
+        "body": "content | null"
+      }
+    },
+    "Noted": {
+      "dataFields": {
+        "text": "content | null"
+      }
+    },
+    "NotNoted": {
+      "dataFields": {}
+    },
+    "Notify": {
+      "dataFields": {
+        "text": "content | null"
+      }
+    },
+    "Delivered": {
+      "dataFields": {}
+    },
+    "SendRejected": {
+      "dataFields": {
+        "reason": "string"
+      }
+    },
+    "SendFailed": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {
+    "Got": {
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+      ]
+    },
+    "Noted": {
+      "text": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+      ]
+    },
+    "Notify": {
+      "text": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+      ]
+    },
+    "SendRejected": {
+      "reason": [
+        "channel-archived",
+        "rate-limited"
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

@@ -1,0 +1,23 @@
+// The airline desk's policy (PT34.5, S586), tagged with the risk each rule answers and the control it implements (PT8.6).
+// A change waits for the customer's confirmation; a cancellation needs a checked customer and a reason, and one the
+// airline makes for a disruption, which carries no customer's claims, is decided on unknown input (PS8.2) and denied;
+// a large compensation certificate waits for a person, who approves it with a signed record (PT12.5).
+module airline_desk_policy
+
+policy airline {
+  scope "airline_desk"
+  obligation change-confirmed "A booking is changed only after the customer confirms the change." mitigates "mit:5.2" implements "nist:MAP-3.5" rule {
+    when proposal.kind == "effect" && effect.kind == "airline.change" && !machine("airline_desk.Booking").confirmed
+    require false else deny
+  }
+  obligation cancel-requested "A booking is cancelled only at a checked customer's request, with a reason." mitigates "mit:4.3", "mit:7.3" implements "iso:A.9.4" rule {
+    when proposal.kind == "effect" && effect.kind == "airline.cancel" && (step.claims.check != Verified || machine("airline_desk.Booking").reason == None)
+    require false else deny
+    on unknown deny
+  }
+  obligation large-certificate-reviewed "A large compensation certificate is issued only after a person approves it." mitigates "mit:7.3" implements "iso:A.9.2", "nist:MAP-3.5" rule {
+    when proposal.kind == "effect" && effect.kind == "airline.certificate" && machine("airline_desk.Compensation").large
+    require false else escalate
+    on unknown escalate
+  }
+}

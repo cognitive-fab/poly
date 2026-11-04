@@ -1,0 +1,141 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:11701f4d36880b22fc41cec53399be38c33cbe3d1aaf89cebca9328566be665f",
+  "stateKeys": [
+    {
+      "name": "window",
+      "type": "'Closed' | 'Open'"
+    },
+    {
+      "name": "waiting",
+      "type": "0..2"
+    },
+    {
+      "name": "queued",
+      "type": "0..2"
+    },
+    {
+      "name": "queue1",
+      "type": "content | null"
+    },
+    {
+      "name": "queue2",
+      "type": "content | null"
+    },
+    {
+      "name": "slot",
+      "type": "'Free' | 'Sending' | 'Receipt'"
+    },
+    {
+      "name": "pending",
+      "type": "0..3"
+    },
+    {
+      "name": "app",
+      "type": "address of concierge.Desk | null"
+    }
+  ],
+  "initState": {
+    "window": "Closed",
+    "waiting": 0,
+    "queued": 0,
+    "queue1": null,
+    "queue2": null,
+    "slot": "Free",
+    "pending": 0,
+    "app": null
+  },
+  "actions": {
+    "Open": {
+      "dataFields": {
+        "app": "address of concierge.Desk | null"
+      }
+    },
+    "Inbound": {
+      "dataFields": {
+        "from": "string",
+        "body": "content | null",
+        "$claims": "{ verified: 'Unverified' | 'Verified', principal: principal | null }"
+      }
+    },
+    "WindowExpired": {
+      "dataFields": {}
+    },
+    "Reply": {
+      "dataFields": {
+        "body": "content | null"
+      }
+    },
+    "Template": {
+      "dataFields": {
+        "body": "content | null"
+      }
+    },
+    "Sent": {
+      "dataFields": {}
+    },
+    "SendFailed": {
+      "dataFields": {}
+    },
+    "Ack": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {
+    "Open": {
+      "app": [
+        null,
+        "concierge.Desk#1",
+        "concierge.Desk#2"
+      ]
+    },
+    "Inbound": {
+      "from": [
+        "wa-1",
+        "wa-2"
+      ],
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ],
+      "$claims": [
+        {
+          "verified": "Unverified",
+          "principal": "p1"
+        },
+        {
+          "verified": "Unverified",
+          "principal": "p2"
+        },
+        {
+          "verified": "Verified",
+          "principal": "p1"
+        },
+        {
+          "verified": "Verified",
+          "principal": "p2"
+        }
+      ]
+    },
+    "Reply": {
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ]
+    },
+    "Template": {
+      "body": [
+        null,
+        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

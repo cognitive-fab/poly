@@ -63,6 +63,10 @@ The first reports `PL4003` and the delivery in which the target executes the ref
 
 The first of the four heavy commands above checks the program alone, with its maps and prices beside it. The second checks the project with its policy beside it, and the program's translation validation. The third is AC27. The fourth is the ledger of v1.3.1: the program checks CLEAN with its instance, and the variant that does not consult the ledger gives the witness. The light tests, which check nothing heavy, are `test/ex-concierge-host.test.mjs` (the recorded providers), `test/ex-concierge-refund.test.mjs` (the refund path and the handler), `test/ex-concierge-policy.test.mjs` (the policy denies what it says) and `test/ex-concierge-liveness.test.mjs`.
 
+## The risks its rules answer
+
+Each obligation of the policy names the AI risk it mitigates and the control it implements (PT8.6, S586): the large refund `mit:4.3` and `mit:7.3`, with `iso:A.9.2` and `nist:MAP-3.5`; the two audience rules `mit:2.1`, with `nist:MEASURE-2.10`. `poly.json` lists the project's exposure, `mit:2.1`, `mit:3.1`, `mit:4.3` and `mit:7.3`. No rule names `mit:3.1` (false or misleading information: the check cannot tell whether a model's answer is right), so the check warns `uncovered: mit:3.1` and the risk report lists it under *Exposed and not covered*. `docs/examples/risk-report/concierge/` keeps AC27's day as a store and the report made from it. The tags decide nothing (PS8.10), and the policy was signed again with them, since they are in the document a person signs.
+
 ## What is recorded and where
 
 `test/fixtures/concierge/answers.json` holds the recorded model answers for nine made-up messages, with the orders and the charges they were paid with; its `PROVENANCE.md` says how each number was chosen. The host code is in `host/`: the recorded providers (`recorded.mjs`), the refund handler (`refund.mjs`) and the notice to the staff (`notice.mjs`). The price tables and calibration maps beside the program are the tests' own, not a provider's.

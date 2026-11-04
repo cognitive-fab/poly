@@ -1,0 +1,1623 @@
+{
+  "v": 1,
+  "subject": {
+    "kind": "poly.program",
+    "project": "risk-report-concierge",
+    "machines": [
+      {
+        "id": "concierge.Desk",
+        "module": "concierge",
+        "machine": "Desk",
+        "dir": ".poly/build/concierge.Desk"
+      },
+      {
+        "id": "concierge.Notice",
+        "module": "concierge",
+        "machine": "Notice",
+        "dir": ".poly/build/concierge.Notice"
+      },
+      {
+        "id": "concierge.support.Conversation",
+        "module": "concierge.support",
+        "machine": "Conversation",
+        "dir": ".poly/build/concierge.support.Conversation"
+      },
+      {
+        "id": "concierge.staff.Conversation",
+        "module": "concierge.staff",
+        "machine": "Conversation",
+        "dir": ".poly/build/concierge.staff.Conversation"
+      },
+      {
+        "id": "concierge.payments.Grant",
+        "module": "concierge.payments",
+        "machine": "Grant",
+        "dir": ".poly/build/concierge.payments.Grant"
+      },
+      {
+        "id": "concierge.triage.Route",
+        "module": "concierge.triage",
+        "machine": "Route",
+        "dir": ".poly/build/concierge.triage.Route"
+      },
+      {
+        "id": "concierge.spend.Budget",
+        "module": "concierge.spend",
+        "machine": "Budget",
+        "dir": ".poly/build/concierge.spend.Budget"
+      }
+    ]
+  },
+  "artefacts": {
+    ".poly/build/policies/concierge.policy.json": "sha256:3f9ba0162d77fc28a22744be5e0229f898aeebf97c00a400b38d950e9f0cbd82",
+    ".poly/build/channels/support.json": "sha256:e65c77ba3bb9df85b8ce0433735957136815f3f43eb4eae261969e94dfdf4cd1",
+    ".poly/build/channels/staff.json": "sha256:a9ec2e517038d0e0694ea2f237ada1a2e6ed12bdd3f725d360daa4d4b2f2fe7f",
+    ".poly/build/credentials/payments.json": "sha256:21779f70d08d3f81407c57b50b3b36f8d84746d3c4181a104f5980f9f2b7d10e",
+    ".poly/build/sources/orders.json": "sha256:35a515127bf7425fff9d02856bc5b5da933545bdf0e3cf19ab90362bab89aecc",
+    ".poly/build/flow/concierge.json": "sha256:794181bc0cfecefb53625d03ea71ae180981b149a355593fbe6f6eb806b39984",
+    ".poly/build/routes/triage.json": "sha256:4fbeba72df30d89abcd3418d1c25164c75eec4362e7419c742ef69f5d4213f8c",
+    ".poly/build/budgets/spend.json": "sha256:f7f5f00b9a35b1153307b1d7344482822af3a01cc206faf348b732df17a6e229",
+    ".poly/build/concierge.Desk/contract.json": "sha256:84b9838437af417e288a105ef1c7a95db5caebb5a446f3ddc4c84cd98702dd62",
+    ".poly/build/concierge.Desk/next.cjs": "sha256:36f1b0930b452a2867530b462da81e145e5ebcd0cf930aa74631f07603f0132b",
+    ".poly/build/concierge.Desk/invariants.mjs": "sha256:37f1899404cba05d12d1af7e2e52c3e4a0d9d2c27ecdc961155358517d850c64",
+    ".poly/build/concierge.Desk/effects.cjs": "sha256:b893c0117ac6ac2b536a8265bdc5393c037f443b89542177d6568007aebfa8e4",
+    ".poly/build/concierge.Desk/effects.manifest.json": "sha256:02581b66b9556a384116ad153d5d6d8d4f47ba83f6f485927efa3c2be6323fc7",
+    ".poly/build/concierge.Desk/types.d.ts": "sha256:3fc502e5398ee849ce6d4bf78bdc5cf2818606b08a177ddf7cb7f8accb1c8cd7",
+    ".poly/build/concierge.Notice/contract.json": "sha256:0eac2707105bd9d146456035abc0c336be173068cd37d49f31917ec22740c496",
+    ".poly/build/concierge.Notice/next.cjs": "sha256:bd170dfe54c7aecbfbb7187b00556f97cc7f1218ebdae6121ab869e1291db459",
+    ".poly/build/concierge.Notice/invariants.mjs": "sha256:46eab3bc69f4dbd1c7bb1de76a0813d6e31ae4379fac9185667c1547ed3a5868",
+    ".poly/build/concierge.Notice/effects.cjs": "sha256:e06cb4fdca7994a956a026a5776225ea83f10ff709c8ac093640ef062e02a2e0",
+    ".poly/build/concierge.Notice/effects.manifest.json": "sha256:574d093600e98d1d0b1c325028c3de976000318a49695aaad809f2303e9d147d",
+    ".poly/build/concierge.Notice/types.d.ts": "sha256:987a5f3bd9d9516700cfda8d4ed74aca7567152016a34938310e858d5e963925",
+    ".poly/build/concierge.support.Conversation/contract.json": "sha256:7d136f927c619a30e2f887a41d544e81d8beb809ab1be8097c560404e9ed81b8",
+    ".poly/build/concierge.support.Conversation/next.cjs": "sha256:7227a423b294cc181073fb777a3bae07e942e88d73cdb63a3b2a40ecdc5b0ac1",
+    ".poly/build/concierge.support.Conversation/invariants.mjs": "sha256:6855cef57b6ccc4c6035b930f9a21440a3337588280912e0c4d2c082842906e5",
+    ".poly/build/concierge.support.Conversation/effects.cjs": "sha256:3653af1db52ff532b04eece4e9c24b14c49e70356efd6054436f9dfd5c30b303",
+    ".poly/build/concierge.support.Conversation/effects.manifest.json": "sha256:be627ded3223263fe45a4947182a1c7445868e178fa7bb37592f2264c4336de5",
+    ".poly/build/concierge.support.Conversation/types.d.ts": "sha256:1fbc6aedc5254cbe98774b7058b8548f5c6b86e18b10e2f724499e62fd7ef464",
+    ".poly/build/concierge.staff.Conversation/contract.json": "sha256:8cadf1165067b3bc9222f0a40da38ad32a2291698262dbc50d3f56ccc5301261",
+    ".poly/build/concierge.staff.Conversation/next.cjs": "sha256:445245ce57e22ec5e7fcdf0bd1df0ffdee165de331c6e9ec40671612a75c9ac3",
+    ".poly/build/concierge.staff.Conversation/invariants.mjs": "sha256:be1f3c8afc25ec34f45b9a40e65db937df188b37ec8fd3460ad9a55a1e004ff7",
+    ".poly/build/concierge.staff.Conversation/effects.cjs": "sha256:50a208a3f70c6a8af3947696179101d70318ba9faad4645f88002e3494266aa3",
+    ".poly/build/concierge.staff.Conversation/effects.manifest.json": "sha256:5b2493d43e356fb467d6b98cb2bdf1878f8cc2b7682d3776d02c681ee8959182",
+    ".poly/build/concierge.staff.Conversation/types.d.ts": "sha256:38a68c26259f2527a7638b983380e009fb2a9650bf797b3550b24ad93410ac5f",
+    ".poly/build/concierge.payments.Grant/contract.json": "sha256:d8c8d66240a7ef844edb2d07d43d39122732f0d4257edef066782889a192acc9",
+    ".poly/build/concierge.payments.Grant/next.cjs": "sha256:3d479b6f95e992294b4a7137e2df4e9f409d4d9ad5688e24e743eb67c798cfa2",
+    ".poly/build/concierge.payments.Grant/invariants.mjs": "sha256:891619d1d31efb5026d07f9f9b1f775ff6d050e97a79e8957cf624983c60d8ac",
+    ".poly/build/concierge.payments.Grant/effects.cjs": "sha256:067279bc36f8b22ec4064a9ead529eb0caaa185d9ba19a830a0e77e8260bcbe3",
+    ".poly/build/concierge.payments.Grant/effects.manifest.json": "sha256:6b1cb6ac83b252c51c1883aaf4eb5ec76f98f14179a3440ae84c2982abac4571",
+    ".poly/build/concierge.payments.Grant/liveness.mjs": "sha256:1219b4b1eaaef098276a2b56e449d1cc812492e9d04dff145ec2cc8d854408d7",
+    ".poly/build/concierge.payments.Grant/types.d.ts": "sha256:3f1f9522822e0b1bb20602bee0dc47294c542777396cb29215a7b1ec33ae6239",
+    ".poly/build/concierge.triage.Route/contract.json": "sha256:66cbd862f10b8df2c858e5674644f8fd30640ba9dcc83d575f663a95b822ca9c",
+    ".poly/build/concierge.triage.Route/next.cjs": "sha256:73daeca50e9c3204d6fc0435ff0122a0d2aa5143d51f840d34b4026ddba555be",
+    ".poly/build/concierge.triage.Route/invariants.mjs": "sha256:33c36975471d08b888101171b799d0469219d72efd562a3451667ad85eb8442c",
+    ".poly/build/concierge.triage.Route/effects.cjs": "sha256:a11395e0af7e9a5dc48f4bbabe82a551e3226d83e480e78253c17757b7fe6ad3",
+    ".poly/build/concierge.triage.Route/effects.manifest.json": "sha256:52605af68e9598cc6a74c713258aac70b7b0a5586e80cb00f1e321edc59219d0",
+    ".poly/build/concierge.triage.Route/liveness.mjs": "sha256:6713ebac82347d0996444034bc84cc59e6f75bd8b1f78eb656dabbe9e4bc4b80",
+    ".poly/build/concierge.triage.Route/types.d.ts": "sha256:480065c2704e2fd8bae6c191335fe23aafafc96a177b8eeea3c6c80c05d8ec6a",
+    ".poly/build/concierge.spend.Budget/contract.json": "sha256:47d1c9df1779290c850cfc22e126df238c88810b22d28287dd5abb7340dbbac2",
+    ".poly/build/concierge.spend.Budget/next.cjs": "sha256:0b7129d48fc83a7641ec95cddd93ea34af7e17e61af46d0ac01896276db911f5",
+    ".poly/build/concierge.spend.Budget/invariants.mjs": "sha256:64d8793dcbf0b5c92dff581d59cf4eb6acf7f22f8076a9bf34ac7cfc42786ec8",
+    ".poly/build/concierge.spend.Budget/types.d.ts": "sha256:11b6414979041fb5fffc6c0ab2a5f64479422ed5bc264a5a0123e33498d6fec8"
+  },
+  "guarantees": [],
+  "checks": [
+    {
+      "name": "concierge.Desk:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:flow",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Desk:decisions",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:flow",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.Notice:decisions",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.support.Conversation:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.staff.Conversation:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:liveness",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.payments.Grant:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:liveness",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.triage.Route:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:model-check",
+      "ok": true,
+      "engine": "polygraph@8.4.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "concierge.spend.Budget:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    }
+  ],
+  "domains": {
+    "concierge.Desk": [
+      "inflight ∈ 0..3",
+      "Got.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Found.items ∈ Items count 0..2",
+      "Cited.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Cited.cites ∈ Items count 0..2",
+      "Classified.branch ∈ Branch",
+      "Classified.conf ∈ {0}",
+      "Classified.margin ∈ {0}",
+      "Amounted.value ∈ 0..500 at {0, 101} cut by {100} (S458)",
+      "Amounted.conf ∈ {0, 800}",
+      "Amounted.cites ∈ Items count 0..2",
+      "Resolve.done ∈ bool",
+      "Answered.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Acked.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "SendRejected.reason ∈ {\"window-closed\"}",
+      "3 principal representatives (PD5.1.3c)",
+      "2 content representatives and none (PS4.1f)"
+    ],
+    "concierge.Notice": [
+      "sending ∈ 0..3",
+      "Got.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Noted.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "Notify.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+      "SendRejected.reason ∈ {\"channel-archived\", \"rate-limited\"}",
+      "2 content representatives and none (PS4.1f)"
+    ],
+    "concierge.support.Conversation": [
+      "waiting ∈ 0..2",
+      "queued ∈ 0..2",
+      "pending ∈ 0..3",
+      "Open.app ∈ {none, concierge.Desk#1, concierge.Desk#2}",
+      "Inbound.from ∈ {\"wa-1\", \"wa-2\"}",
+      "Inbound.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "Reply.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "Template.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "2 principal representatives (PD5.1.3c)",
+      "3 content representatives and none (PS4.1f)"
+    ],
+    "concierge.staff.Conversation": [
+      "waiting ∈ 0..2",
+      "queued ∈ 0..2",
+      "pending ∈ 0..3",
+      "Open.app ∈ {none, concierge.Notice#1, concierge.Notice#2}",
+      "Inbound.channel ∈ {\"C-1\", \"C-2\"}",
+      "Inbound.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "Inbound.event ∈ Event",
+      "Reply.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "Template.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+      "2 principal representatives (PD5.1.3c)",
+      "3 content representatives and none (PS4.1f)"
+    ],
+    "concierge.payments.Grant": [
+      "attempt ∈ 0..3",
+      "Callback.granted ∈ ScopeSet",
+      "Refreshed.valid ∈ bool"
+    ],
+    "concierge.triage.Route": [
+      "tier ∈ 0..1",
+      "left ∈ 0..1",
+      "Answer.conf ∈ {0, 800}",
+      "Answer.margin ∈ {0, 100}"
+    ],
+    "concierge.spend.Budget": [
+      "cap ∈ 0..3",
+      "spent ∈ 0..18",
+      "reserved ∈ 0..3",
+      "overrun ∈ 0..15",
+      "Open.limit ∈ 0..3",
+      "Reserve.r ∈ 1..3",
+      "Settle.r ∈ 1..3",
+      "Settle.actual ∈ 0..6",
+      "Release.r ∈ 1..3"
+    ]
+  },
+  "boundAccepted": null,
+  "toolchain": {
+    "sam-pattern": "2.3.0",
+    "polygraph": "8.4.0",
+    "polygraph sam-pattern (vendored)": "2.3.0",
+    "poly-ref": "0.0.0"
+  },
+  "issuedAt": "2026-11-04T17:07:57.860Z",
+  "buildId": "cert-eb1690537e84",
+  "poly": {
+    "sources": {
+      "src/concierge.policy.poly": "sha256:617451f20611553dfe88762369093a518399d63f12f20e17170b5d055a27bfdb",
+      "src/concierge.poly": "sha256:6a375c4054e3c5f4b884aaf840f7e5c92c86791e424ea2a63823ad221467b066"
+    },
+    "moduleDigests": {
+      "concierge_policy": "sha256:89b99971e7e3dc4d48902ab7c877b0853d3f449f5ea242888f525a934cc0d824",
+      "concierge": "sha256:1924fa6e27ab1c7caa584e79ba2382b2a29785326ad50d75166633101e9ec2cc"
+    },
+    "typeModules": {
+      "std.routing": {
+        "path": "std:routing/routing.poly",
+        "digest": "sha256:55abfd110d2b18678b39533fea7bfca99c320e78892e67cd2ba2cc44837a0572",
+        "file": "sha256:4c748082e043b83999b3ec3d3bb46ab7f5ff9ff8e93b398126b09a4b66d997de"
+      },
+      "std.credentials": {
+        "path": "std:credentials/grant.poly",
+        "digest": "sha256:d8551cfdfb33b0b166eb5ec5710a56afcf98fd3f7ef26b13cadff81e86c650bf",
+        "file": "sha256:cd7d0d79fe07fdc877839b76c4d32c8668979367f4b55f1761a28c252a81ad80"
+      },
+      "std.channels.whatsapp": {
+        "path": "std:channels/whatsapp.poly",
+        "digest": "sha256:6c428d561936d3d5a4de959d1d393b3eeaec7e62a965f6a6def880383944cd66",
+        "file": "sha256:1212169275a6d64e5f402f331a7949c3d7c417f4f78e441006a24a227bd54681"
+      },
+      "std.channels.slack": {
+        "path": "std:channels/slack.poly",
+        "digest": "sha256:956004954012f0cb75c7bd3f50084a38b5782e9897f1e74ef5ff2542f4e99cfc",
+        "file": "sha256:c8bedda9c6a85e1d1dfa877ef561a54b912ace092246d840c5bcca24ce7d2800"
+      }
+    },
+    "instances": {
+      "concierge.Desk": {
+        "domains": [
+          "inflight ∈ 0..3",
+          "Got.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Found.items ∈ Items count 0..2",
+          "Cited.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Cited.cites ∈ Items count 0..2",
+          "Classified.branch ∈ Branch",
+          "Classified.conf ∈ {0}",
+          "Classified.margin ∈ {0}",
+          "Amounted.value ∈ 0..500 at {0, 101} cut by {100} (S458)",
+          "Amounted.conf ∈ {0, 800}",
+          "Amounted.cites ∈ Items count 0..2",
+          "Resolve.done ∈ bool",
+          "Answered.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Acked.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "SendRejected.reason ∈ {\"window-closed\"}",
+          "3 principal representatives (PD5.1.3c)",
+          "2 content representatives and none (PS4.1f)"
+        ],
+        "states": 5762,
+        "transitions": 322672,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K11",
+          "K17"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.Notice": {
+        "domains": [
+          "sending ∈ 0..3",
+          "Got.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Noted.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "Notify.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\"}",
+          "SendRejected.reason ∈ {\"channel-archived\", \"rate-limited\"}",
+          "2 content representatives and none (PS4.1f)"
+        ],
+        "states": 28,
+        "transitions": 420,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.support.Conversation": {
+        "domains": [
+          "waiting ∈ 0..2",
+          "queued ∈ 0..2",
+          "pending ∈ 0..3",
+          "Open.app ∈ {none, concierge.Desk#1, concierge.Desk#2}",
+          "Inbound.from ∈ {\"wa-1\", \"wa-2\"}",
+          "Inbound.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "Reply.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "Template.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "2 principal representatives (PD5.1.3c)",
+          "3 content representatives and none (PS4.1f)"
+        ],
+        "states": 342,
+        "transitions": 16074,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K11"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.staff.Conversation": {
+        "domains": [
+          "waiting ∈ 0..2",
+          "queued ∈ 0..2",
+          "pending ∈ 0..3",
+          "Open.app ∈ {none, concierge.Notice#1, concierge.Notice#2}",
+          "Inbound.channel ∈ {\"C-1\", \"C-2\"}",
+          "Inbound.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "Inbound.event ∈ Event",
+          "Reply.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "Template.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\"}",
+          "2 principal representatives (PD5.1.3c)",
+          "3 content representatives and none (PS4.1f)"
+        ],
+        "states": 666,
+        "transitions": 41958,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K11"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.payments.Grant": {
+        "domains": [
+          "attempt ∈ 0..3",
+          "Callback.granted ∈ ScopeSet",
+          "Refreshed.valid ∈ bool"
+        ],
+        "states": 13,
+        "transitions": 104,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7",
+          "K18"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.triage.Route": {
+        "domains": [
+          "tier ∈ 0..1",
+          "left ∈ 0..1",
+          "Answer.conf ∈ {0, 800}",
+          "Answer.margin ∈ {0, 100}"
+        ],
+        "states": 6,
+        "transitions": 36,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      },
+      "concierge.spend.Budget": {
+        "domains": [
+          "cap ∈ 0..3",
+          "spent ∈ 0..18",
+          "reserved ∈ 0..3",
+          "overrun ∈ 0..15",
+          "Open.limit ∈ 0..3",
+          "Reserve.r ∈ 1..3",
+          "Settle.r ∈ 1..3",
+          "Settle.actual ∈ 0..6",
+          "Release.r ∈ 1..3"
+        ],
+        "states": 96,
+        "transitions": 2976,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": []
+      },
+      "concierge.support": {
+        "instances": [
+          "app: Desk",
+          "concierge.support.Conversation[0..0]: concierge.support.Conversation"
+        ],
+        "states": 81443,
+        "transitions": 2114490,
+        "bounds": [
+          "transit ≤ 3",
+          "instances ≤ 2"
+        ],
+        "kernelAssumptions": [
+          "K1",
+          "K2",
+          "K4",
+          "K7",
+          "K8"
+        ]
+      },
+      "concierge.staff": {
+        "instances": [
+          "app: Notice",
+          "concierge.staff.Conversation[0..0]: concierge.staff.Conversation"
+        ],
+        "states": 3620,
+        "transitions": 194795,
+        "bounds": [
+          "transit ≤ 3",
+          "instances ≤ 2"
+        ],
+        "kernelAssumptions": [
+          "K1",
+          "K2",
+          "K4",
+          "K7",
+          "K8"
+        ]
+      }
+    },
+    "kernelAssumptions": [
+      "K1",
+      "K10",
+      "K11",
+      "K15",
+      "K17",
+      "K18",
+      "K2",
+      "K4",
+      "K7",
+      "K8"
+    ],
+    "decisions": [
+      {
+        "machine": "concierge.Desk",
+        "kind": "decision.classify",
+        "provider": null,
+        "route": "triage",
+        "tiers": [
+          {
+            "name": "small",
+            "provider": "small",
+            "model": "flash-2026-09",
+            "calibration": "sha256:e20d3b570f8417260534bc40456311a35b6ec2ff95cb66f74f95053d4c840f05"
+          },
+          {
+            "name": "large",
+            "provider": "large",
+            "model": "opus-2026-08",
+            "calibration": "sha256:2f513ee455885a4563856f48a2fe628dd20922546510c1aa10c6d6884e708f0f"
+          }
+        ],
+        "result": [
+          "Refund",
+          "Status",
+          "Other"
+        ],
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": true,
+        "calibration": "certified per tier"
+      },
+      {
+        "machine": "concierge.Desk",
+        "kind": "decision.amount",
+        "provider": "small",
+        "result": {
+          "value": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134,
+            135,
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177,
+            178,
+            179,
+            180,
+            181,
+            182,
+            183,
+            184,
+            185,
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208,
+            209,
+            210,
+            211,
+            212,
+            213,
+            214,
+            215,
+            216,
+            217,
+            218,
+            219,
+            220,
+            221,
+            222,
+            223,
+            224,
+            225,
+            226,
+            227,
+            228,
+            229,
+            230,
+            231,
+            232,
+            233,
+            234,
+            235,
+            236,
+            237,
+            238,
+            239,
+            240,
+            241,
+            242,
+            243,
+            244,
+            245,
+            246,
+            247,
+            248,
+            249,
+            250,
+            251,
+            252,
+            253,
+            254,
+            255,
+            256,
+            257,
+            258,
+            259,
+            260,
+            261,
+            262,
+            263,
+            264,
+            265,
+            266,
+            267,
+            268,
+            269,
+            270,
+            271,
+            272,
+            273,
+            274,
+            275,
+            276,
+            277,
+            278,
+            279,
+            280,
+            281,
+            282,
+            283,
+            284,
+            285,
+            286,
+            287,
+            288,
+            289,
+            290,
+            291,
+            292,
+            293,
+            294,
+            295,
+            296,
+            297,
+            298,
+            299,
+            300,
+            301,
+            302,
+            303,
+            304,
+            305,
+            306,
+            307,
+            308,
+            309,
+            310,
+            311,
+            312,
+            313,
+            314,
+            315,
+            316,
+            317,
+            318,
+            319,
+            320,
+            321,
+            322,
+            323,
+            324,
+            325,
+            326,
+            327,
+            328,
+            329,
+            330,
+            331,
+            332,
+            333,
+            334,
+            335,
+            336,
+            337,
+            338,
+            339,
+            340,
+            341,
+            342,
+            343,
+            344,
+            345,
+            346,
+            347,
+            348,
+            349,
+            350,
+            351,
+            352,
+            353,
+            354,
+            355,
+            356,
+            357,
+            358,
+            359,
+            360,
+            361,
+            362,
+            363,
+            364,
+            365,
+            366,
+            367,
+            368,
+            369,
+            370,
+            371,
+            372,
+            373,
+            374,
+            375,
+            376,
+            377,
+            378,
+            379,
+            380,
+            381,
+            382,
+            383,
+            384,
+            385,
+            386,
+            387,
+            388,
+            389,
+            390,
+            391,
+            392,
+            393,
+            394,
+            395,
+            396,
+            397,
+            398,
+            399,
+            400,
+            401,
+            402,
+            403,
+            404,
+            405,
+            406,
+            407,
+            408,
+            409,
+            410,
+            411,
+            412,
+            413,
+            414,
+            415,
+            416,
+            417,
+            418,
+            419,
+            420,
+            421,
+            422,
+            423,
+            424,
+            425,
+            426,
+            427,
+            428,
+            429,
+            430,
+            431,
+            432,
+            433,
+            434,
+            435,
+            436,
+            437,
+            438,
+            439,
+            440,
+            441,
+            442,
+            443,
+            444,
+            445,
+            446,
+            447,
+            448,
+            449,
+            450,
+            451,
+            452,
+            453,
+            454,
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            461,
+            462,
+            463,
+            464,
+            465,
+            466,
+            467,
+            468,
+            469,
+            470,
+            471,
+            472,
+            473,
+            474,
+            475,
+            476,
+            477,
+            478,
+            479,
+            480,
+            481,
+            482,
+            483,
+            484,
+            485,
+            486,
+            487,
+            488,
+            489,
+            490,
+            491,
+            492,
+            493,
+            494,
+            495,
+            496,
+            497,
+            498,
+            499,
+            500
+          ]
+        },
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "concierge.Desk",
+        "kind": "decision.answer",
+        "provider": "small",
+        "result": "content",
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "concierge.Desk",
+        "kind": "decision.reply",
+        "provider": "small",
+        "result": "content",
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "concierge.Desk",
+        "kind": "decision.ack",
+        "provider": "small",
+        "result": "content",
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "concierge.Notice",
+        "kind": "decision.noted",
+        "provider": "small",
+        "result": "content",
+        "labels": [
+          "egress:external",
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      }
+    ],
+    "limits": [
+      "capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)",
+      "the store is SQLite only; Postgres is not built (S135)",
+      "installed packages are hashed, not linted: a package's own I/O is stopped only by the opt-in sandbox (S154)",
+      "a call's cost is its provider's usage report at the certified prices (K15): a call whose provider gave no answer reports no usage and its reservation is released, so what a provider bills for such a call is not counted; a usage report that is not whole token counts fails the call; a reservation covers the token limit at the highest price, which a call over its input tokens may exceed, recorded as an overrun"
+    ],
+    "assumptions": [
+      {
+        "id": "liveness-completions",
+        "machine": "concierge.payments.Grant",
+        "assumption": "machine-level liveness assumes that no completion of the program's own decisions and effects is rejected: the machine check offers a completion as an ordinary action in any state (PS4.4), and at run time a rejected completion consumes its intent",
+        "status": "open",
+        "by": null
+      },
+      {
+        "id": "liveness-completions",
+        "machine": "concierge.triage.Route",
+        "assumption": "machine-level liveness assumes that no completion of the program's own decisions and effects is rejected: the machine check offers a completion as an ordinary action in any state (PS4.4), and at run time a rejected completion consumes its intent",
+        "status": "open",
+        "by": null
+      }
+    ],
+    "handlers": {
+      "roots": [
+        "src/handlers.ts"
+      ],
+      "files": {
+        "src/handlers.ts": "sha256:42934cde35ac62fbf19c338e9e5b1d77be18cdb4810e3524372e16b110706a8f"
+      },
+      "lint": {
+        "version": "poly-lint-handlers 2: PT6.5 over the relative-import closure (S72, S142)",
+        "verdict": "CLEAN"
+      },
+      "packages": [],
+      "packageFiles": {},
+      "lockfile": {
+        "path": "../../../package-lock.json",
+        "digest": "sha256:e133809ff8434572b426a25558181e748c31902a1c18ab21e46b75040149702b"
+      }
+    },
+    "keyrings": {
+      "people": [
+        {
+          "name": "ops",
+          "keyId": "key-ops",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA24eMFhuYezDBEt5INMrkN+nsqwwTDAuPZbxsVe8BN7Y=\n-----END PUBLIC KEY-----"
+        }
+      ],
+      "agents": [
+        {
+          "name": "ci-agent",
+          "keyId": "key-ci-agent",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA1OQrAjzkSRIUskhU9Mn/V3y+mv37bs0s/0mQrIjkWC0=\n-----END PUBLIC KEY-----"
+        }
+      ]
+    },
+    "keyringChain": {
+      "anchor": "sha256:d2d09467bbcd7f8e8e8b3a045686fff2c5897bee6a83c3f864cb4c04174f3adb",
+      "head": "sha256:d2d09467bbcd7f8e8e8b3a045686fff2c5897bee6a83c3f864cb4c04174f3adb",
+      "source": "test"
+    },
+    "policies": [
+      {
+        "scope": "concierge",
+        "policies": [
+          "refunds"
+        ],
+        "path": ".poly/build/policies/concierge.policy.json",
+        "reads": [
+          "concierge.Desk"
+        ],
+        "source": "src/concierge.policy.poly",
+        "sequence": 1,
+        "signature": {
+          "v": 1,
+          "kind": "policy",
+          "subject": "sha256:6e21c33c25f8e23378518b0eab77e66e99c54a80584db8015c02eee7fda44600",
+          "by": "key-ops",
+          "at": "2026-10-06T00:00:00.000Z",
+          "sig": "qJNIrt5nRELR7UqySCcWPYCTfdMPdg2WsdNoILOJ8pyQ3IGGkjx556uNmv3Dpsxfh0DAOfDvaqlZUjIaJnFjCg=="
+        }
+      }
+    ],
+    "channels": [
+      {
+        "name": "support",
+        "application": "concierge.Desk",
+        "descriptor": ".poly/build/channels/support.json"
+      },
+      {
+        "name": "staff",
+        "application": "concierge.Notice",
+        "descriptor": ".poly/build/channels/staff.json"
+      }
+    ],
+    "credentials": [
+      {
+        "name": "payments",
+        "descriptor": ".poly/build/credentials/payments.json"
+      }
+    ],
+    "routes": [
+      {
+        "name": "triage",
+        "descriptor": ".poly/build/routes/triage.json"
+      }
+    ],
+    "budgets": [
+      {
+        "name": "spend",
+        "descriptor": ".poly/build/budgets/spend.json"
+      }
+    ],
+    "vaults": [
+      {
+        "credential": "payments",
+        "store": "kms",
+        "package": "@poly/io",
+        "version": "0.0.0",
+        "digest": "sha256:30044cc1bcfae48db202358b814e04abaf83d402b8faeed29e839897bf3da7e6"
+      }
+    ],
+    "memory": {
+      "sources": [
+        {
+          "name": "orders",
+          "descriptor": ".poly/build/sources/orders.json",
+          "adapter": "postgres",
+          "package": "@poly/io",
+          "version": "0.0.0",
+          "digest": "sha256:30044cc1bcfae48db202358b814e04abaf83d402b8faeed29e839897bf3da7e6"
+        }
+      ],
+      "flows": [
+        {
+          "module": "concierge",
+          "descriptor": ".poly/build/flow/concierge.json"
+        }
+      ],
+      "declassify": {
+        "decisions": [
+          {
+            "kind": "decision.amount",
+            "class": "customer",
+            "answers": 501
+          }
+        ],
+        "counts": []
+      }
+    },
+    "policyEngine": {
+      "name": "polyaxion",
+      "commit": "c37c60e"
+    },
+    "adapters": [
+      {
+        "channel": "staff",
+        "adapter": "slack",
+        "package": "@poly/io",
+        "version": "0.0.0",
+        "digest": "sha256:30044cc1bcfae48db202358b814e04abaf83d402b8faeed29e839897bf3da7e6"
+      },
+      {
+        "channel": "support",
+        "adapter": "whatsapp",
+        "package": "@poly/io",
+        "version": "0.0.0",
+        "digest": "sha256:30044cc1bcfae48db202358b814e04abaf83d402b8faeed29e839897bf3da7e6"
+      }
+    ],
+    "risk": {
+      "catalogs": [
+        {
+          "catalog": "iso",
+          "version": "ISO/IEC 42001:2023",
+          "digest": "sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f"
+        },
+        {
+          "catalog": "mit",
+          "version": "Version 4 (2025-12-04)",
+          "digest": "sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b"
+        },
+        {
+          "catalog": "nist",
+          "version": "AI RMF 1.0 (NIST AI 100-1, January 2023)",
+          "digest": "sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc"
+        }
+      ],
+      "exposure": [
+        "mit:2.1",
+        "mit:3.1",
+        "mit:4.3",
+        "mit:7.3"
+      ],
+      "items": {
+        "refunds.large-refund-reviewed": {
+          "scope": "concierge",
+          "kind": "rule",
+          "risks": [
+            "mit:4.3",
+            "mit:7.3"
+          ],
+          "controls": [
+            "iso:A.9.2",
+            "nist:MAP-3.5"
+          ]
+        },
+        "refunds.customer-decisions": {
+          "scope": "concierge",
+          "kind": "rule",
+          "risks": [
+            "mit:2.1"
+          ],
+          "controls": [
+            "nist:MEASURE-2.10"
+          ]
+        },
+        "refunds.staff-decisions": {
+          "scope": "concierge",
+          "kind": "rule",
+          "risks": [
+            "mit:2.1"
+          ],
+          "controls": [
+            "nist:MEASURE-2.10"
+          ]
+        }
+      }
+    }
+  },
+  "signatures": [
+    {
+      "keyId": "test-risk-report-concierge",
+      "alg": "ed25519",
+      "sig": "JtyC+Tniv1QMDjaWtOv0lsJIres8OqtkzPZ4YoiOodfrDaX6Ul7Gpw89dKF0ucmvl9iR64moxX9UVIM6EcSEDw=="
+    }
+  ],
+  "digest": "sha256:7c90d52015f7ca0a6847d91beac78343352203ec5dcde594bfe2ba2715d0c354"
+}
