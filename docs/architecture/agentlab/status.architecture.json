@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What has met the real gateway, and what waits on it",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "What has met the real gateway, and what waits o…",
+        "focus": [
+          "hello",
+          "vpadapter"
+        ],
+        "note": "Only the MCP client has met the gateway: probed live against the Hello surface on 2 November, which shaped its version negotiation; it is o…"
+      },
+      {
+        "id": "gw",
+        "label": "Owner's Affinidi gateway",
+        "focus": [
+          "surfaceA",
+          "hello"
+        ],
+        "note": "Hosted by Affinidi at helium-sunset.p3w7om.agentgateway.affinidi.io; it holds the Lab's API keys and signs what it decided, and poly can on…"
+      },
+      {
+        "id": "box",
+        "label": "Ubuntu box glm",
+        "focus": [
+          "vpadapter",
+          "mcpclient"
+        ],
+        "note": "Runs the poly host on loopback, reachable from outside only through the 2Dee tunnel that cloudflared runs here; nothing here holds a key of…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "mcpclient",
+      "type": "backend",
+      "label": "MCP client",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "no key",
+      "sources": [
+        {
+          "path": "packages/poly-io/src/mcp.ts",
+          "line": 136,
+          "label": "mcpClient"
+        },
+        {
+          "path": "packages/poly-io/src/net.ts",
+          "line": 12,
+          "label": "httpsTransport"
+        }
+      ]
+    },
+    {
+      "id": "hello",
+      "type": "security",
+      "label": "Hello surface",
+      "pos": [
+        700,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "/payments/hello",
+      "sources": [
+        {
+          "path": "packages/poly-io/PROVENANCE.md",
+          "line": 150,
+          "label": "the live probes of 2026-11-02"
+        }
+      ]
+    },
+    {
+      "id": "labhello",
+      "type": "external",
+      "label": "Lab Hello server",
+      "pos": [
+        1020,
+        446
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "MCP, one tool"
+    },
+    {
+      "id": "recorded",
+      "type": "security",
+      "label": "Recorded MCP server",
+      "pos": [
+        700,
+        446
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "test fixture",
+      "sources": [
+        {
+          "path": "test/fixtures/agentlab/recorded-mcp.mjs",
+          "line": 42
+        },
+        {
+          "path": "test/fixtures/agentlab/customers.json"
+        }
+      ]
+    },
+    {
+      "id": "surfaceA",
+      "type": "security",
+      "label": "Surface A",
+      "pos": [
+        380,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Signs a verifiable",
+      "tag": "planned"
+    },
+    {
+      "id": "vpadapter",
+      "type": "backend",
+      "label": "Gateway VP adapter",
+      "pos": [
+        60,
+        149
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certified",
+      "tag": "planned"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Owner's Affinidi gateway",
+      "wraps": [
+        "surfaceA",
+        "hello"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "vpadapter",
+        "mcpclient"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "mcpclient--hello",
+      "from": "mcpclient",
+      "to": "hello",
+      "label": "live probes, 2026-11-02 · HTTPS",
+      "labelAt": [
+        295,
+        60
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "hello--labhello",
+      "from": "hello",
+      "to": "labhello",
+      "label": "the call with the API key · HTTPS",
+      "labelAt": [
+        935,
+        310
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "mcpclient--recorded",
+      "from": "mcpclient",
+      "to": "recorded",
+      "label": "tests, no network",
+      "labelAt": [
+        295,
+        108
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Only the MCP client has met the gateway: probed live against the Hello surface on 2 November, which shaped its version negotiation",
+        "it is otherwise tested on the recorded server",
+        "Surface A and the VP adapter are planned, and wait on one captured request"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The desk, the checker and the refund demo, built and drawn under Act 1",
+        "the host and launcher, drawn by the presenter question",
+        "the runbook and dry run (P5), which are documents with no component"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "The VP adapter and the host wait on one captured request: forwarded-request.json and audit-presentation.json do not exist yet, so the presentation's format and the MCP revision surface A sends are unconfirmed: P2 verifies what the fixtures show and nothing it has not seen; only gateway-did.jsonl has been captured (G1 step 6)."
+      ]
+    }
+  ]
+}

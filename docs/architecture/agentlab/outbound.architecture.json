@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "The Desk decides, and only then the Lab is called",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "The Desk decides, and only then the Lab is call…",
+        "focus": [
+          "desk",
+          "gate",
+          "mcpclient"
+        ],
+        "note": "The Desk refuses a read once ten customers are read; every effect it proposes goes to the gate, which escalates an email change to a person…"
+      },
+      {
+        "id": "box",
+        "label": "Ubuntu box glm",
+        "focus": [
+          "desk",
+          "policy",
+          "gate",
+          "mcpclient"
+        ],
+        "note": "Runs the poly host on loopback, reachable from outside only through the 2Dee tunnel that cloudflared runs here; nothing here holds a key of…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "desk",
+      "type": "backend",
+      "label": "Desk machine",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Refuses a caller's read",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 53,
+          "label": "service machine Desk"
+        },
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 96,
+          "label": "read-budget"
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "database",
+      "label": "Desk policy",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "policy file",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.policy.poly",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "type": "backend",
+      "label": "Polyaxion effect gate",
+      "pos": [
+        305,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "before effects",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/policy-gate.ts"
+        },
+        {
+          "path": "vendor/polyaxion/PROVENANCE.md"
+        }
+      ]
+    },
+    {
+      "id": "mcpclient",
+      "type": "backend",
+      "label": "MCP client",
+      "pos": [
+        550,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "no key",
+      "sources": [
+        {
+          "path": "packages/poly-io/src/mcp.ts",
+          "line": 136,
+          "label": "mcpClient"
+        },
+        {
+          "path": "packages/poly-io/src/net.ts",
+          "line": 12,
+          "label": "httpsTransport"
+        }
+      ]
+    },
+    {
+      "id": "surfaceB",
+      "type": "security",
+      "label": "Surface B",
+      "pos": [
+        795,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Adds the Lab's API key",
+      "tag": "planned"
+    },
+    {
+      "id": "records",
+      "type": "external",
+      "label": "Lab customer-records",
+      "pos": [
+        1040,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "50 customers"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "desk",
+        "policy",
+        "gate",
+        "mcpclient"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "desk--gate",
+      "from": "desk",
+      "to": "gate",
+      "label": "effect proposals",
+      "labelAt": [
+        295,
+        63
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "policy--gate",
+      "from": "policy",
+      "to": "gate",
+      "label": "signed obligation · file",
+      "labelAt": [
+        370,
+        187
+      ]
+    },
+    {
+      "id": "gate--mcpclient",
+      "from": "gate",
+      "to": "mcpclient",
+      "label": "allowed effects",
+      "labelAt": [
+        540,
+        187
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "mcpclient--surfaceB",
+      "from": "mcpclient",
+      "to": "surfaceB",
+      "label": "no credential · HTTPS",
+      "labelAt": [
+        785,
+        126
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "surfaceB--records",
+      "from": "surfaceB",
+      "to": "records",
+      "label": "adds x-api-key · HTTPS",
+      "labelAt": [
+        1030,
+        436
+      ],
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The Desk refuses a read once ten customers are read",
+        "every effect it proposes goes to the gate, which escalates an email change to a person and records each verdict in the signed ledger",
+        "An allowed effect reaches the MCP client, which calls surface B with no credential, and surface B adds the Lab's key"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "How the call reached the Desk, drawn by the previous question",
+        "the ledger, the approval and the keys, drawn by the presenter and trust questions",
+        "Connected but out of scope: gateway channel, Signed ledger, poly approve, Hello surface, Recorded MCP server, poly check and admit"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "A Desk refuses a read once it has read ten customers, and no path takes it past nineteen: The server decides how many customers a page holds, so the worst case is 9 + 10; the field's domain 0..19 states the bound and the check proves no path escapes it.",
+        "An email change runs only after a person signs its approval; a phone or address change runs at once."
+      ]
+    }
+  ]
+}

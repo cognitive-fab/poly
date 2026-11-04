@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "A tool call reaches the caller's Desk",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "A tool call reaches the caller's Desk",
+        "focus": [
+          "vpadapter",
+          "channel",
+          "desk"
+        ],
+        "note": "Only the last two steps exist: the channel and the Desk. Everything before them is planned: surface A signs who asked into each request, th…"
+      },
+      {
+        "id": "box",
+        "label": "Ubuntu box glm",
+        "focus": [
+          "tunnel",
+          "host",
+          "vpadapter",
+          "channel",
+          "desk"
+        ],
+        "note": "Runs the poly host on loopback, reachable from outside only through the 2Dee tunnel that cloudflared runs here; nothing here holds a key of…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "surfaceA",
+      "type": "security",
+      "label": "Surface A",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "tag": "planned"
+    },
+    {
+      "id": "tunnel",
+      "type": "security",
+      "label": "2Dee tunnel",
+      "pos": [
+        281,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Publishes the box's"
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Agent Lab host",
+      "pos": [
+        503,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "port 8787",
+      "tag": "planned"
+    },
+    {
+      "id": "vpadapter",
+      "type": "backend",
+      "label": "Gateway VP adapter",
+      "pos": [
+        724,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certified",
+      "tag": "planned"
+    },
+    {
+      "id": "channel",
+      "type": "backend",
+      "label": "gateway channel",
+      "pos": [
+        946,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "webhook",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 38,
+          "label": "channel gateway: webhook"
+        }
+      ]
+    },
+    {
+      "id": "desk",
+      "type": "backend",
+      "label": "Desk machine",
+      "pos": [
+        1167,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Refuses a caller's",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 53,
+          "label": "service machine Desk"
+        },
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 96,
+          "label": "read-budget"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "tunnel",
+        "host",
+        "vpadapter",
+        "channel",
+        "desk"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "surfaceA--tunnel",
+      "from": "surfaceA",
+      "to": "tunnel",
+      "label": "call + signed VP · HTTPS",
+      "labelAt": [
+        272,
+        63
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "tunnel--host",
+      "from": "tunnel",
+      "to": "host",
+      "label": "to 127.0.0.1:8787 · HTTP",
+      "labelAt": [
+        494,
+        310
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "host--vpadapter",
+      "from": "host",
+      "to": "vpadapter",
+      "label": "forwarded request",
+      "labelAt": [
+        715,
+        310
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "vpadapter--channel",
+      "from": "vpadapter",
+      "to": "channel",
+      "label": "verified claims",
+      "labelAt": [
+        937,
+        310
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "channel--desk",
+      "from": "channel",
+      "to": "desk",
+      "label": "typed actions",
+      "labelAt": [
+        1158,
+        310
+      ],
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Only the last two steps exist: the channel and the Desk",
+        "Everything before them is planned: surface A signs who asked into each request, the tunnel brings it to the host, and the VP adapter, checking that signature against the gateway's pinned key, is the one place a caller's identity may come from"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The agent and the OAuth discovery proxy before surface A, which the narrative describes",
+        "the gateway DID log the adapter pins, drawn by the trust question",
+        "what the Desk does with the call, drawn by the next question"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "The gateway decides each request; poly decides the sequence. Neither does the other's job: A per-request policy cannot count across requests: the slow export is made of calls that each pass every per-request rule."
+      ]
+    }
+  ]
+}

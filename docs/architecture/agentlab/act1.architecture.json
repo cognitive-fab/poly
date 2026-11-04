@@ -1,0 +1,274 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Act 1: the check finds the slow export",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "Act 1: the check finds the slow export",
+        "focus": [
+          "checker",
+          "variant"
+        ],
+        "note": "The checker explores every reachable state of the teaching variant, which has only per-request rules, and returns a five-step witness: two…"
+      },
+      {
+        "id": "box",
+        "label": "Ubuntu box glm",
+        "focus": [
+          "channel",
+          "desk",
+          "policy"
+        ],
+        "note": "Runs the poly host on loopback, reachable from outside only through the 2Dee tunnel that cloudflared runs here; nothing here holds a key of…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "checker",
+      "type": "frontend",
+      "label": "poly check and admit",
+      "pos": [
+        60,
+        88
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certificate",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/admit.ts",
+          "line": 59,
+          "label": "certificate faults"
+        },
+        {
+          "path": "packages/poly-check/src/secrets.ts",
+          "line": 1,
+          "label": "PL6825"
+        }
+      ]
+    },
+    {
+      "id": "variant",
+      "type": "backend",
+      "label": "Teaching variant",
+      "pos": [
+        380,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "desk-per-request.poly",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk-per-request.poly",
+          "line": 1,
+          "label": "expected: FINDING PL3102"
+        }
+      ]
+    },
+    {
+      "id": "desk",
+      "type": "backend",
+      "label": "Desk machine",
+      "pos": [
+        700,
+        248
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Refuses a caller's read once ten",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 53,
+          "label": "service machine Desk"
+        },
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 96,
+          "label": "read-budget"
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "database",
+      "label": "Desk policy",
+      "pos": [
+        380,
+        248
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "policy file",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.policy.poly",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "id": "channel",
+      "type": "backend",
+      "label": "gateway channel",
+      "pos": [
+        60,
+        248
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "webhook",
+      "sources": [
+        {
+          "path": "examples/agentlab/desk.poly",
+          "line": 38,
+          "label": "channel gateway: webhook"
+        }
+      ]
+    },
+    {
+      "id": "refund",
+      "type": "backend",
+      "label": "Refund demo",
+      "pos": [
+        380,
+        129
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Act 4, Stripe stand-in",
+      "sources": [
+        {
+          "path": "demo/launch.mjs",
+          "line": 1
+        },
+        {
+          "path": "demo/README.md"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "channel",
+        "desk",
+        "policy"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "channel--desk",
+      "from": "channel",
+      "to": "desk",
+      "label": "typed actions",
+      "labelAt": [
+        455,
+        324
+      ],
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          135,
+          315
+        ],
+        [
+          775,
+          315
+        ]
+      ]
+    },
+    {
+      "id": "checker--variant",
+      "from": "checker",
+      "to": "variant",
+      "label": "FINDING PL3102, 5-step witness",
+      "labelAt": [
+        295,
+        58
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "checker--desk",
+      "from": "checker",
+      "to": "desk",
+      "label": "CLEAN, certified · file",
+      "labelAt": [
+        367,
+        124
+      ]
+    },
+    {
+      "id": "checker--policy",
+      "from": "checker",
+      "to": "policy",
+      "label": "policy checks CLEAN · file",
+      "labelAt": [
+        374,
+        199
+      ]
+    },
+    {
+      "id": "checker--refund",
+      "from": "checker",
+      "to": "refund",
+      "label": "admits the demo copy · file",
+      "labelAt": [
+        377,
+        205
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The checker explores every reachable state of the teaching variant, which has only per-request rules, and returns a five-step witness: two allowed searches of ten that read twenty customers, past the bound of nineteen (PL3102)",
+        "The desk with its read budget checks CLEAN and is certified"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Everything at run time: the gateway, the host and the MCP client",
+        "Connected but out of scope: Gateway VP adapter, Polyaxion effect gate"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Risks",
+      "items": [
+        "Act 1's finding is a domain escape (PL3102), not a path-property violation as the proposal and P1 describe; the program has no path property, and the README's line saying the variant keeps one is contradicted by the check's own output: The read budget is stated as a require and as the type bound of customersRead; the check prints no path property for the Desk."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Where the keys are, and who signs what",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "Where the keys are, and who signs what",
+        "focus": [
+          "gwdid",
+          "keys",
+          "mcpclient"
+        ],
+        "note": "The Lab's API key lives only in surface B; the gateway's signing key only behind its DID log, which poly pins. On poly's side the only keys…"
+      },
+      {
+        "id": "gw",
+        "label": "Owner's Affinidi gateway",
+        "focus": [
+          "surfaceA",
+          "surfaceB",
+          "gwdid"
+        ],
+        "note": "Hosted by Affinidi at helium-sunset.p3w7om.agentgateway.affinidi.io; it holds the Lab's API keys and signs what it decided, and poly can on…"
+      },
+      {
+        "id": "box",
+        "label": "Ubuntu box glm",
+        "focus": [
+          "vpadapter",
+          "gate",
+          "ledger",
+          "mcpclient",
+          "keys",
+          "approve"
+        ],
+        "note": "Runs the poly host on loopback, reachable from outside only through the 2Dee tunnel that cloudflared runs here; nothing here holds a key of…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "surfaceA",
+      "type": "security",
+      "label": "Surface A",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "tag": "planned"
+    },
+    {
+      "id": "gwdid",
+      "type": "database",
+      "label": "Gateway DID log",
+      "pos": [
+        285,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "did:webvh, Ed25519"
+    },
+    {
+      "id": "surfaceB",
+      "type": "security",
+      "label": "Surface B",
+      "pos": [
+        960,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Adds the Lab's API key",
+      "tag": "planned"
+    },
+    {
+      "id": "records",
+      "type": "external",
+      "label": "Lab customer-records",
+      "pos": [
+        1184,
+        446
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "50 customers"
+    },
+    {
+      "id": "vpadapter",
+      "type": "backend",
+      "label": "Gateway VP adapter",
+      "pos": [
+        60,
+        197
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "certified",
+      "tag": "planned"
+    },
+    {
+      "id": "mcpclient",
+      "type": "backend",
+      "label": "MCP client",
+      "pos": [
+        735,
+        197
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "no key",
+      "sources": [
+        {
+          "path": "packages/poly-io/src/mcp.ts",
+          "line": 136,
+          "label": "mcpClient"
+        },
+        {
+          "path": "packages/poly-io/src/net.ts",
+          "line": 12,
+          "label": "httpsTransport"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "type": "backend",
+      "label": "Polyaxion effect gate",
+      "pos": [
+        510,
+        247
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "before effects",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/policy-gate.ts"
+        },
+        {
+          "path": "vendor/polyaxion/PROVENANCE.md"
+        }
+      ]
+    },
+    {
+      "id": "approve",
+      "type": "frontend",
+      "label": "poly approve",
+      "pos": [
+        285,
+        247
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "a person's signed",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/cli.ts",
+          "line": 175
+        }
+      ]
+    },
+    {
+      "id": "keys",
+      "type": "database",
+      "label": "Box keys",
+      "pos": [
+        60,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "~/.poly-keys",
+      "tag": "planned"
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Signed ledger",
+      "pos": [
+        735,
+        298
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "hash-chained, SQLite",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 149
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Owner's Affinidi gateway",
+      "wraps": [
+        "surfaceA",
+        "surfaceB",
+        "gwdid"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "vpadapter",
+        "gate",
+        "ledger",
+        "mcpclient",
+        "keys",
+        "approve"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "vpadapter--gwdid",
+      "from": "vpadapter",
+      "to": "gwdid",
+      "label": "pinned issuer and key · file",
+      "labelAt": [
+        276,
+        124
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "gate--ledger",
+      "from": "gate",
+      "to": "ledger",
+      "label": "verdicts and steps · SQL",
+      "labelAt": [
+        794,
+        273
+      ]
+    },
+    {
+      "id": "approve--gate",
+      "from": "approve",
+      "to": "gate",
+      "label": "signed approval record · file",
+      "labelAt": [
+        501,
+        323
+      ]
+    },
+    {
+      "id": "gate--mcpclient",
+      "from": "gate",
+      "to": "mcpclient",
+      "label": "allowed effects",
+      "labelAt": [
+        725,
+        234
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "mcpclient--surfaceB",
+      "from": "mcpclient",
+      "to": "surfaceB",
+      "label": "no credential · HTTPS",
+      "labelAt": [
+        950,
+        124
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "surfaceB--records",
+      "from": "surfaceB",
+      "to": "records",
+      "label": "adds x-api-key · HTTPS",
+      "labelAt": [
+        1175,
+        60
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "keys--ledger",
+      "from": "keys",
+      "to": "ledger",
+      "label": "ledger signer · file",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          135,
+          373
+        ],
+        [
+          810,
+          373
+        ]
+      ],
+      "labelAt": [
+        467,
+        373
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "keys--approve",
+      "from": "keys",
+      "to": "approve",
+      "label": "approver's key · file",
+      "labelAt": [
+        276,
+        323
+      ],
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The Lab's API key lives only in surface B",
+        "the gateway's signing key only behind its DID log, which poly pins",
+        "On poly's side the only keys are its own: the ledger signer and a person's approval key, both planned for the box and neither present yet"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The agent, the proxy and the tunnel, which carry requests but hold no key the demo depends on",
+        "the channel, the Desk and the policy, drawn by the run-time questions",
+        "Connected but out of scope: OAuth discovery proxy, 2Dee tunnel, Agent Lab host, gateway channel, Desk machine, Desk policy"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "poly holds no key of the Lab. The MCP client refuses a configuration that carries a credential under any header name, and PL6825 finds none in the files the certificate binds: The key stays in the gateway, as the Hello, Gateway recipe teaches.",
+        "An email change runs only after a person signs its approval; a phone or address change runs at once."
+      ]
+    }
+  ]
+}

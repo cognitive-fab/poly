@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "The presenter approves, and the ledger is the evidence",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/cognitive-fab/poly",
+      "revision": "6afdafe35d692197870b5d4e0ee17b2b9d19bc28"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "The presenter approves, and the ledger is the e…",
+        "focus": [
+          "approve",
+          "ledger"
+        ],
+        "note": "Planned: the presenter types approve <intent> at the launcher, which signs a record with the approver's key through poly approve; the gate…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "launcher",
+      "type": "frontend",
+      "label": "Launcher and prompt",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "launch.mjs, tmux",
+      "tag": "planned"
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Agent Lab host",
+      "pos": [
+        380,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "port 8787",
+      "tag": "planned"
+    },
+    {
+      "id": "approve",
+      "type": "frontend",
+      "label": "poly approve",
+      "pos": [
+        380,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "a person's signed record",
+      "sources": [
+        {
+          "path": "packages/poly-check/src/cli.ts",
+          "line": 175
+        }
+      ]
+    },
+    {
+      "id": "keys",
+      "type": "database",
+      "label": "Box keys",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "~/.poly-keys",
+      "tag": "planned"
+    },
+    {
+      "id": "gate",
+      "type": "backend",
+      "label": "Polyaxion effect gate",
+      "pos": [
+        700,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "before effects",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/policy-gate.ts"
+        },
+        {
+          "path": "vendor/polyaxion/PROVENANCE.md"
+        }
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Signed ledger",
+      "pos": [
+        1020,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "hash-chained, SQLite",
+      "sources": [
+        {
+          "path": "packages/poly-runtime/src/ledger-store.ts",
+          "line": 149
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Ubuntu box glm",
+      "wraps": [
+        "host",
+        "launcher",
+        "gate",
+        "ledger",
+        "keys",
+        "approve"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "gate--ledger",
+      "from": "gate",
+      "to": "ledger",
+      "label": "verdicts and steps · SQL",
+      "labelAt": [
+        935,
+        126
+      ]
+    },
+    {
+      "id": "approve--gate",
+      "from": "approve",
+      "to": "gate",
+      "label": "signed approval record · file",
+      "labelAt": [
+        615,
+        126
+      ]
+    },
+    {
+      "id": "keys--ledger",
+      "from": "keys",
+      "to": "ledger",
+      "label": "ledger signer · file",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          135,
+          268
+        ],
+        [
+          1095,
+          268
+        ]
+      ],
+      "labelAt": [
+        615,
+        268
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "keys--approve",
+      "from": "keys",
+      "to": "approve",
+      "label": "approver's key · file",
+      "labelAt": [
+        362,
+        250
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "launcher--host",
+      "from": "launcher",
+      "to": "host",
+      "label": "starts and drives the host",
+      "labelAt": [
+        295,
+        63
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "launcher--approve",
+      "from": "launcher",
+      "to": "approve",
+      "label": "approve or deny <intent> · spawn",
+      "labelAt": [
+        295,
+        97
+      ],
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Planned: the presenter types approve <intent> at the launcher, which signs a record with the approver's key through poly approve",
+        "the gate applies it and the effect runs",
+        "Built: poly approve, the gate and the signed ledger"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The gateway and the Lab, which an approval never reaches until the effect runs",
+        "Connected but out of scope: 2Dee tunnel, Gateway VP adapter, Desk machine, Desk policy, MCP client"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "An email change runs only after a person signs its approval; a phone or address change runs at once."
+      ]
+    }
+  ]
+}
