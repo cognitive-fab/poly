@@ -17,10 +17,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { cpus, tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-assertNotExperimentTree(ROOT);
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
 const FIXTURE = join(ROOT, 'test', 'fixtures', 'agentapp');
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };

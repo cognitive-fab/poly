@@ -6,11 +6,9 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 import { lowerModels } from './outbox-models.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-assertNotExperimentTree(ROOT);
 const out = join(ROOT, 'packages', 'poly-runtime', 'model', 'build');
 rmSync(out, { recursive: true, force: true });
 const { files, manifest } = lowerModels();

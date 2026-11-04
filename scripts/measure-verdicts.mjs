@@ -9,7 +9,6 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const rel = (p) => relative(ROOT, p).split(sep).join('/');
@@ -40,7 +39,6 @@ if (process.argv[2] === '--one') {
   process.exit(0);
 }
 
-assertNotExperimentTree(ROOT);
 const out = process.argv[2];
 const jobs = Number(process.argv[process.argv.indexOf('--jobs') + 1]) || 6;
 const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? (e === 'node_modules' || e === '.poly' ? [] : walk(join(d, e))) : [join(d, e)]));

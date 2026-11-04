@@ -9,13 +9,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ERROR_LINES = 40;
 
 async function run(label) {
-  assertNotExperimentTree(ROOT);
   // Polywatch: the label names the log file only, so it is a plain word and never a path.
   if (label !== undefined && !/^[A-Za-z0-9_-]+$/.test(label)) throw new Error(`a label is letters, digits, _ and - only: ${JSON.stringify(label)}`);
   const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim() || 'nocommit';

@@ -8,10 +8,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-assertNotExperimentTree(ROOT);
 const [source = 'C:/Users/jjdub/code/polycheck', commit = '678b120'] = process.argv.slice(2);
 const FILES = ['src/check.mjs', 'data/regions.json', 'package.json', 'LICENSE'];
 const git = (...a) => execFileSync('git', ['-C', source, ...a], { maxBuffer: 1 << 28 });

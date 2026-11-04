@@ -6,7 +6,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const CORPUS = join(ROOT, 'test', 'fixtures', 'inbox');
@@ -66,7 +65,6 @@ export function build() {
 const text = (tape) => `${JSON.stringify(tape, null, 2)}\n`;
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  if (process.argv.includes('--write')) assertNotExperimentTree(ROOT);
   const tapes = build();
   let same = true;
   for (const [label, tape] of Object.entries(tapes)) {

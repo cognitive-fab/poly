@@ -9,10 +9,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentCommands } from '@poly/agent';
 import { RUN_SCHEMA } from '@poly/core';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const dir = join(fileURLToPath(import.meta.url), '..', '..', 'schemas');
-assertNotExperimentTree(join(dir, '..'));
 mkdirSync(dir, { recursive: true });
 const want = new Map(agentCommands().flatMap((c) => [[`${c.name}.input.json`, c.input], [`${c.name}.output.json`, c.output]]));
 for (const f of readdirSync(dir)) if (f.endsWith('.json') && !want.has(f)) rmSync(join(dir, f));

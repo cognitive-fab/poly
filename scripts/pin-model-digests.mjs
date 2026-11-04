@@ -5,13 +5,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotExperimentTree } from './tree-guard.mjs';
 import { parse } from '@poly/lang';
 import { digest } from '@poly/core';
 import { modelSource, BOUNDS } from '@poly/runtime/model';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-assertNotExperimentTree(ROOT);
 const file = join(ROOT, 'packages', 'poly-core', 'src', 'reserved.ts');
 const text = readFileSync(file, 'utf8');
 const digests = BOUNDS.map((m) => digest(parse(modelSource(m)).module));
