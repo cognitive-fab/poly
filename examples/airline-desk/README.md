@@ -23,7 +23,7 @@ Each rule says which AI risk it answers and which control it implements (PT8.6):
 
 ## The report
 
-`docs/examples/risk-report/airline-desk/` keeps a store the runtime wrote over a scripted day, with its certificate, its build and the public keys that verify it, and the report made from them, `report.md` and `report.json`. `node scripts/risk-report-examples.mjs` made them; the store is kept, not made again, since its key is random by design. The report regenerates byte for byte from the kept store:
+`docs/examples/risk-report/airline-desk/` keeps a store the runtime wrote over a scripted day, with its certificate, the policy document of its build and the public keys that verify them, and the report made from them, `report.md` and `report.json`. `node scripts/risk-report-examples.mjs` made them; the store is kept, not made again, since its key is random by design. The report regenerates byte for byte from the kept store:
 
 ```sh
 node packages/poly-check/dist/src/cli.js report risks --db docs/examples/risk-report/airline-desk/store.db --build docs/examples/risk-report/airline-desk/build --certificate docs/examples/risk-report/airline-desk/certificate.json --trust <ledger key id>=docs/examples/risk-report/airline-desk/ledger.pub.pem --trust <admission key id>=docs/examples/risk-report/airline-desk/admission.pub.pem

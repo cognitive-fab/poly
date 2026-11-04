@@ -4,7 +4,7 @@ Each folder here keeps what `poly report risks` reads for one example (PT34.5, S
 
 - `store.db`: the store the runtime wrote over a scripted day, with a fixed clock, on a store file with a ledger signer, every head signed and an anchor published;
 - `certificate.json`: the certificate the runs were admitted under, of the tagged policy signed by a person;
-- `build/`: the build the certificate certifies, whose policy documents the report reads by their digests;
+- `build/policies/`: the policy documents of the build the certificate certifies, the only files of the build the report reads, each checked by its certified digest;
 - `ledger.pub.pem` and `admission.pub.pem`: the public keys that verify the store and the certificate, named by key id in `trust.json`;
 - `report.md` and `report.json`: the report, in its two formats.
 

@@ -51,7 +51,12 @@ function keep(example, { dir, db, certificate, signer, key }) {
   kept.close();
   for (const x of ['-wal', '-shm']) rmSync(join(out, `store.db${x}`), { force: true });
   copyFileSync(certificate, join(out, 'certificate.json'));
-  cpSync(join(dir, '.poly', 'build'), join(out, 'build'), { recursive: true });
+  // Of the build, only what the report reads: the policy documents the certificate names, checked by their digests.
+  for (const p of JSON.parse(readFileSync(certificate, 'utf8')).poly.policies) {
+    const to = join(out, 'build', p.path.replace(/^\.poly\/build\//, ''));
+    mkdirSync(join(to, '..'), { recursive: true });
+    copyFileSync(join(dir, p.path), to);
+  }
   writeFileSync(join(out, 'ledger.pub.pem'), signer.publicKey);
   writeFileSync(join(out, 'admission.pub.pem'), key.publicKey);
   const trust = { [signer.id]: 'ledger.pub.pem', [key.id]: 'admission.pub.pem' };
