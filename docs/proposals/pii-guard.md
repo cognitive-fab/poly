@@ -203,6 +203,23 @@ Run only these files and the ones the change touches; the full suite only at the
 - **Q9. The masked text and taint.** The redacted `Content` keeps the original's taint class in PT10j (the join of the inputs). Should a verified redaction lower it, so a model call reads a lower audience? Recommended: no in this example; the policy reads `redaction == Verified` instead.
 - **Q10. Ruling number.** S587 in sequence, or S600 to start a new block after E3's reserved S550 to S599.
 
+## 11a. The owner's answers (2026-11-04)
+
+The plan is approved. The specification commit and the code wait until risk-tags passes its tests.
+
+| Question | Answer |
+|---|---|
+| Q1 | Host code. |
+| Q2 | A decision. The specification states that the `rules` preset is deterministic and needs no calibration, and that a model-detected type is never `Absent`, so no confidence is relied on. |
+| Q3 | `rules` for the live tests; `multi-open` as an optional lane. |
+| Q4 | Enable edgepii's opt-in GOV_ID patterns for a US SSN and the French NIR, pinned in the adapter's configuration. If 0.3.1 has no such pattern for those locales, keep the stated limit and put it first in the README. |
+| Q5 | The rule and a test; the v2.0 idea is logged in `docs/proposals/v2.0-ideas.md`. |
+| Q6 | A host table of approved recipient digests; an unknown recipient is new. |
+| Q7 | The shared venv. |
+| Q8 | 0.3.1 exactly; any upgrade is its own change. |
+| Q9 | No. |
+| Q10 | S587. |
+
 ## Conclusion
 
 The guard needs no change to poly's language or runtime. The detector runs as a pinned local process behind a small JSON protocol, the host turns its answer into a finite record of facts, and the machine and policy decide from those facts, failing closed on anything the host cannot read. What edgepii cannot find is the guard's limit, and the plan states it: the `rules` preset sees no name and no national id, so the policy treats both as present and redacts what it can, and the README measures, in English and French, how much that is.
