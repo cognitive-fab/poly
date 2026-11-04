@@ -8,3 +8,5 @@ vendor/** -text
 demo/baseline/PROMPT.md -text
 demo/baseline/arm-ts.md -text
 demo/baseline/arm-poly.md -text
+# The Agent Lab fixtures are copied byte for byte from captures of the gateway (P2): a test changes one byte and expects a refusal. No end-of-line conversion.
+test/fixtures/agentlab/** -text
