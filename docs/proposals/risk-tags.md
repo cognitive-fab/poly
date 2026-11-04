@@ -6,7 +6,7 @@ Status: a plan for the owner's review. Nothing is specified in the spec document
 
 ## 0. What this covers and the ids it uses
 
-A policy rule says which AI risk it mitigates and which control it implements. `poly check` refuses an unknown tag and warns on an untagged rule. A project may list the risks it considers itself exposed to. A new command, `poly report risks`, reads the verified journal and says, for each risk, what each tagged rule did. The owner's brief sets it against MIT FutureTech's working paper *Unmitigated? How are the world's largest companies responding to AI risks?* (October 2026), read by the owner as finding that companies rarely link a mitigation to the risk it addresses; the paper's published summary reports that 32% of the world's 100 largest companies and 62% of the 1,000 largest acknowledge no AI risk at all. The brief also asks for the audit trail the ITX guide asks of a seller.
+A policy rule says which AI risk it mitigates and which control it implements. `poly check` refuses an unknown tag and, in a project that opts in to risk reporting, warns on an untagged rule. A project may list the risks it considers itself exposed to. A new command, `poly report risks`, reads the verified journal and says, for each risk, what each tagged rule did. It answers a gap the literature names: "71 of the largest 100 companies reported any mitigations, but companies rarely linked publicly reported mitigations to a specific risk" (Saeri et al., *Unmitigated? How are the world's largest companies responding to AI risks?*, MIT FutureTech, October 2026, Discussion). It also gives a buyer the audit trail the ITX guide asks of a seller.
 
 | Prefix | Meaning | Proposed here |
 |---|---|---|
@@ -79,7 +79,7 @@ Each file is `{ catalog, version, source, retrieved, sourceDigest, entries: [{ i
 ## 4. The check (PT34.2)
 
 - **An unknown tag is an error.** `PL6506 POLICY_TAG_UNKNOWN` at the tag's position, for a tag whose catalog prefix is not `mit`, `nist` or `iso`, whose id is not in that catalog, whose kind is wrong for its clause, or which names a MIT domain alone. It is in the policy-types stage, so the verdict is REFUSED and the later policy stages do not run, as for a scope error.
-- **An untagged item is a warning.** An obligation, `recalled` item or policy `never` with no `mitigates` clause gives the warning `untagged: <policy>.<item> names no risk it mitigates (PT8.7)`. It is a warning of PT12.3a: printed beside the verdict, never in it, not certified. One with risks and no controls gives `no control: …` the same way.
+- **An untagged item is a warning, in a project that opts in.** A project opts in to risk reporting when its `poly.json` declares an exposure list or any of its policy items carries a tag. In such a project an obligation, `recalled` item or policy `never` with no `mitigates` clause gives the warning `untagged: <policy>.<item> names no risk it mitigates (PT8.7)`. It is a warning of PT12.3a: printed beside the verdict, never in it, not certified. One with risks and no controls gives `no control: …` the same way. A project that has not opted in gets no new warning, so its check output is byte-identical to v1.5.0's (RT15).
 - **Declared exposure.** `poly.json` gains `exposure: { risks: ["mit:2.1", "mit:7.3", …] }` (PT1.2, schema `schemas/manifest/exposure.json`). An unknown id is `PL6507 EXPOSURE_TAG_UNKNOWN`. An exposed risk that no item of the project mitigates gives the warning `uncovered: mit:2.1 is listed as an exposure and no rule mitigates it`. The certificate records the exposure list, so a report reads the list the build was admitted with.
 
 ## 5. Lowering, signing and the toolchain checks (PT8.7, PT34.3)
@@ -152,6 +152,8 @@ Outcome unknown: 1 intent (payments.refund, sha256:a41f…), approved by key-own
 |---|---|---|
 | concierge | 41 | 0 |
 
+Allows are counted per scope: an allow in the journal names no rule, so no rule is credited with one.
+
 ## Refused by the runtime (no rule)
 
 | Reason | Count |
@@ -172,7 +174,7 @@ The JSON has the same content: `{ v: 1, meaning, period, store: { verified, notC
 ## 7. The examples (PT34.5)
 
 - **The refunds desk.** `examples/concierge/concierge.policy.poly` and its copy `demo/concierge/concierge.policy.poly` (the copy test asks that they stay equal) gain tags on their three obligations, and `examples/concierge/poly.json` an exposure list. The policy is signed again.
-- **A τ²-bench-style example.** None is in this repository. The poly-tau2 session's `translation/airline` (policy `airline_writes`, five obligations) is the candidate: copied into `examples/airline` with its provenance, tagged, with an exposure list (question Q4).
+- **An airline-style example, written new.** A small `examples/airline-desk`, in the style of a τ²-bench airline task (a booking change, a cancellation with a reason, a compensation certificate), written for these docs. Nothing is copied from the poly-tau2 study, whose materials are available on request only. It is tagged and has an exposure list.
 - **The generated reports.** For each example a script drives the example's runtime with a fixed clock over a scripted set of proposals, keeps the resulting store, certificate and trust file under `docs/examples/risk-report/<example>/`, and writes `report.md` and `report.json` beside them. A test regenerates both reports from the kept store and compares them byte for byte, and runs the report twice to show the same bytes. The store is kept, not regenerated, because the store's own HMAC key is random by design (M8, `poly_store_key`) and would change every recipient digest.
 
 ## 8. Spec sections and the ruling
@@ -222,10 +224,24 @@ Acceptance criteria:
 - **Q8. Finding 34 (escalate-once drops the engine record).** Recommended: record it as a finding now and fix it under rule 7a before or with this feature, since the report then attributes those refusals to a rule.
 - **Q9. Are the warnings opt-out?** A project with many untagged rules gets a warning per rule. Recommended: no option in v1; the warnings are printed, not certified, and the count is the point.
 
+## 10a. The owner's answers (2026-11-03)
+
+- **Q1.** No tags on machine actions or machine `never emit` in v1.
+- **Q2.** Yes: `--period YYYY-MM` or `YYYY-MM-DD`, UTC, as `poly cost` has it.
+- **Q3.** Exposure by sector or role comes later.
+- **Q4.** Do not copy the poly-tau2 translation: the study materials are available on request only. Write a small new airline-style example for the docs (section 7).
+- **Q5.** Yes: `poly_report_risks` over MCP, read-only.
+- **Q6.** The certificate is named in the journal only if the `policySet` check of section 6 step 2 fails.
+- **Q7.** Not in v1. The report states plainly that allows are counted per scope.
+- **Q8.** Finding 34 is fixed first, as its own finding after v1.5.1, confirmed by a failing test before the fix.
+- **Q9.** The untagged-rule warnings appear only in a project that opts in to risk reporting (it declares an exposure list or uses any tag); otherwise no new warning, consistent with RT15 (section 4).
+- **Citation.** The paper is cited, not the owner (section 0).
+- **Order.** v1.5.1 first, then finding 34, then the spec of this plan under rule 7a.
+
 ## 11. Risks
 
 - **The concierge's policy changes.** Its digest, its signature and every demo admission change, and tests that pin them (the demo-copy test, the diagrams, the shared demo admission) must be found and updated with it. The demo's heavy files run long; they run as two commands, and only at the owner's word if they are the full serial group.
-- **The untagged warning fires on every existing policy.** All 13 example policies, their `-defect` copies and the conformance policies are untagged, so `poly check` prints new warning lines for each. Anything that compares rendered check output byte for byte changes with them, for example `docs/demo/part4/*.check.txt` and any test that asserts there are no warnings. Before the code, a grep for checks of rendered output lists those files; they are among "the files the change touches", and either the examples are tagged in the same change or the expected outputs are updated with the warnings.
+- **Where new warnings appear.** Settled by Q9: a project that has not opted in gets no new warning, so the 13 example policies, their `-defect` copies and the conformance policies print nothing new. The tagged examples (concierge, the airline desk) do opt in and print their warnings. Rendered check output of those two changes with them, and any file that holds it (for example `docs/demo/part4/*.check.txt` and any test that asserts there are no warnings) changes too. Before the code, a grep for checks of rendered output lists those files; they are among "the files the change touches", and either the examples are tagged in the same change or the expected outputs are updated with the warnings.
 - **Catalog drift.** MIT revises its taxonomy (Version 4 now). A new version is a catalog commit; a tag valid in one version and not in the next is `PL6506` when the catalog is updated, which is the intended signal.
 - **ISO labels.** Our labels must stay our words. A review of `iso-42001.json` against the rule "ids and our labels only" is part of the catalog commit.
 - **Over-reading the report.** The wording rule (RT12) is tested, and the Markdown has no word such as *mitigated*, *covered* or *safe* next to a count.
