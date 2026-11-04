@@ -498,10 +498,16 @@ export class EffectWorker {
             return;
           }
           // Rule 2 of PT9.7: an approved re-proposal is allowed or denied, never escalated again.
-          if (d === 2 && g.decision === 'escalate') g = { decision: 'deny', reason: 'escalate-once' };
+          // Finding 34: the denial records the escalation it replaces and its reason (`stale-items`, `budget`), which no
+          // other event of the intent holds; an engine record, if any, is kept as for every gate verdict (S146).
+          let replaced: { gateDecision: 'escalate'; escalatedBy: string | null } | null = null;
+          if (d === 2 && g.decision === 'escalate') {
+            replaced = { gateDecision: 'escalate', escalatedBy: g.reason ?? null };
+            g = { decision: 'deny', reason: 'escalate-once', ...(g.record ? { record: g.record } : {}) };
+          }
           // S146: the gate's own record, its action kept by digest, and the gate's decision before rule 2 of PT9.7.
           const { action: gateAction, ...gateRecord } = (g.record ?? {}) as Record<string, unknown>;
-          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...gateRecord, ...(gateAction ? { action: this.store.keep(gateAction), gateDecision: g.decision } : {}) };
+          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...gateRecord, ...(gateAction ? { action: this.store.keep(gateAction), gateDecision: g.decision } : {}), ...(replaced ?? {}) };
           if (g.decision === 'allow') {
             // PS18.4: the reservation and the allow commit together. A budget another call took first in between aborts
             // the allow, and the intent is read again (merge review F2), so the budget's own on exhausted decides; a
