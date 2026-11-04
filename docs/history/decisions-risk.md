@@ -4,7 +4,7 @@
 
 ## S586 Risk and control tags on policy items, and `poly report risks` (owner, 2026-11-03)
 
-**The plan is accepted** (`docs/proposals/risk-tags.md`, with the owner's answers in its section 10a). The specification is PS8.10 in `04-semantics.md`, and PT8.1, PT8.6 and PT34 in `03-technical-spec.md`, with rows in PT1.2, PT12.2, PT12.3a and PT14. The acceptance criteria are RT1 to RT17 (PT34.6).
+**The plan is accepted** (`docs/proposals/risk-tags.md`, with the owner's answers in its section 10a). The specification is PS8.10 in `04-semantics.md`, and PT8.1, PT8.6 and PT34 in `03-technical-spec.md`, with rows in PT1.2, PT12.2, PT12.3a and PT14. The acceptance criteria are RT1 to RT19 (PT34.6).
 
 **The rulings on the plan's questions.**
 
@@ -19,6 +19,8 @@
 | Q7 Allows per rule | Not in v1. The report states plainly that allows are counted per scope. |
 | Q8 Finding 34 | Fixed first, as its own finding after v1.5.1, with a failing test before the fix (done on branch `finding-escalate-once`: 131239b1, 32c490ca, 94e96062). |
 | Q9 The untagged-rule warnings | Only in a project that opts in to risk reporting (it declares an exposure or uses any tag); otherwise no new warning, as RT15 asks. |
+
+**Amendment (owner, 2026-11-04).** On review of the specification: a host-side `escalate-once` denial (finding 34) is counted as an escalation made by the runtime, grouped by its `escalatedBy` cause (RT18); the report and the catalog provenance carry the MIT attribution line with its version and CC BY 4.0 (RT19); the MIT catalog is pinned to Version 4 of 2025-12-04; the PT8.6 example tags `merge-is-never-allowed` with `mit:5.2` (loss of human agency).
 
 **The citation.** The literature is cited by its own words: Saeri et al., *Unmitigated? How are the world's largest companies responding to AI risks?*, MIT FutureTech, October 2026, Discussion.
 
