@@ -42,7 +42,7 @@ Under `examples/pii-guard/`. The names are fixed.
 | `samples/*.txt`, `samples/gold.json` | the English and French samples and their expected spans |
 | `README.md` | what it shows, its limits first, how to run it, what is checked, what is not, the measured scores, a conclusion, a glossary |
 
-Under `adapters/edgepii/`:
+Under `examples/pii-guard/adapter/`:
 
 | File | Content |
 |---|---|
@@ -55,13 +55,13 @@ Under `adapters/edgepii/`:
 | `PROVENANCE.md` | edgepii's version, licence (its wheel's `LICENSE` and `License-Expression: Apache-2.0`), the wheel's hash, each dependency's version, hash and licence, and for the model lane the model's repository, revision and licence as its card states it |
 | `README.md` | the adapter, the protocol, setup, a conclusion, a glossary |
 
-A `.gitattributes` line marks `adapters/edgepii/adapter.py` `eol=lf`, so its digest is the same in every checkout.
+A `.gitattributes` line marks `examples/pii-guard/adapter/adapter.py` `eol=lf`, so its digest is the same in every checkout.
 
 Tests: `test/ex-pii-guard.test.mjs` (light), `test/pii-facts.test.mjs` (light), `test/pii-adapter-live.test.mjs` (the real adapter, skipped when absent) and `test/after/ex-pii-guard-e2e.test.mjs` (admission and runs). The shared helper is `test/ex-kit.mjs`. For decisions, an escalation and its approval, read `test/after/ex-support-drafts-e2e.test.mjs`; for a policy's decision table through poly-ref, `test/ex-concierge-policy.test.mjs`; for a stored `Content`, `test/after/ex-appointment-booker-e2e.test.mjs` (`rt.putContent`).
 
 ## The adapter
 
-`adapters/edgepii/adapter.py`, started as `python adapter.py --preset <name>` (`rules` or `multi-open`). It builds `Locator.preset(name)` once, then reads one JSON request per line on stdin and writes one JSON answer per line on stdout, UTF-8 with `\n` line ends (it reconfigures stdin and stdout so on Windows). Stderr is its log and carries no value.
+`examples/pii-guard/adapter/adapter.py`, started as `python adapter.py --preset <name>` (`rules` or `multi-open`). It builds `Locator.preset(name)` once, then reads one JSON request per line on stdin and writes one JSON answer per line on stdout, UTF-8 with `\n` line ends (it reconfigures stdin and stdout so on Windows). Stderr is its log and carries no value.
 
 **At start.** It exits with status 2, before importing edgepii, when `EDGEPII_LOG_TEXT` is set to any value, with the message `EDGEPII_LOG_TEXT is set; the adapter does not log values` on stderr. It sets the logger `edgepii` to `WARNING`.
 
@@ -88,7 +88,7 @@ Tests: `test/ex-pii-guard.test.mjs` (light), `test/pii-facts.test.mjs` (light), 
 
 **The source digest.** For each file under the installed package directory `edgepii/`, `__pycache__` excluded, the line `<path>\0<sha256 of the file, hex>\n`, where `<path>` is relative to the directory that holds `edgepii/`, with `/` separators; the lines sorted by path; the SHA-256 of their concatenation. Over the 32 files of the wheel it is `sha256:66137817a819d6fd751d5c2f0453a4a1cb648dd1bde29b36145da1cff80d65a9`. The venv keeps no wheel, so the source is what the adapter can measure of the code it runs.
 
-**The pin.** `adapters/edgepii/PIN.json`:
+**The pin.** `examples/pii-guard/adapter/PIN.json`:
 
 ```json
 {
@@ -106,15 +106,15 @@ Tests: `test/ex-pii-guard.test.mjs` (light), `test/pii-facts.test.mjs` (light), 
 
 The `wheel` is checked at install by `pip install --require-hashes --no-deps -r requirements.txt`; the rest at every start. Any upgrade of edgepii is its own change that reruns the samples and the scores (Q8).
 
-**The venv (Q7).** Outside the repository, shared by the worktrees: `%LOCALAPPDATA%\poly\venvs\edgepii-0.3.1\` on Windows (`$HOME/.local/share/poly/venvs/edgepii-0.3.1/` elsewhere). `node adapters/edgepii/setup.mjs` finds Python 3.11 or later (`py -3.12`, `py -3.11`, then `python3`), creates the venv, installs `requirements.txt`, and with `--model` also `requirements-model.txt` and the model's weights at the pinned revision into the Hugging Face cache it prints. No test writes under the user's home.
+**The venv (Q7).** Outside the repository, shared by the worktrees: `%LOCALAPPDATA%\poly\venvs\edgepii-0.3.1\` on Windows (`$HOME/.local/share/poly/venvs/edgepii-0.3.1/` elsewhere). `node examples/pii-guard/adapter/setup.mjs` finds Python 3.11 or later (`py -3.12`, `py -3.11`, then `python3`), creates the venv, installs `requirements.txt`, and with `--model` also `requirements-model.txt` and the model's weights at the pinned revision into the Hugging Face cache it prints. No test writes under the user's home.
 
 ## The adapter client (`host/edgepii.mjs`)
 
 - `defaultPython()`: `process.env.POLY_EDGEPII_PYTHON` when set; otherwise the venv's `Scripts\python.exe` on Windows, `bin/python` elsewhere.
 - `loadPin(file)`: reads and returns `PIN.json`; throws when a field above is missing.
-- `adapterStatus({ python, pin, preset })`: `{ ok: true }`, or `{ ok: false, reason }` where `reason` is the exact skip message. When `python` does not exist: `not run: edgepii 0.3.1 is not installed at <python>; run node adapters/edgepii/setup.mjs`. For the model lane, when the start fails: `not run: the multi-open lane is not installed; run node adapters/edgepii/setup.mjs --model`. When `hello` differs from the pin: `not run: the adapter at <python> does not match adapters/edgepii/PIN.json (<field>)`. A test that needs the adapter calls it first and skips with `reason`.
+- `adapterStatus({ python, pin, preset })`: `{ ok: true }`, or `{ ok: false, reason }` where `reason` is the exact skip message. When `python` does not exist: `not run: edgepii 0.3.1 is not installed at <python>; run node examples/pii-guard/adapter/setup.mjs`. For the model lane, when the start fails: `not run: the multi-open lane is not installed; run node examples/pii-guard/adapter/setup.mjs --model`. When `hello` differs from the pin: `not run: the adapter at <python> does not match examples/pii-guard/adapter/PIN.json (<field>)`. A test that needs the adapter calls it first and skips with `reason`.
 - `startAdapter({ python, script, pin, preset = 'rules', timeoutMs = 10000 })`: resolves to a client, or rejects with a `FactError` (from `host/facts.mjs`) whose `code` is:
-  - `pin-mismatch`, **before any process starts**, when the SHA-256 of `script` (default `adapters/edgepii/adapter.py`) differs from `pin.adapter`; and after `hello` when any of `edgepii`, `source`, `taxonomy`, or the preset's `revision` and `detectors`, differs from the pin;
+  - `pin-mismatch`, **before any process starts**, when the SHA-256 of `script` (default `examples/pii-guard/adapter/adapter.py`) differs from `pin.adapter`; and after `hello` when any of `edgepii`, `source`, `taxonomy`, or the preset's `revision` and `detectors`, differs from the pin;
   - `missing`, when `python` does not exist or the process cannot start;
   - `timeout`, when `hello` does not answer in time.
   It starts the process with `spawn`, no shell, and an environment limited to `SYSTEMROOT` (on Windows), `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `HF_HUB_OFFLINE=1`, and `HF_HOME` when set; nothing else of the parent's environment is passed.
@@ -272,7 +272,7 @@ The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`,
 | `recheck-found` | a `redact` answer whose `recheck.found` is `{ "EMAIL": 1 }` |
 | `recheck-dropped` | a `redact` answer whose `recheck.dropped` is `1` |
 
-**Scores.** `adapters/edgepii/score.py --preset <name>` scores each sample against its gold with `exact_span_f1` and prints, per language and per type, the precision, recall and F1. The README records the table for `rules`, and for `multi-open` when installed, with the date, edgepii's version and the preset's revision. Whether edgepii handles French is answered by those numbers. Expected from the rules, and measured rather than asserted: `GOV_ID` recall 0 under `rules` in both languages; an IBAN with spaces and a French phone number in national form not found.
+**Scores.** `examples/pii-guard/adapter/score.py --preset <name>` scores each sample against its gold with `exact_span_f1` and prints, per language and per type, the precision, recall and F1. The README records the table for `rules`, and for `multi-open` when installed, with the date, edgepii's version and the preset's revision. Whether edgepii handles French is answered by those numbers. Expected from the rules, and measured rather than asserted: `GOV_ID` recall 0 under `rules` in both languages; an IBAN with spaces and a French phone number in national form not found.
 
 ## Seeded defect
 
@@ -361,6 +361,8 @@ Measured on the amended program, with `checkExample` as the light test runs it: 
 - **The model lane is not packaged.** `requirements-model.txt`, the hashed closure of `torch` and `gliner2`, is not written in this change; `setup.mjs --model` says so and stops, and `adapterStatus` for `multi-open` gives its skip message. The demo's lane is `rules` (Q3), live and recorded.
 - **A spaced IBAN is read in part as a phone.** On `en-ids.txt`, the IBAN written with spaces is not found as `PAYMENT`, as predicted, and its last three groups, `5698 7654 32`, are found as a `PHONE` (libphonenumber reads them as a number of one of the default regions). The recorded answers hold it, and the scores count it as a false positive.
 
+**A3 (2026-11-05), measured by the boundary check.** The adapter's files were specified under `adapters/edgepii/`. `scripts/check-boundaries.mjs` refused all four code files there: `adapters/` holds the host adapters of S167, and "an adapter holds .json and .md files only, and launches poly mcp or poly lsp". The edgepii adapter is the example's host code (Q1), not a host adapter, so its files live in the example, under `examples/pii-guard/adapter/`, and every path and skip message on this page names that place. The venv's place is unchanged.
+
 ## Conclusion
 
 The guard changes nothing in poly's language or runtime. A pinned local process answers in types and offsets, the host turns that answer into a finite record of facts, and the machine and its policy decide from those facts, failing closed on anything the host cannot read. What edgepii cannot find is the guard's limit, and this page states it first: edgepii 0.3.1 ships no national id pattern, and its `rules` preset sees no name, so the program treats both as present, every send is redacted, and the README measures in English and French how much a redaction masks.
@@ -368,7 +370,7 @@ The guard changes nothing in poly's language or runtime. A pinned local process 
 ## Glossary
 
 - **edgepii:** an Apache-2.0 Python library that returns exact character spans of personal data, found by rules and checksums or by a model.
-- **Adapter:** the Python process `adapters/edgepii/adapter.py`, speaking JSON lines over stdin and stdout; host code, not a certified poly adapter (Q1).
+- **Adapter:** the Python process `examples/pii-guard/adapter/adapter.py`, speaking JSON lines over stdin and stdout; host code, not a certified poly adapter (Q1).
 - **Span:** a type and a half-open range `[start, end)` of code points on the source text.
 - **Dropped span:** a span whose offsets failed edgepii's slice check; counted, never repaired, and a reason to fail.
 - **Fact table:** the host's map from a `locate` answer to the record `Findings`, one `Presence` per type.
