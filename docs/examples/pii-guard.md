@@ -283,7 +283,7 @@ Light test (`test/ex-pii-guard.test.mjs`):
 Facts test (`test/pii-facts.test.mjs`), with no Python:
 
 - `factsOf` on recorded answers: a span of each type gives `Found`; no span gives `Absent` for the five rule types and `NotRuledOut` for `GOV_ID`, `PERSON` and `ORG`; a span found by a model of a rule type gives `Found`; each row of the error table gives its `code`, including a span with `text` or `raw_label`;
-- `scanProvider` over `recordedAdapter` answers the recorded findings for each sample, and fails for each `fault`; `redactProvider` answers the masked text, fails for `recheck-found`, `recheck-dropped` and each failing call, and is given `redactTypes` of the payload's target;
+- `scanProvider` over `recordedAdapter` answers the recorded findings for each sample, fails for each `fault` but `recheck-found` and `recheck-dropped`, and answers the recorded findings under those two, which change only a `redact` answer; `redactProvider` answers the masked text, fails for `recheck-found`, `recheck-dropped` and each failing call, and is given `redactTypes` of the payload's target;
 - `startAdapter` with a `pin.adapter` that differs from the script's digest rejects `pin-mismatch` and starts no process; with a `python` that does not exist, `missing`;
 - `recipientTable`: `has` after `add`, case and surrounding space ignored; `digests()` holds no address; two keys give different digests;
 - `adapterStatus` with a missing `python` gives the exact skip message.
@@ -292,7 +292,7 @@ Live test (`test/pii-adapter-live.test.mjs`), skipped with `adapterStatus`'s `re
 
 End-to-end test (`test/after/ex-pii-guard-e2e.test.mjs`, serial), over the recorded adapter, a recorded egress (`recordingEgress`) and `rt.putContent` for documents. Completions are dispatched by the runtime, never by hand.
 
-- **model call, redacted:** `DraftModel` over `en-model.txt`, then `Send`: the scan finds the email and the phone, the redaction is verified, one POST to the model whose body holds `<EMAIL_1>` and `<PHONE_1>` and none of the sample's values; `Sent`;
+- **model call, redacted:** `DraftModel` over `en-model.txt`, then `Send`: the scan finds the email and the phone, the redaction is verified, one POST to the model whose body holds `<EMAIL_1>` and `<PHONE_1>` and neither the sample's email nor its phone number; `Sent`. The sample's name is still in the body: `rules` finds no `PERSON`, so the redaction cannot mask it, and the test asserts that it is there, as the README's limits state;
 - **mail with a secret, known recipient:** the recipient added to the table first; `DraftMail` over `en-mail.txt`, `Send`: the body holds `<SECRET>`, no escalation; `Sent`;
 - **a send before the redaction finishes:** the recorded adapter with `hold`; once the scan has completed and the instance is `Redacting`, `Send` is accepted, nothing is posted, the instance is `Open`; after `release()` and `Redacted`, `Send` posts the masked text;
 - **the gate refuses, then allows:** the defect program admitted with the program's policy, the recorded adapter with `hold`, a known recipient; `Send` for a mail while `Redacting` emits `sendMail`, which the gate denies (a `verdict` event with `outcome: "denied"` for `mail.send`; the worker delivers a denied effect's `failed` completion), so nothing is posted and `NotDelivered` returns the instance to `Open`; after `release()` and `Redacted`, `Send` posts the masked text;
@@ -321,7 +321,7 @@ Run only these files and the ones a change touches; the full suite only at the o
 - **PG12** The live adapter's answers equal the recorded ones for every sample, and the live tests skip with their message when it is absent.
 - **PG13** The README's English and French scores are those `score.py` prints on the samples, with the versions, the revision and the date.
 - **PG14** With `risk-tags` merged, `poly report risks` on the example's kept store counts its three rules under `mit:2.1` and lists `mit:2.2` as exposed and not covered.
-- **PG15** The README's limits begin with GOV_ID: edgepii 0.3.1 ships no GOV_ID pattern, so under `rules` a national id is never found and a verified redaction does not mask it; the measured `GOV_ID` recall of 0 is shown beside it.
+- **PG15** The README's limits begin with GOV_ID: edgepii 0.3.1 ships no GOV_ID pattern, so under `rules` a national id is never found and a verified redaction does not mask it; the measured `GOV_ID` recall of 0 is shown beside it. The second limit is names: under `rules` no `PERSON` is found, so a name reaches the model inside the verified, masked text.
 
 ## Differences from the plan
 
