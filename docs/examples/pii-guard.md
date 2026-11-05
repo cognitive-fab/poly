@@ -41,6 +41,7 @@ Under `examples/pii-guard/`. The names are fixed.
 | `recorded/answers.json` | the adapter's recorded answers for the samples |
 | `samples/*.txt`, `samples/gold.json` | the English and French samples and their expected spans |
 | `README.md` | what it shows, its limits first, how to run it, what is checked, what is not, the measured scores, a conclusion, a glossary |
+| `poly.json` | the example's manifest: `{ "poly": "1", "name": "pii-guard", "modules": ["pii-guard.poly", "pii-guard.policy.poly"], "exposure": { "risks": ["mit:2.1", "mit:2.2"] } }` (A4) |
 
 Under `examples/pii-guard/adapter/`:
 
@@ -228,7 +229,7 @@ Policy `outbound`, scope `"pii"`, in module `pii_policy`. Each rule is guarded b
 - `model-redacted` "A name, email or phone number is redacted before an external model sees it.": for `effect.kind == "model.call"`, `require M.redaction == Verified || M.personal == Absent else deny`, `on unknown deny`.
 - `new-recipient-approved` "A new external recipient gets nothing until a person approves.": for `effect.kind == "mail.send" && M.recipient == New`, `require false else escalate`, `on unknown escalate`.
 
-The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`, `implements "nist:MEASURE-2.10"` on the first two, `implements "nist:MAP-3.5"` on the third) and the project's `exposure: { "risks": ["mit:2.1", "mit:2.2"] }` are added when `risk-tags` is merged, by an amendment to this page; until then the policy is the same without them.
+The policy is signed as a person signs it. **Risk tags (A4, PT8.6, PT34).** Each obligation carries its tags after its quoted text and before `rule`: `sensitive-redacted` and `model-redacted` each `mitigates "mit:2.1" implements "nist:MEASURE-2.10"`; `new-recipient-approved` `implements "nist:MAP-3.5"` and mitigates nothing. `mit:2.1` is the MIT subdomain "Compromise of privacy by obtaining, leaking or correctly inferring sensitive information"; `mit:2.2` is "AI system security vulnerabilities and attacks". The example's `poly.json` declares `exposure: { "risks": ["mit:2.1", "mit:2.2"] }`. So the project opts in to risk reporting, and a check of the example with that manifest prints exactly two warnings of PT34.2 and stays `CLEAN`: `untagged: outbound.new-recipient-approved names no risk it mitigates (PT8.6)`, and `uncovered: mit:2.2 is listed as an exposure and no rule mitigates it (PT34.2)`. Both are kept on purpose: the escalation is a control (a person approves) and not a mitigation of a listed risk, and no rule of a privacy guard mitigates attacks on the AI system, which the report should show as exposed. The defect's policy is the same text, tags included.
 
 `govId` is never `Absent` at run time under either preset, so neither is `sensitive`, and `person` never is under `rules`, so neither is `personal`: **every send at run time goes through a verified redaction**. The unredacted branches of `Send` and of the two rules are reached only in the check's over-approximation, and by a future preset that has a GOV_ID rule. They are kept so that the program states the rule and not the limit of today's detector.
 
@@ -286,6 +287,7 @@ Light test (`test/ex-pii-guard.test.mjs`):
 - the defect is `FINDINGS` with exactly `PL3002`, `no-sensitive-mail` named and no other property, and a witness whose last step is `Send`;
 - the policy through poly-ref's decision table: `model.call` with `scan` `Done` and `redaction` `Verified` is allowed; with `scan` `Pending` or `Failed`, denied by `sensitive-redacted`; with `sensitive` `Found` and `redaction` `None` or `Redacting`, denied; with `sensitive` `NotRuledOut` and `redaction` not `Verified`, denied; with both facts `Absent`, `scan` `Done` and `redaction` `None`, allowed; with `personal` `NotRuledOut`, `sensitive` `Absent` and `redaction` `None`, denied by `model-redacted`; `mail.send` with `recipient` `New` and the send otherwise allowed is escalated by `new-recipient-approved`, and with `Known` allowed;
 - `poly check --host` is `CLEAN`, and a handler with a wrong field is `PL6836`;
+- the risk tags (A4): the policy file's three obligations carry exactly the tags above, and the defect's policy is the same text; `examples/pii-guard/poly.json` declares exactly the exposure above and lists the two modules; the program with its policy, checked as a project whose `poly.json` declares that exposure, is `CLEAN`, and the risk warnings of its project report (`checkProject`'s `warnings`, each `{ kind: "risk", warning, text }`; `checkExample` does not return them) are exactly the two above, in that order; checked as a project without an exposure, the tags alone opt it in, and the one risk warning is the `untagged:` one;
 - the handlers: 201 ok; 422 permanent; 503 ambiguous and not permanent; header and body as above.
 
 Facts test (`test/pii-facts.test.mjs`), with no Python:
@@ -362,6 +364,8 @@ Measured on the amended program, with `checkExample` as the light test runs it: 
 - **A spaced IBAN is read in part as a phone.** On `en-ids.txt`, the IBAN written with spaces is not found as `PAYMENT`, as predicted, and its last three groups, `5698 7654 32`, are found as a `PHONE` (libphonenumber reads them as a number of one of the default regions). The recorded answers hold it, and the scores count it as a false positive.
 
 **A3 (2026-11-05), measured by the boundary check.** The adapter's files were specified under `adapters/edgepii/`. `scripts/check-boundaries.mjs` refused all four code files there: `adapters/` holds the host adapters of S167, and "an adapter holds .json and .md files only, and launches poly mcp or poly lsp". The edgepii adapter is the example's host code (Q1), not a host adapter, so its files live in the example, under `examples/pii-guard/adapter/`, and every path and skip message on this page names that place. The venv's place is unchanged.
+
+**A4 (2026-11-05), when `risk-tags` (S586) was merged.** The risk tags this page deferred are added, as "Policy" now states: three obligations tagged, the example's `poly.json` with its exposure, and a light test of both. Nothing else changes: tags change no verdict, no decision of the gate and no state count (PT34.3, PS8.10).
 
 ## Conclusion
 
