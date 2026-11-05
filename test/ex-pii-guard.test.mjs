@@ -4,17 +4,20 @@
 // PG10 (a new recipient escalated), and the certified handlers (poly check --host, PL6836, the status classes). As
 // amended by A1: the state holds the two joined facts sensitive and personal, and the measured state counts (5,206 and
 // 7,006) and the defect's witness (DraftMail, Scanned, Checked, Send) are recorded on the page, so they are asserted.
+// As amended by A4 (PT8.6, PT34.2, PG14's sources): the policy's risk tags, the example's poly.json with its exposure,
+// and the two risk warnings of a check that opts in.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { commandNamed } from '@poly/check';
+import { checkProject, commandNamed } from '@poly/check';
 import { parse } from '@poly/lang';
 import { decide, initialSigma, policyFacts, proposalTable } from '@poly/ref';
 import { ROOT } from './helpers.mjs';
 import { checkExample, expectedOf, mismatch } from './examples-expected.mjs';
+import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 const EX_DIR = join(ROOT, 'examples', 'pii-guard');
 const PROGRAM = join(EX_DIR, 'pii-guard.poly');
@@ -235,6 +238,65 @@ test('PG10: mail.send to a New recipient, otherwise allowed, is escalated by new
 });
 
 // ── the certified handlers ──
+
+// ── the risk tags and the exposure (A4, PT8.6, PT34.2) ──
+
+const UNTAGGED = 'untagged: outbound.new-recipient-approved names no risk it mitigates (PT8.6)';
+const UNCOVERED = 'uncovered: mit:2.2 is listed as an exposure and no rule mitigates it (PT34.2)';
+const tagsOf = (tags) => (tags ?? []).map((t) => t.tag);
+
+test('A4: the policy\'s three obligations carry exactly their risk tags, and the defect\'s policy is the same text', () => {
+  const src = readFileSync(POLICY, 'utf8');
+  const policy = parse(src).module.decls.find((d) => d.kind === 'Policy' && d.name === 'outbound');
+  assert.ok(policy, 'the policy outbound parses');
+  const tags = Object.fromEntries(policy.items.filter((i) => i.kind === 'RuleObligation').map((i) => [i.name, { mitigates: tagsOf(i.mitigates), implements: tagsOf(i.implements) }]));
+  assert.deepEqual(tags, {
+    'sensitive-redacted': { mitigates: ['mit:2.1'], implements: ['nist:MEASURE-2.10'] },
+    'model-redacted': { mitigates: ['mit:2.1'], implements: ['nist:MEASURE-2.10'] },
+    // The escalation is a control (a person approves), not a mitigation of a listed risk.
+    'new-recipient-approved': { mitigates: [], implements: ['nist:MAP-3.5'] },
+  });
+  const lf = (s) => s.replace(/\r\n/g, '\n');
+  assert.equal(lf(readFileSync(DEFECT_POLICY, 'utf8')), lf(src), 'the defect\'s policy is the same text, tags included');
+});
+
+test('A4: examples/pii-guard/poly.json declares exactly the exposure mit:2.1, mit:2.2 and lists the two modules', () => {
+  const manifest = JSON.parse(readFileSync(join(EX_DIR, 'poly.json'), 'utf8'));
+  assert.equal(manifest.name, 'pii-guard');
+  assert.deepEqual(manifest.exposure, { risks: ['mit:2.1', 'mit:2.2'] });
+  assert.deepEqual([...manifest.modules].sort(), ['pii-guard.policy.poly', 'pii-guard.poly']);
+});
+
+/**
+ * The program and its policy as a project, signed as a person signs it, its poly.json (written by project()) extended
+ * with `exposure` when one is given. checkExample does not return the project report's warnings, so this checks the
+ * project with checkProject and reads them there.
+ */
+async function riskCheck(name, exposure) {
+  const dir = project(name, ['examples/pii-guard/pii-guard.poly', 'examples/pii-guard/pii-guard.policy.poly'], makeKey(name), 'test-examples-project');
+  if (exposure) {
+    const pj = join(dir, 'poly.json');
+    writeFileSync(pj, JSON.stringify({ ...JSON.parse(readFileSync(pj, 'utf8')), exposure }, null, 2));
+  }
+  await signPolicies(dir);
+  const r = await checkProject(dir, { root: dir });
+  return { report: r, risk: (r.warnings ?? []).filter((w) => w.kind === 'risk') };
+}
+
+test('A4: checked as a project whose poly.json declares the exposure, the program is CLEAN with exactly the untagged: and uncovered: warnings, in that order', { timeout: 300_000 }, async () => {
+  const { report, risk } = await riskCheck(`ex-pii-guard-exposure-${process.pid}`, { risks: ['mit:2.1', 'mit:2.2'] });
+  assert.equal(report.verdict, 'CLEAN', JSON.stringify(report.files?.flatMap((f) => f.diagnostics ?? [])));
+  assert.deepEqual(risk.map((w) => w.text), [UNTAGGED, UNCOVERED], JSON.stringify(risk));
+  assert.deepEqual(risk.map((w) => w.warning), ['untagged', 'uncovered']);
+});
+
+test('A4: checked as a project without an exposure, the tags alone opt it in, and the one risk warning is untagged:', { timeout: 300_000 }, async () => {
+  const { report, risk } = await riskCheck(`ex-pii-guard-tags-only-${process.pid}`, null);
+  // Tags change no verdict (PT34.3).
+  assert.equal(report.verdict, 'CLEAN', JSON.stringify(report.files?.flatMap((f) => f.diagnostics ?? [])));
+  assert.deepEqual(risk.map((w) => w.text), [UNTAGGED], JSON.stringify(risk));
+  assert.deepEqual(risk.map((w) => w.warning), ['untagged']);
+});
 
 test('poly check --host with root examples/pii-guard is CLEAN', { timeout: 300_000 }, async () => {
   const r = await commandNamed('check').run({ target: PROGRAM, root: EX_DIR, host: join(EX_DIR, 'host', 'tsconfig.json') });
