@@ -158,7 +158,7 @@ Otherwise, for each type of `table.fields`: `Found` when some span has that type
 
 ## Machine
 
-`audience { public < personal }`: the host stores each document as `personal`, and a decision over a body with no taint record fails closed (S302).
+`audience { public < personal }`. The host stores each document and each address with `rt.putContent(body)`, which takes no class: the body enters with the bottom taint, and declaring an audience is what makes the runtime keep that taint record, without which a decision over the body fails closed (PS17.4, S302).
 
 One `machine Outbound` in module `pii`, one instance per document. Enums: `Target { Model, Mail }`, `Presence { Absent, Found, NotRuledOut }`, `Scan { Pending, Done, Failed }`, `Redaction { None, Redacting, Verified, RedactFailed }`, `Recipient { Unchecked, Known, New }`, `Phase { Empty, Open, Sending, Sent, Uncertain }`. The type `Findings` as above.
 
@@ -232,7 +232,7 @@ The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`,
 - `SCAN_TYPES` is `["SECRET", "GOV_ID", "PAYMENT", "EMAIL", "PHONE", "IP_ADDRESS", "PERSON", "ORG"]`.
 - `redactTypes(target)`: `"Mail"` gives `["SECRET", "GOV_ID", "PAYMENT"]`; `"Model"` gives those and `"PERSON", "EMAIL", "PHONE"`; anything else throws.
 - `scanProvider(client, table)` returns a provider `(question, materials)`: it reads `materials.bodies.doc` (none throws), calls `client.locate(body, SCAN_TYPES)`, maps the answer with `factsOf(answer, table, client.preset)`, and returns `{ answer: findings, distribution: [[findings, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. Any throw fails the decision, so the machine takes `ScanFailed`.
-- `redactProvider(client)`: reads `materials.bodies.doc` and `question.payload.target`, calls `client.redact(body, redactTypes(target))`, and checks the answer itself, never trusting `ok` alone: top-level keys exactly `v`, `id`, `ok`, `masked`, `redacted`, `recheck`; `masked` a string; `recheck.dropped === 0`; `recheck.found` an object with no key. Anything else throws a `FactError` (`recheck` for a non-empty `found` or a `dropped` above zero, `malformed` for the rest). It returns `{ answer: masked, distribution: [[masked, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. The runtime stores `masked` as the decision's `Content`, with the join of the taints it read (Q9: not lowered).
+- `redactProvider(client)`: reads `materials.bodies.doc` and `question.payload.target` (an enum argument reaches the provider as its variant's name, `"Model"` or `"Mail"`, as the concierge's `outcome` does in `examples/concierge/host/recorded.mjs`), calls `client.redact(body, redactTypes(target))`, and checks the answer itself, never trusting `ok` alone: top-level keys exactly `v`, `id`, `ok`, `masked`, `redacted`, `recheck`; `masked` a string; `recheck.dropped === 0`; `recheck.found` an object with no key. Anything else throws a `FactError` (`recheck` for a non-empty `found` or a `dropped` above zero, `malformed` for the rest). It returns `{ answer: masked, distribution: [[masked, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. The runtime stores `masked` as the decision's `Content`, with the join of the taints it read (Q9: not lowered).
 - `recipientProvider(recipients)`: reads `materials.bodies.to` and answers `"Known"` when `recipients.has(body)`, otherwise `"New"`.
 - `provideGuard(rt, { client, table, recipients })`: registers the three with `rt.provide`: `scan` and `redact` with model `edgepii-0.3.1/<preset>`, `recipient` with model `recipients`, none with a calibration map.
 
@@ -250,7 +250,7 @@ The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`,
 
 **Recorded answers.** `recorded/answers.json` is `{ "hello": <hello answer>, "documents": [{ "file": "<sample file>", "locate": <locate answer>, "redact": [{ "types": [...], "answer": <redact answer> }] }] }`: one `locate` per sample with `SCAN_TYPES`, and one `redact` per target's `redactTypes`. It is written by `node examples/pii-guard/host/record.mjs` from the live adapter with the `rules` preset, so it holds what the real adapter answered, and it holds no span text (the masked texts are of synthetic samples).
 
-**The recorded adapter.** `recordedAdapter(fixture, { preset = 'rules', samplesDir, fault } = {})` returns a client with the interface of `startAdapter`'s and a `calls` array of `{ op, types }` (never a text). It answers `locate` and `redact` for a text equal to a sample file's content, from that file's entry (for `redact`, the entry whose `types` equal the request's), and rejects with `FactError` `missing` for any other text. `fault` changes every answer:
+**The recorded adapter.** `recordedAdapter(fixture, { preset = 'rules', samplesDir, fault, hold = false } = {})` returns a client with the interface of `startAdapter`'s, a `calls` array of `{ op, types }` (never a text), and `release()`. With `hold`, each `redact` call stays pending until the test calls `release()`, which settles every held call with its answer; `locate` is never held. This is how a test keeps the redaction in flight while the scan and the recipient complete. It answers `locate` and `redact` for a text equal to a sample file's content, from that file's entry (for `redact`, the entry whose `types` equal the request's), and rejects with `FactError` `missing` for any other text. `fault` changes every answer:
 
 | `fault` | Effect |
 |---|---|
@@ -294,12 +294,12 @@ End-to-end test (`test/after/ex-pii-guard-e2e.test.mjs`, serial), over the recor
 
 - **model call, redacted:** `DraftModel` over `en-model.txt`, then `Send`: the scan finds the email and the phone, the redaction is verified, one POST to the model whose body holds `<EMAIL_1>` and `<PHONE_1>` and none of the sample's values; `Sent`;
 - **mail with a secret, known recipient:** the recipient added to the table first; `DraftMail` over `en-mail.txt`, `Send`: the body holds `<SECRET>`, no escalation; `Sent`;
-- **a send before the redaction finishes:** the redact provider held open by the test; `Send` is accepted, nothing is posted, the instance is `Open`; once released, `Send` posts the masked text;
-- **the gate refuses, then allows:** the defect program admitted with the program's policy; `Send` for a mail while `Redacting` is denied by `sensitive-redacted` (a `verdict` event with `outcome: "denied"`), nothing is posted, the instance is `Open` again; after `Redacted`, `Send` posts the masked text;
+- **a send before the redaction finishes:** the recorded adapter with `hold`; once the scan has completed and the instance is `Redacting`, `Send` is accepted, nothing is posted, the instance is `Open`; after `release()` and `Redacted`, `Send` posts the masked text;
+- **the gate refuses, then allows:** the defect program admitted with the program's policy, the recorded adapter with `hold`, a known recipient; `Send` for a mail while `Redacting` emits `sendMail`, which the gate denies (a `verdict` event with `outcome: "denied"` for `mail.send`; the worker delivers a denied effect's `failed` completion), so nothing is posted and `NotDelivered` returns the instance to `Open`; after `release()` and `Redacted`, `Send` posts the masked text;
 - **a failed re-check:** with `recheck-found`, then with `recheck-dropped`: `RedactFailed`, `Send` posts nothing;
 - **a failed scan:** with `missing`, then with `dropped`: `scan` `Failed`, `Send` posts nothing;
 - **a new recipient:** `DraftMail` to an address not in the table, `Send`: escalated, nothing posted; the person's signed approval (`approvalFor`, `rt.approve`) releases it, one POST; `Sent`; the host adds the recipient; a second instance to the same address is `Known` and not escalated; a recipient decision that fails gives `New` and an escalation;
-- **no value in the journal:** for every run above, the JSON of `rt.chain(id)` holds no value that the gold marks in the samples used;
+- **no value in the journal:** for every run above, the JSON of `rt.chain(id)` holds no value that the gold marks in the samples used, and no recipient address;
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`);
 - **the real adapter:** one model call over `en-model.txt` with `startAdapter`, skipped with `adapterStatus`'s `reason` when absent.
 
