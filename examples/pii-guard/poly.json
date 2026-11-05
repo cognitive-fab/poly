@@ -1,0 +1,14 @@
+{
+  "poly": "1",
+  "name": "pii-guard",
+  "modules": [
+    "pii-guard.poly",
+    "pii-guard.policy.poly"
+  ],
+  "exposure": {
+    "risks": [
+      "mit:2.1",
+      "mit:2.2"
+    ]
+  }
+}
