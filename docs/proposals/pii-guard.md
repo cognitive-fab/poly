@@ -2,7 +2,7 @@
 
 *Cognitive Fab · November 2026 · on branch `pii-guard`, cut from main at 67c37744 (v1.5.1 plus finding 34) · from the owner's brief of 2026-11-04, edgepii 0.3.1 (read from its wheel), PT6, PT6.5, PT8, PT10j, PT10k, PS1.4a, PS17.4a, PD4.3 and the examples' layout*
 
-Status: a plan for the owner's review. Nothing is specified, tested, installed or built. The code waits until `risk-tags` passes its tests and is merged, so the example can carry real risk tags.
+Status: approved (section 11a), ruled as S587 in `docs/history/decisions-pii.md`. The specification is `docs/examples/pii-guard.md`. Nothing is tested, installed or built: the tests and the code wait until `risk-tags` passes its tests and is merged, so the example can carry real risk tags.
 
 ## 0. What this covers and the ids it uses
 
@@ -219,6 +219,8 @@ The plan is approved. The specification commit and the code wait until risk-tags
 | Q8 | 0.3.1 exactly; any upgrade is its own change. |
 | Q9 | No. |
 | Q10 | S587. |
+
+**Q4, checked on 2026-11-05.** edgepii 0.3.1 ships no GOV_ID pattern for any locale: its rule detector has no GOV_ID branch, `Locator.preset` takes no pattern argument, and its own corpus notes say "No pattern ships in v1." So the answer's fallback applies: the stated limit is kept and is first in the README. The evidence is in `docs/history/decisions-pii.md`.
 
 ## Conclusion
 
