@@ -1,6 +1,6 @@
 # Example spec: pii-guard
 
-S587, from the plan `docs/proposals/pii-guard.md` and the owner's answers of 2026-11-04 (its section 11a). Written before any test or code (rule 7a). The tests are written by someone who has read only this page, so everything a test needs is on it. The code waits until `risk-tags` passes its tests and is merged.
+S587, from the plan `docs/proposals/pii-guard.md` and the owner's answers of 2026-11-04 (its section 11a). Written before any test or code (rule 7a). The tests are written by someone who has read only this page, so everything a test needs is on it. The tests and the code started before `risk-tags` was merged, at the owner's word (2026-11-05); the risk tags are added by an amendment when it is.
 
 ## Purpose
 

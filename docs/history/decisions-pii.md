@@ -23,6 +23,8 @@
 
 **Order of work (rule 7a).** The specification, committed alone and before risk-tags is merged (owner, 2026-11-05); then the tests, by a separate writer on the session's model who has read only the specification, failing first; then the code. The tests and the code wait until `risk-tags` passes its tests and is merged, so the policy can carry real risk tags. Only the new test files and the files the change touches are run; the full suite only at the owner's word, with nothing else heavy on the machine.
 
+**The tests and the code start before risk-tags (owner, 2026-11-05).** After accepting the specification, the owner said to go ahead. `risk-tags` was not yet merged on `main`, so the tests and the code start now; the policy is written without risk tags, and they are added by an amendment to the specification when `risk-tags` is merged. The rest of the order holds: tests by a separate writer, failing first, then the code, and only the targeted test files are run.
+
 ## Q4 checked against edgepii 0.3.1 (2026-11-05)
 
 The wheel `edgepii-0.3.1-py3-none-any.whl` was downloaded again and its SHA-256 compared with the plan's (`620f9b3c...2b52f`). **It ships no GOV_ID pattern, for any locale**, so there is no SSN or NIR pattern to enable:

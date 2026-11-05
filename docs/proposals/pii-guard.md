@@ -2,7 +2,7 @@
 
 *Cognitive Fab · November 2026 · on branch `pii-guard`, cut from main at 67c37744 (v1.5.1 plus finding 34) · from the owner's brief of 2026-11-04, edgepii 0.3.1 (read from its wheel), PT6, PT6.5, PT8, PT10j, PT10k, PS1.4a, PS17.4a, PD4.3 and the examples' layout*
 
-Status: approved (section 11a), ruled as S587 in `docs/history/decisions-pii.md`. The specification is `docs/examples/pii-guard.md`. Nothing is tested, installed or built: the tests and the code wait until `risk-tags` passes its tests and is merged, so the example can carry real risk tags.
+Status: approved (section 11a), ruled as S587 in `docs/history/decisions-pii.md`. The specification is `docs/examples/pii-guard.md`. The tests and the code started before `risk-tags` was merged, at the owner's word of 2026-11-05; the risk tags are added when it is.
 
 ## 0. What this covers and the ids it uses
 
