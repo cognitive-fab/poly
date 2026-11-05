@@ -222,6 +222,8 @@ The plan is approved. The specification commit and the code wait until risk-tags
 
 **Q4, checked on 2026-11-05.** edgepii 0.3.1 ships no GOV_ID pattern for any locale: its rule detector has no GOV_ID branch, `Locator.preset` takes no pattern argument, and its own corpus notes say "No pattern ships in v1." So the answer's fallback applies: the stated limit is kept and is first in the README. The evidence is in `docs/history/decisions-pii.md`.
 
+**Where this plan is superseded.** The specification, `docs/examples/pii-guard.md`, wins where it differs, and lists each difference. Three of this plan's statements are wrong and are kept here as written: edgepii's placeholders are `<EMAIL_1>` and `<SECRET>`, not `[EMAIL_1]` (section 6); a French phone number in national form is not found at all, since the phone rule's default regions are `US`, `CN`, `HK` and `GB` (section 7); and no effect is named `send`, so each property of section 5 written `never emit send` is two statements in the specification, one per effect.
+
 ## Conclusion
 
 The guard needs no change to poly's language or runtime. The detector runs as a pinned local process behind a small JSON protocol, the host turns its answer into a finite record of facts, and the machine and policy decide from those facts, failing closed on anything the host cannot read. What edgepii cannot find is the guard's limit, and the plan states it: the `rules` preset sees no name and no national id, so the policy treats both as present and redacts what it can, and the README measures, in English and French, how much that is.
