@@ -34,7 +34,7 @@ Under `examples/pii-guard/`. The names are fixed.
 | `host/edgepii.mjs` | the adapter client: exports `defaultPython()`, `loadPin(file)`, `adapterStatus(opts)` and `startAdapter(opts)` |
 | `host/facts.mjs` | the fact table: exports `loadTable(file)`, `factsOf(answer, table, preset)` and `FactError` |
 | `host/facts.json` | the table, as data |
-| `host/providers.mjs` | exports `SCAN_TYPES`, `redactTypes(target)`, `scanProvider(client, table)`, `redactProvider(client)`, `recipientProvider(recipients)` and `provideGuard(rt, opts)` |
+| `host/providers.mjs` | exports `SCAN_TYPES`, `redactTypes(target)`, `exposureOf(findings)`, `scanProvider(client, table)`, `redactProvider(client)`, `recipientProvider(recipients)` and `provideGuard(rt, opts)` |
 | `host/recipients.mjs` | exports `recipientTable(key, digests)` |
 | `host/recorded.mjs` | exports `loadRecorded(file)` and `recordedAdapter(fixture, opts)` |
 | `host/record.mjs` | run by a person: writes `recorded/answers.json` from the live adapter over the samples |
@@ -122,10 +122,10 @@ The `wheel` is checked at install by `pip install --require-hashes --no-deps -r 
 
 ## The fact table (`host/facts.mjs`, `host/facts.json`)
 
-```poly
-enum Presence { Absent, Found, NotRuledOut }
-type Findings = { secret: Presence, govId: Presence, payment: Presence, email: Presence,
-                  phone: Presence, ip: Presence, person: Presence, org: Presence }
+The program declares `enum Presence { Absent, Found, NotRuledOut }`. The host's record `Findings` holds one `Presence` per type, in these fields (it is not a type of the program, A1):
+
+```
+{ secret, govId, payment, email, phone, ip, person, org }
 ```
 
 `host/facts.json`:
@@ -142,7 +142,7 @@ type Findings = { secret: Presence, govId: Presence, payment: Presence, email: P
 
 `ruledOut[preset]` lists the types whose absence the preset's rules establish. `GOV_ID`, `PERSON` and `ORG` are in neither list: no rule finds them, and a model's silence is not proof.
 
-`factsOf(answer, table, preset)` returns a `Findings` object, or throws a `FactError` (an `Error` with a string `code`):
+`factsOf(answer, table, preset)` returns a `Findings` object (one field per type, as in the record above, which is the host's and not the program's), or throws a `FactError` (an `Error` with a string `code`):
 
 | Condition, checked in this order | `code` |
 |---|---|
@@ -156,36 +156,43 @@ Otherwise, for each type of `table.fields`: `Found` when some span has that type
 
 `loadTable(file)` reads the table and throws when `fields` or `ruledOut` is missing.
 
+**The exposure.** The program reads two facts, not eight (see the amendments). `exposureOf(findings)` (exported by `host/providers.mjs`) joins the fields of each group into one `Presence`: `sensitive` from `secret`, `govId` and `payment`; `personal` from `person`, `email` and `phone`. A group is `Found` when one of its fields is `Found`; else `NotRuledOut` when one is `NotRuledOut`; else `Absent`. `ip` and `org` are in no group. So a group is `Absent` only when every type of it was ruled out, and under `rules` neither group is ever `Absent`, since `govId` and `person` never are.
+
+```poly
+type Exposure = { sensitive: Presence, personal: Presence }
+```
+
 ## Machine
 
 `audience { public < personal }`. The host stores each document and each address with `rt.putContent(body)`, which takes no class: the body enters with the bottom taint, and declaring an audience is what makes the runtime keep that taint record, without which a decision over the body fails closed (PS17.4, S302).
 
-One `machine Outbound` in module `pii`, one instance per document. Enums: `Target { Model, Mail }`, `Presence { Absent, Found, NotRuledOut }`, `Scan { Pending, Done, Failed }`, `Redaction { None, Redacting, Verified, RedactFailed }`, `Recipient { Unchecked, Known, New }`, `Phase { Empty, Open, Sending, Sent, Uncertain }`. The type `Findings` as above.
+One `machine Outbound` in module `pii`, one instance per document. Enums: `Target { Model, Mail }`, `Presence { Absent, Found, NotRuledOut }`, `Scan { Pending, Done, Failed }`, `Redaction { None, Redacting, Verified, RedactFailed }`, `Recipient { Unchecked, Known, New }`, `Phase { Empty, Open, Sending, Sent, Uncertain }`. The type `Exposure` as above.
 
-State: `phase` (`Empty`), `target` (`Model`), `scan` (`Pending`), `secret`, `govId`, `payment`, `email`, `phone`, `person : Presence` (each `NotRuledOut`, so nothing reads as absent before a scan), `redaction` (`None`), `recipient` (`Unchecked`), `doc`, `to`, `out : Content` (none). `terminal phase in { Sent, Uncertain }`. `ip` and `org` are in the scan decision's record and not in the state: no property and no rule reads them, and leaving them out keeps the explored facts at 3^6 combinations.
+State: `phase` (`Empty`), `target` (`Model`), `scan` (`Pending`), `sensitive`, `personal : Presence` (each `NotRuledOut`, so nothing reads as absent before a scan), `redaction` (`None`), `recipient` (`Unchecked`), `held : bool` (`false`), `doc`, `to : Content` (none). `doc` is the document to send: the draft, then its verified redaction. `terminal phase in { Sent, Uncertain }`. The eight types are in the scan decision's record (its provider's `Findings`), not in the state.
 
-- `DraftModel(doc: Content)`: `"drafted"` unless `Empty`. Goes to `Open` with `target` `Model`, records `doc`, issues `decide scan(doc: doc)`.
-- `DraftMail(doc: Content, to: Content)`: `"drafted"` unless `Empty`. Goes to `Open` with `target` `Mail`, records `doc` and `to`, issues `decide scan(doc: doc)` and `decide recipient(to: to)`.
-- `Scanned(secretIs, govIdIs, paymentIs, emailIs, phoneIs, personIs: Presence)`: `"not-scanning"` unless `Open` with `scan == Pending`. Sets `scan` to `Done` and the six facts. When `secretIs`, `govIdIs` or `paymentIs` is not `Absent`, or the target is `Model` and `personIs`, `emailIs` or `phoneIs` is not `Absent`: sets `redaction` to `Redacting` and issues `decide redact(doc: doc, target: target)`. Otherwise sets `out` to `doc`.
+- `DraftModel(body: Content)`: `"drafted"` unless `Empty`. Goes to `Open` with `target` `Model`, sets `doc` to `body`, issues `decide scan(doc: body)`.
+- `DraftMail(body: Content, address: Content)`: `"drafted"` unless `Empty`. Goes to `Open` with `target` `Mail`, sets `doc` to `body` and `to` to `address`, issues `decide scan(doc: body)` and `decide recipient(to: address)`.
+- `Scanned(sensitiveIs, personalIs: Presence)`: `"not-scanning"` unless `Open` with `scan == Pending`. Sets `scan` to `Done` and the two facts. When `sensitiveIs` is not `Absent`, or the target is `Model` and `personalIs` is not `Absent`: sets `redaction` to `Redacting` and issues `decide redact(doc: doc, target: target)`.
 - `ScanFailed()`: `"not-scanning"` unless `Open` with `scan == Pending`. Sets `scan` to `Failed`.
-- `Redacted(text: Content)`: `"not-redacting"` unless `redaction == Redacting`. Sets `out` to `text` and `redaction` to `Verified`.
+- `Redacted(text: Content)`: `"not-redacting"` unless `redaction == Redacting`. Sets `doc` to `text` and `redaction` to `Verified`.
 - `Unredacted()`: `"not-redacting"` unless `redaction == Redacting`. Sets `redaction` to `RedactFailed`.
 - `Checked(who: Recipient)`: `"not-checking"` unless the target is `Mail` and `recipient == Unchecked`. Sets `recipient` to `Known` when `who == Known`, otherwise to `New` (an answer `Unchecked` is read as new).
 - `CheckFailed()`: same guard. Sets `recipient` to `New`: an unknown recipient is new (Q6).
-- `Send()`: `"not-open"` unless `Open`. Then, **with an `if` and no `require`**, so that a `Send` from a state that may not send is accepted and does nothing (which is what makes each `never` below tested, PS5.2a):
-  - target `Model`: when `scan == Done` and either `redaction == Verified`, or `redaction == None` and `secret`, `govId`, `payment`, `person`, `email` and `phone` are all `Absent`: goes to `Sending` and emits `callModel(text: out)`;
-  - target `Mail`: when `scan == Done`, `recipient != Unchecked`, and either `redaction == Verified`, or `redaction == None` and `secret`, `govId` and `payment` are all `Absent`: goes to `Sending` and emits `sendMail(text: out, to: to)`.
+- `Send()`: `"not-open"` unless `Open`. Then, **with an `if` and no `require`**, so that a `Send` from a state that may not send is accepted and sends nothing (which is what makes each `never` below tested, PS5.2a):
+  - target `Model`: when `scan == Done` and either `redaction == Verified`, or `redaction == None` and `sensitive` and `personal` are both `Absent`: goes to `Sending`, sets `held` to `false` and emits `callModel(text: doc)`;
+  - target `Mail`: when `scan == Done`, `recipient != Unchecked`, and either `redaction == Verified`, or `redaction == None` and `sensitive` is `Absent`: goes to `Sending`, sets `held` to `false` and emits `sendMail(text: doc, to: to)`;
+  - otherwise sets `held` to `true` and stays `Open`. A handler path with no write, no effect and no rejection is `PL2201 SILENT_NOOP` (PT4.4), so the held `Send` writes `held`.
 - `Delivered()`: `"not-sending"` unless `Sending`; `Sent`. `NotDelivered()`: same guard; back to `Open`. `DeliveryUncertain()`: same guard; `Uncertain` (a person looks).
 
 ## Decisions and effects
 
-- `decision scan(doc: Content) -> Findings`: provider `"edgepii"`, labels `read:private` (the detector is local: no egress label), timeout 30s; `ok(r)` to `Scanned(secretIs: r.answer.secret, govIdIs: r.answer.govId, paymentIs: r.answer.payment, emailIs: r.answer.email, phoneIs: r.answer.phone, personIs: r.answer.person)`; `failed` to `ScanFailed()`.
+- `decision scan(doc: Content) -> Exposure`: provider `"edgepii"`, labels `read:private` (the detector is local: no egress label), timeout 30s; `ok(r)` to `Scanned(sensitiveIs: r.answer.sensitive, personalIs: r.answer.personal)`; `failed` to `ScanFailed()`.
 - `decision redact(doc: Content, target: Target) -> Content`: provider `"edgepii"`, labels `read:private`, timeout 30s; `ok(r)` to `Redacted(text: r.answer)`; `failed` to `Unredacted()`.
 - `decision recipient(to: Content) -> Recipient`: provider `"recipients"`, labels `read:private`, timeout 2s; `ok(r)` to `Checked(who: r.answer)`; `failed` to `CheckFailed()`.
 - `effect callModel(text: Content)`: kind `"model.call"`, labels `egress:external, read:private`, target the exact URL `https://model.example/v1/complete`, class `irreversible`, retry `attempts 1, base 200ms, timeout 30s`; `ok` to `Delivered`, `failed` to `NotDelivered`, `exhausted` to `DeliveryUncertain`.
 - `effect sendMail(text: Content, to: Content)`: kind `"mail.send"`, labels `egress:external, read:private`, target `https://mail.example/v1/send`, class `irreversible`, the same retry and completions.
 
-**No confidence is relied on (Q2).** The `rules` preset is deterministic and needs no calibration: the scan provider answers one `Findings` with probability 1, uncalibrated (PD1.6c), and no handler reads `r.conf` or `r.margin`. A type that a model detects is never `Absent` (the fact table), so a model's confidence never lowers what the policy requires. No completion of a decision emits an effect (the sends come from `Send`), so the decisions stage has nothing to gate (`PL6201` is judged on the completion step, S75). The decisions carry no egress label, so polycheck's regions do not reach them and the policy needs no rule naming them (`PL7001` is not expected).
+**No confidence is relied on (Q2).** The `rules` preset is deterministic and needs no calibration: the scan provider answers one `Exposure` with probability 1, uncalibrated (PD1.6c), and no handler reads `r.conf` or `r.margin`. A type that a model detects is never `Absent` (the fact table), so a model's confidence never lowers what the policy requires. No completion of a decision emits an effect (the sends come from `Send`), so the decisions stage has nothing to gate (`PL6201` is judged on the completion step, S75). The decisions carry no egress label, so polycheck's regions do not reach them and the policy needs no rule naming them (`PL7001` is not expected).
 
 ## Properties
 
@@ -193,13 +200,13 @@ Eight `never` statements (PS5.2a), one per property and effect:
 
 | Name | Statement |
 |---|---|
-| `no-sensitive-model` | `never no-sensitive-model: emit callModel() while (secret != Absent \|\| govId != Absent \|\| payment != Absent) && redaction != Verified` |
+| `no-sensitive-model` | `never no-sensitive-model: emit callModel() while sensitive != Absent && redaction != Verified` |
 | `no-sensitive-mail` | the same with `sendMail()` |
 | `no-unscanned-model` | `never no-unscanned-model: emit callModel() while scan != Done` |
 | `no-unscanned-mail` | the same with `sendMail()` |
 | `no-unverified-model` | `never no-unverified-model: emit callModel() while redaction == RedactFailed` |
 | `no-unverified-mail` | the same with `sendMail()` |
-| `model-redacted` | `never model-redacted: emit callModel() while (person != Absent \|\| email != Absent \|\| phone != Absent) && redaction != Verified` |
+| `model-redacted` | `never model-redacted: emit callModel() while personal != Absent && redaction != Verified` |
 | `mail-recipient-checked` | `never mail-recipient-checked: emit sendMail() while recipient == Unchecked` |
 
 Each is **tested**, not vacuous: `Send` is accepted from `Open` whatever the facts, and `Open` is reachable with `scan == Pending`, with a sensitive fact while `Redacting`, with `RedactFailed`, with a personal fact `NotRuledOut` (the initial value), and with `recipient == Unchecked`. The program and its policy check `CLEAN`, with deadlock freedom. The instance is printed; its state count is measured when the code exists and recorded in the amendments.
@@ -217,13 +224,13 @@ Each is **tested**, not vacuous: `Send` is accepted from `Open` whatever the fac
 
 Policy `outbound`, scope `"pii"`, in module `pii_policy`. Each rule is guarded by `proposal.kind == "effect"`. `M` below stands for `machine("pii.Outbound")`, written out in full in the file.
 
-- `sensitive-redacted` "No SECRET, GOV_ID or PAYMENT leaves unredacted.": for `effect.kind in { "model.call", "mail.send" }`, `require M.scan == Done && (M.redaction == Verified || (M.secret == Absent && M.govId == Absent && M.payment == Absent)) else deny`, `on unknown deny`.
-- `model-redacted` "A name, email or phone number is redacted before an external model sees it.": for `effect.kind == "model.call"`, `require M.redaction == Verified || (M.person == Absent && M.email == Absent && M.phone == Absent) else deny`, `on unknown deny`.
+- `sensitive-redacted` "No SECRET, GOV_ID or PAYMENT leaves unredacted.": for `effect.kind in { "model.call", "mail.send" }`, `require M.scan == Done && (M.redaction == Verified || M.sensitive == Absent) else deny`, `on unknown deny`.
+- `model-redacted` "A name, email or phone number is redacted before an external model sees it.": for `effect.kind == "model.call"`, `require M.redaction == Verified || M.personal == Absent else deny`, `on unknown deny`.
 - `new-recipient-approved` "A new external recipient gets nothing until a person approves.": for `effect.kind == "mail.send" && M.recipient == New`, `require false else escalate`, `on unknown escalate`.
 
 The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`, `implements "nist:MEASURE-2.10"` on the first two, `implements "nist:MAP-3.5"` on the third) and the project's `exposure: { "risks": ["mit:2.1", "mit:2.2"] }` are added when `risk-tags` is merged, by an amendment to this page; until then the policy is the same without them.
 
-`govId` is never `Absent` at run time under either preset, and `person` never under `rules`, so **every send at run time goes through a verified redaction**. The unredacted branches of `Send` and of the two rules are reached only in the check's over-approximation, and by a future preset that has a GOV_ID rule. They are kept so that the program states the rule and not the limit of today's detector.
+`govId` is never `Absent` at run time under either preset, so neither is `sensitive`, and `person` never is under `rules`, so neither is `personal`: **every send at run time goes through a verified redaction**. The unredacted branches of `Send` and of the two rules are reached only in the check's over-approximation, and by a future preset that has a GOV_ID rule. They are kept so that the program states the rule and not the limit of today's detector.
 
 ## Host code
 
@@ -231,7 +238,8 @@ The policy is signed as a person signs it. The risk tags (`mitigates "mit:2.1"`,
 
 - `SCAN_TYPES` is `["SECRET", "GOV_ID", "PAYMENT", "EMAIL", "PHONE", "IP_ADDRESS", "PERSON", "ORG"]`.
 - `redactTypes(target)`: `"Mail"` gives `["SECRET", "GOV_ID", "PAYMENT"]`; `"Model"` gives those and `"PERSON", "EMAIL", "PHONE"`; anything else throws.
-- `scanProvider(client, table)` returns a provider `(question, materials)`: it reads `materials.bodies.doc` (none throws), calls `client.locate(body, SCAN_TYPES)`, maps the answer with `factsOf(answer, table, client.preset)`, and returns `{ answer: findings, distribution: [[findings, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. Any throw fails the decision, so the machine takes `ScanFailed`.
+- `exposureOf(findings)`: the join above.
+- `scanProvider(client, table)` returns a provider `(question, materials)`: it reads `materials.bodies.doc` (none throws), calls `client.locate(body, SCAN_TYPES)`, maps the answer with `exposureOf(factsOf(answer, table, client.preset))`, and returns `{ answer: exposure, distribution: [[exposure, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. Any throw fails the decision, so the machine takes `ScanFailed`.
 - `redactProvider(client)`: reads `materials.bodies.doc` and `question.payload.target` (an enum argument reaches the provider as its variant's name, `"Model"` or `"Mail"`, as the concierge's `outcome` does in `examples/concierge/host/recorded.mjs`), calls `client.redact(body, redactTypes(target))`, and checks the answer itself, never trusting `ok` alone: top-level keys exactly `v`, `id`, `ok`, `masked`, `redacted`, `recheck`; `masked` a string; `redacted` an object whose keys are types of `redactTypes(target)` and whose values are integers of at least 1; `recheck.dropped === 0`; `recheck.found` an object with no key. Anything else throws a `FactError` (`recheck` for a non-empty `found` or a `dropped` above zero, `malformed` for the rest). It returns `{ answer: masked, distribution: [[masked, 1]], usage: {}, reported: "edgepii-0.3.1/<preset>", latencyMs }`. The runtime stores `masked` as the decision's `Content`, with the join of the taints it read (Q9: not lowered).
 - `recipientProvider(recipients)`: reads `materials.bodies.to` and answers `"Known"` when `recipients.has(body)`, otherwise `"New"`.
 - `provideGuard(rt, { client, table, recipients })`: registers the three with `rt.provide`: `scan` and `redact` with model `edgepii-0.3.1/<preset>`, `recipient` with model `recipients`, none with a calibration map.
@@ -276,14 +284,15 @@ Light test (`test/ex-pii-guard.test.mjs`):
 
 - the program with its policy is `CLEAN`; the instance is printed; the program declares exactly the eight `never` statements of the table above, by name, and the report's `vacuous` and `notRun` lists name none of them (the report has no list of tested properties, so a property is tested when it is declared, the verdict is `CLEAN` and it is in neither list, PT12.3);
 - the defect is `FINDINGS` with exactly `PL3002`, `no-sensitive-mail` named and no other property, and a witness whose last step is `Send`;
-- the policy through poly-ref's decision table: `model.call` with `scan` `Done` and `redaction` `Verified` is allowed; with `scan` `Pending` or `Failed`, denied by `sensitive-redacted`; with `secret` `Found` and `redaction` `None` or `Redacting`, denied; with `govId` `NotRuledOut` and `redaction` not `Verified`, denied; with every fact `Absent`, `scan` `Done` and `redaction` `None`, allowed; with `person` `NotRuledOut` and `redaction` `None`, the other facts `Absent`, denied by `model-redacted`; `mail.send` with `recipient` `New` and the send otherwise allowed is escalated by `new-recipient-approved`, and with `Known` allowed;
+- the policy through poly-ref's decision table: `model.call` with `scan` `Done` and `redaction` `Verified` is allowed; with `scan` `Pending` or `Failed`, denied by `sensitive-redacted`; with `sensitive` `Found` and `redaction` `None` or `Redacting`, denied; with `sensitive` `NotRuledOut` and `redaction` not `Verified`, denied; with both facts `Absent`, `scan` `Done` and `redaction` `None`, allowed; with `personal` `NotRuledOut`, `sensitive` `Absent` and `redaction` `None`, denied by `model-redacted`; `mail.send` with `recipient` `New` and the send otherwise allowed is escalated by `new-recipient-approved`, and with `Known` allowed;
 - `poly check --host` is `CLEAN`, and a handler with a wrong field is `PL6836`;
 - the handlers: 201 ok; 422 permanent; 503 ambiguous and not permanent; header and body as above.
 
 Facts test (`test/pii-facts.test.mjs`), with no Python:
 
 - `factsOf` on recorded answers: a span of each type gives `Found`; no span gives `Absent` for the five rule types and `NotRuledOut` for `GOV_ID`, `PERSON` and `ORG`; a span found by a model of a rule type gives `Found`; each row of the error table gives its `code`, including a span with `text` or `raw_label`;
-- `scanProvider` over `recordedAdapter` answers the recorded findings for each sample, fails for each `fault` but `recheck-found` and `recheck-dropped`, and answers the recorded findings under those two, which change only a `redact` answer; `redactProvider` answers the masked text, fails for `recheck-found`, `recheck-dropped` and each failing call, and is given `redactTypes` of the payload's target;
+- `exposureOf`: each group `Found` when one field is, else `NotRuledOut` when one is, else `Absent`; `ip` and `org` change nothing;
+- `scanProvider` over `recordedAdapter` answers the exposure of the recorded findings for each sample (under `rules`, neither fact is ever `Absent`), fails for each `fault` but `recheck-found` and `recheck-dropped`, and answers the same under those two, which change only a `redact` answer; `redactProvider` answers the masked text, fails for `recheck-found`, `recheck-dropped` and each failing call, and is given `redactTypes` of the payload's target;
 - `startAdapter` with a `pin.adapter` that differs from the script's digest rejects `pin-mismatch` and starts no process; with a `python` that does not exist, `missing`;
 - `recipientTable`: `has` after `add`, case and surrounding space ignored; `digests()` holds no address; two keys give different digests;
 - `adapterStatus` with a missing `python` gives the exact skip message.
@@ -326,7 +335,7 @@ Run only these files and the ones a change touches; the full suite only at the o
 ## Differences from the plan
 
 - **GOV_ID (Q4):** edgepii 0.3.1 has no opt-in pattern to enable, so the adapter has no GOV_ID configuration and the limit is kept, first in the README.
-- **The state holds six facts, not eight:** `ip` and `org` stay in the decision's record.
+- **The state holds two facts, not eight:** `sensitive` and `personal`, each the join of three types; the eight stay in the decision's record. See the amendments.
 - **`Redaction` gains `Redacting`, and `Recipient` gains `Unchecked`,** with the property `mail-recipient-checked`, so a mail cannot go out before its recipient is known. The plan's `Redaction { None, Verified, Failed }` and its `RedactFailed` are made one: `RedactFailed`. Each property of the plan is two `never` statements, one per effect, since a `never` names an effect the machine declares.
 - **The redaction is issued by `Scanned`** when the facts call for it, not by a separate action.
 - **`hello` reports the source digest, not the wheel's hash,** since the venv keeps no wheel; the wheel's hash is checked at install.
@@ -337,7 +346,14 @@ Run only these files and the ones a change touches; the full suite only at the o
 
 ## Amendments made when the code existed
 
-None yet. The state count, the defect's witness, and whether the decision stage and polycheck's regions report as predicted are recorded here when measured.
+**A1 (2026-11-05), measured on the first draft of the program, before the tests were committed.** The body of this page already reads as amended; the change and its reasons are here.
+
+- **Two facts, not six.** With six `Presence` facts in the state, `Scanned` has 3^6 = 729 labels per state. `poly check` on that program ran out of its 4 GB heap after two minutes, still in its first stages; with `out` removed it was still running at 150 seconds. With the two joined facts `sensitive` and `personal`, the program and its policy check `CLEAN` with 5,206 states. The properties are the same ones: each `never` and rule read the three types of a group joined by `||`, and the join reads them the same way. The host's fact table keeps all eight types (`factsOf` is unchanged), and `exposureOf` is the one new host function.
+- **`out` removed.** A `Content` field adds a representative to every `Content` domain (PS4.1f). `Redacted` sets `doc` to the masked text, and both sends carry `doc`.
+- **`held`.** A `Send` that may not send was to be "accepted and do nothing". A handler path with no write, no effect and no rejection is `PL2201 SILENT_NOOP` (PT4.4), and the check refused the program at stage 0. The held `Send` sets `held` to `true`.
+- **The action parameters are `body` and `address`.** `DraftModel(doc)` and `DraftMail(doc, to)` were named after the fields they set, which shadows them (S19, a warning that becomes `PL1002` after v1). The decisions' parameters keep the names `doc` and `to`, so the providers still read `materials.bodies.doc` and `materials.bodies.to`.
+
+Measured on the amended program, with `checkExample` as the light test runs it: the program with its policy is `CLEAN`, 5,206 states, 4 `Content` representatives and none, nothing vacuous and nothing not run, the policy `CLEAN`. The defect is `FINDINGS`: exactly `PL3002` on `no-sensitive-mail`, 7,006 states, the policy `CLEAN`, with the witness predicted above in this order: `DraftMail`, `Scanned`, `Checked`, `Send` (4 steps).
 
 ## Conclusion
 
@@ -350,6 +366,7 @@ The guard changes nothing in poly's language or runtime. A pinned local process 
 - **Span:** a type and a half-open range `[start, end)` of code points on the source text.
 - **Dropped span:** a span whose offsets failed edgepii's slice check; counted, never repaired, and a reason to fail.
 - **Fact table:** the host's map from a `locate` answer to the record `Findings`, one `Presence` per type.
+- **Exposure:** the two facts the program reads, `sensitive` and `personal`, each the join of three of the `Findings`.
 - **NotRuledOut:** a type not found, that a model finds or no rule of the preset can find; treated as present.
 - **Redaction contract:** after masking, a second detector pass with the same types finds nothing and drops nothing.
 - **Source digest:** the digest of edgepii's installed files, which the adapter reports and the pin holds.
