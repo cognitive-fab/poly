@@ -6,7 +6,8 @@
 // PG9 (a failed re-check ends in RedactFailed and no send), PG10 (a new recipient is escalated, sent after a person's
 // approval, then known), PG11 (no value in the journal) and PG12 (the real adapter, skipped with its reason). As
 // amended by A1: the drafts take body and address, the state holds sensitive and personal, Redacted writes doc, and a
-// Send that may not send writes held and stays Open.
+// Send that may not send writes held and stays Open. As amended by A2: a held redaction holds the worker's pass, so the
+// two hold runs start their passes unawaited and await them only after release().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
@@ -86,14 +87,51 @@ async function start(a, { fault, hold = false, recipients, client } = {}) {
   const handlers = rt.handlerExports('src/handlers.ts');
   rt.handle('model.call', handlers.callModel);
   rt.handle('mail.send', handlers.sendMail);
-  return { rt, egress, client: c, recipients: table, h, ids: [] };
+  return { rt, egress, client: c, recipients: table, h, ids: [], passes: [] };
 }
 
 async function stop(run) {
   if (!run) return;
-  // A held redaction is released so that nothing stays pending after the runtime closes.
+  // A held redaction is released, and every pass started unawaited is let finish, before the runtime closes.
   run.client?.release?.();
+  await Promise.allSettled(run.passes ?? []);
   await run.rt.close();
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A2: one worker pass (an advance and a tick, as ex-kit's settle runs them), started and not awaited. A held redaction
+ * holds the pass that runs it, so the pass is kept in `run.passes` and awaited only after release(). A rejection is
+ * marked handled here and still surfaces when the pass is awaited.
+ */
+function startPass(run) {
+  const p = (async () => { await run.rt.advance?.(); await run.rt.worker.tick(); })();
+  p.catch(() => {});
+  run.passes.push(p);
+  return p;
+}
+
+/**
+ * A2: polls until `cond` holds, starting a pass without awaiting it, and another now and then (a second pass started
+ * meanwhile runs the other intents: a gate's verdict, a completion). It gives up after 10 s, well within the decision's
+ * real-time timeout of 30 s, so a held redaction cannot time out while the test waits.
+ */
+async function pollHeld(run, cond) {
+  startPass(run);
+  for (let k = 1; k <= 400; k++) {
+    if (await cond()) return true;
+    if (k % 20 === 0 && run.passes.length < 8) startPass(run);
+    await sleep(25);
+  }
+  return cond();
+}
+
+/** A2: releases the held redaction and awaits every pass started while it was held. */
+async function releaseHeld(run) {
+  run.client.release();
+  const passes = run.passes.splice(0);
+  await Promise.all(passes);
 }
 
 let counter = 0;
@@ -129,6 +167,8 @@ async function settleUntil(run, id, pred, rounds = 40) {
 const decided = (s) => s.scan !== 'Pending' && s.redaction !== 'Redacting' && (s.target !== 'Mail' || s.recipient !== 'Unchecked');
 // The scan and the recipient have completed while the redaction is held.
 const heldRedacting = (s) => s.scan === 'Done' && s.redaction === 'Redacting' && (s.target !== 'Mail' || s.recipient !== 'Unchecked');
+// A2: the instance is Redacting with a redact among the adapter's calls, so the redaction is held in flight.
+const redactHeld = async (run, id) => heldRedacting(await stateOf(run, id)) && run.client.calls.some((c) => c.op === 'redact');
 
 async function send(run, id) {
   assert.equal((await run.rt.dispatch(id, 'Send', {})).stepKind, 'accepted', 'Send is accepted from Open');
@@ -244,16 +284,18 @@ test('PG7: a Send while the redaction is in flight is accepted and does nothing;
   try {
     run = await start(await admitted(), { hold: true });
     const id = await draft(run, 'DraftModel', 'en-model.txt');
-    let s = await settleUntil(run, id, heldRedacting);
+    // A2: the pass that scans also starts the held redact, so it runs unawaited while the test waits and acts.
+    assert.ok(await pollHeld(run, () => redactHeld(run, id)), 'the instance is Redacting with a redact held');
+    let s = await stateOf(run, id);
     assert.equal(s.scan, 'Done');
     assert.equal(s.redaction, 'Redacting', 'the redaction is held in flight');
+    // The held Send writes held in its own step; nothing awaits the held pass.
     await send(run, id);
-    await settle(run.rt, 20);
     s = await stateOf(run, id);
     assert.equal(run.egress.sent.length, 0, 'nothing is posted while Redacting');
     assert.equal(s.phase, 'Open');
     assert.equal(s.held, true, 'the held Send writes held (A1, PT4.4)');
-    run.client.release();
+    await releaseHeld(run);
     s = await settleUntil(run, id, (x) => x.redaction !== 'Redacting');
     assert.equal(s.redaction, 'Verified');
     await send(run, id);
@@ -274,17 +316,23 @@ test('PG7: the gate refuses the defect\'s mail while Redacting (denied, NotDeliv
     run = await start(await admittedDefect(), { hold: true });
     run.recipients.add(KNOWN);
     const id = await draft(run, 'DraftMail', 'en-mail.txt', KNOWN);
-    let s = await settleUntil(run, id, heldRedacting);
+    // A2: the first pass holds the redact; it is not awaited until release().
+    assert.ok(await pollHeld(run, () => redactHeld(run, id)), 'the instance is Redacting with a redact held');
+    let s = await stateOf(run, id);
     assert.equal(s.recipient, 'Known');
     assert.equal(s.redaction, 'Redacting');
-    // The defect's Send emits sendMail here; the gate denies it and the worker delivers the failed completion.
+    // The defect's Send emits sendMail here. A second pass, run while the first is held, has the gate deny it, and the
+    // worker delivers the denied effect's failed completion.
     await send(run, id);
-    s = await settleUntil(run, id, (x) => x.phase !== 'Sending');
+    const back = await pollHeld(run, async () => (await verdicts(run, id, 'denied')).length > 0 && (await stateOf(run, id)).phase === 'Open');
+    s = await stateOf(run, id);
     const denied = await verdicts(run, id, 'denied');
     assert.equal(denied.length, 1, `one denied verdict for mail.send; got ${JSON.stringify(denied.map((e) => e.body))}`);
     assert.equal(run.egress.sent.length, 0, 'nothing is posted');
+    assert.ok(back, `the gate's verdict and NotDelivered ran while the redaction was held; phase ${s.phase}`);
     assert.equal(s.phase, 'Open', 'NotDelivered returns the instance to Open');
-    run.client.release();
+    assert.equal(s.redaction, 'Redacting', 'the redaction is still held');
+    await releaseHeld(run);
     s = await settleUntil(run, id, (x) => x.redaction !== 'Redacting');
     assert.equal(s.redaction, 'Verified');
     await send(run, id);
