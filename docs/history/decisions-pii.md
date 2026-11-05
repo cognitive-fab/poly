@@ -44,6 +44,19 @@ The same reading found three facts the plan did not have, now in the specificati
 
 **Ruling (owner, 2026-11-05).** The specification is accepted as written, with its differences: adjustments from the plan were expected. The example is a demo, and what it must show is edgepii's integration: a pinned local detector whose answers the host reads into facts, and a machine and policy that act on those facts.
 
+## The amendments made when the code existed (accepted by the owner, 2026-11-05)
+
+`docs/examples/pii-guard.md` records four, each with what was measured:
+
+| Amendment | What changed | Why |
+|---|---|---|
+| A1 | The state holds two joined facts, `sensitive` and `personal`, not six; `exposureOf` joins the fact table's eight types; `out` is removed and `Redacted` writes `doc`; a `Send` that may not send writes `held`; the draft actions take `body` and `address` | Six facts ran `poly check` out of a 4 GB heap (two give 5,206 states); a step that writes nothing is `PL2201`; the old parameter names shadowed their fields (S19) |
+| A2 | The tests that hold a redaction in flight do not await the worker's pass while it is held; the model lane is not packaged; a spaced IBAN is read in part as a phone | The worker awaits a decision's provider within its pass, so a held redaction timed out at 30 s; the lane's hashed closure is not written; measured on `en-ids.txt` |
+| A3 | The adapter lives in `examples/pii-guard/adapter/`, not `adapters/edgepii/` | The boundary check keeps `adapters/` for configuration-only host adapters (S167) |
+| A4 | The policy carries its risk tags, and the example's `poly.json` its exposure, with two warnings kept on purpose | `risk-tags` (S586) was merged |
+
+**Ruling (owner, 2026-11-05).** The four amendments are accepted. S587 is complete: the example is checked `CLEAN` with its policy, its defect is found, its four test files pass with the live adapter, and its README states its limits first. Left out of S587, each its own change if wanted: the `multi-open` lane's packaging, and a kept risk-report store for the example. What remains is the owner's push plan: after the risk-tags serial runs and a full suite on `main`, `main` is pushed and `pii-guard` goes up as its own branch for review.
+
 ## Conclusion
 
-S587 adds an example and no language: a pinned local detector, a fact table that never reads silence as absence, and a machine and policy that send only after a scan the host could read. Q4 was answered by reading the library rather than assuming it: edgepii 0.3.1 has no national id pattern to enable, so the guard's first stated limit is that it cannot see one.
+S587 adds an example and no language: a pinned local detector, a fact table that never reads silence as absence, and a machine and policy that send only after a scan the host could read. Q4 was answered by reading the library rather than assuming it: edgepii 0.3.1 has no national id pattern to enable, so the guard's first stated limit is that it cannot see one. Where the plan met the checker, the runtime and the repository's boundaries, the specification was amended with what was measured, and the owner accepted each amendment.
