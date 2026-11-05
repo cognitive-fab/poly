@@ -1,0 +1,7 @@
+{
+  "taxonomy": "2026.11",
+  "fields": { "SECRET": "secret", "GOV_ID": "govId", "PAYMENT": "payment", "EMAIL": "email",
+              "PHONE": "phone", "IP_ADDRESS": "ip", "PERSON": "person", "ORG": "org" },
+  "ruledOut": { "rules": ["SECRET", "PAYMENT", "EMAIL", "PHONE", "IP_ADDRESS"],
+                "multi-open": ["SECRET", "PAYMENT", "EMAIL", "PHONE", "IP_ADDRESS"] }
+}

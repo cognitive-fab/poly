@@ -1,0 +1,23 @@
+// The guard's policy (docs/examples/pii-guard.md, S587). At run time the gate holds what the machine proves: a send
+// leaves only after a scan, and through a verified redaction unless the facts are Absent; an unknown snapshot is denied.
+// A mail to a recipient the host's table does not hold waits for a person's approval (Q5).
+module pii_policy
+
+policy outbound {
+  scope "pii"
+  obligation sensitive-redacted "No SECRET, GOV_ID or PAYMENT leaves unredacted." rule {
+    when proposal.kind == "effect" && effect.kind in { "model.call", "mail.send" }
+    require machine("pii.Outbound").scan == Done && (machine("pii.Outbound").redaction == Verified || machine("pii.Outbound").sensitive == Absent) else deny
+    on unknown deny
+  }
+  obligation model-redacted "A name, email or phone number is redacted before an external model sees it." rule {
+    when proposal.kind == "effect" && effect.kind == "model.call"
+    require machine("pii.Outbound").redaction == Verified || machine("pii.Outbound").personal == Absent else deny
+    on unknown deny
+  }
+  obligation new-recipient-approved "A new external recipient gets nothing until a person approves." rule {
+    when proposal.kind == "effect" && effect.kind == "mail.send" && machine("pii.Outbound").recipient == New
+    require false else escalate
+    on unknown escalate
+  }
+}

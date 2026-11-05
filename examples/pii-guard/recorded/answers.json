@@ -1,0 +1,412 @@
+{
+  "hello": {
+    "v": 1,
+    "id": 1,
+    "ok": true,
+    "edgepii": "0.3.1",
+    "source": "sha256:66137817a819d6fd751d5c2f0453a4a1cb648dd1bde29b36145da1cff80d65a9",
+    "taxonomy": "2026.11",
+    "preset": "rules",
+    "revision": "rules",
+    "detectors": [
+      "rules"
+    ]
+  },
+  "documents": [
+    {
+      "file": "clean.txt",
+      "locate": {
+        "v": 1,
+        "id": 2,
+        "ok": true,
+        "dropped": 0,
+        "spans": []
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 3,
+            "ok": true,
+            "masked": "Team notes for the week.\n\nThe archive move is planned for the first floor, rooms 3 and 4.\nBring boxes, labels and tape. The lift is booked from nine to noon.\nLunch will be provided.\n",
+            "redacted": {},
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 4,
+            "ok": true,
+            "masked": "Team notes for the week.\n\nThe archive move is planned for the first floor, rooms 3 and 4.\nBring boxes, labels and tape. The lift is booked from nine to noon.\nLunch will be provided.\n",
+            "redacted": {},
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "en-ids.txt",
+      "locate": {
+        "v": 1,
+        "id": 5,
+        "ok": true,
+        "dropped": 0,
+        "spans": [
+          {
+            "type": "PAYMENT",
+            "start": 91,
+            "end": 113,
+            "detector": "rule",
+            "detectorId": "rules.iban"
+          },
+          {
+            "type": "PHONE",
+            "start": 154,
+            "end": 166,
+            "detector": "rule",
+            "detectorId": "rules.phone"
+          }
+        ]
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 6,
+            "ok": true,
+            "masked": "Payroll record for the new hire.\n\nSocial security number: 987-65-4320.\nSalary account IBAN <PAYMENT_1>, written for the bank as GB82 WEST 1234 5698 7654 32.\nStart date is the first of the month.\n",
+            "redacted": {
+              "PAYMENT": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 7,
+            "ok": true,
+            "masked": "Payroll record for the new hire.\n\nSocial security number: 987-65-4320.\nSalary account IBAN <PAYMENT_1>, written for the bank as GB82 WEST 1234 <PHONE_1>.\nStart date is the first of the month.\n",
+            "redacted": {
+              "PAYMENT": 1,
+              "PHONE": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "en-mail.txt",
+      "locate": {
+        "v": 1,
+        "id": 8,
+        "ok": true,
+        "dropped": 0,
+        "spans": [
+          {
+            "type": "SECRET",
+            "start": 72,
+            "end": 86,
+            "detector": "rule",
+            "detectorId": "rules.secret"
+          },
+          {
+            "type": "PAYMENT",
+            "start": 143,
+            "end": 162,
+            "detector": "rule",
+            "detectorId": "rules.card"
+          }
+        ]
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 9,
+            "ok": true,
+            "masked": "Hi team,\n\nThe vendor portal is ready. The shared account uses password: <SECRET> until it is rotated.\nThe deposit was paid with the card <PAYMENT_1>, expiry 12/29.\nPlease confirm the delivery date.\n",
+            "redacted": {
+              "SECRET": 1,
+              "PAYMENT": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 10,
+            "ok": true,
+            "masked": "Hi team,\n\nThe vendor portal is ready. The shared account uses password: <SECRET> until it is rotated.\nThe deposit was paid with the card <PAYMENT_1>, expiry 12/29.\nPlease confirm the delivery date.\n",
+            "redacted": {
+              "SECRET": 1,
+              "PAYMENT": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "en-model.txt",
+      "locate": {
+        "v": 1,
+        "id": 11,
+        "ok": true,
+        "dropped": 0,
+        "spans": [
+          {
+            "type": "EMAIL",
+            "start": 109,
+            "end": 134,
+            "detector": "rule",
+            "detectorId": "rules.email"
+          },
+          {
+            "type": "PHONE",
+            "start": 141,
+            "end": 156,
+            "detector": "rule",
+            "detectorId": "rules.phone"
+          }
+        ]
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 12,
+            "ok": true,
+            "masked": "Hello,\n\nPlease summarise the attached note for Avery Quinlan before Friday's review.\nAvery can be reached at avery.quinlan@example.com or on +1 202 555 0143.\nThe note covers the move of the archive to the new building.\n",
+            "redacted": {},
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 13,
+            "ok": true,
+            "masked": "Hello,\n\nPlease summarise the attached note for Avery Quinlan before Friday's review.\nAvery can be reached at <EMAIL_1> or on <PHONE_1>.\nThe note covers the move of the archive to the new building.\n",
+            "redacted": {
+              "EMAIL": 1,
+              "PHONE": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "fr-mail.txt",
+      "locate": {
+        "v": 1,
+        "id": 14,
+        "ok": true,
+        "dropped": 0,
+        "spans": [
+          {
+            "type": "PAYMENT",
+            "start": 52,
+            "end": 79,
+            "detector": "rule",
+            "detectorId": "rules.iban"
+          }
+        ]
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 15,
+            "ok": true,
+            "masked": "Bonjour,\n\nLe remboursement sera versé sur le compte <PAYMENT_1>.\nNuméro de sécurité sociale du salarié : 2 91 07 75 112 457 83.\nMerci de confirmer la date du virement.\n",
+            "redacted": {
+              "PAYMENT": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 16,
+            "ok": true,
+            "masked": "Bonjour,\n\nLe remboursement sera versé sur le compte <PAYMENT_1>.\nNuméro de sécurité sociale du salarié : 2 91 07 75 112 457 83.\nMerci de confirmer la date du virement.\n",
+            "redacted": {
+              "PAYMENT": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "fr-model.txt",
+      "locate": {
+        "v": 1,
+        "id": 17,
+        "ok": true,
+        "dropped": 0,
+        "spans": [
+          {
+            "type": "EMAIL",
+            "start": 113,
+            "end": 140,
+            "detector": "rule",
+            "detectorId": "rules.email"
+          },
+          {
+            "type": "PHONE",
+            "start": 166,
+            "end": 183,
+            "detector": "rule",
+            "detectorId": "rules.phone"
+          }
+        ]
+      },
+      "redact": [
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 18,
+            "ok": true,
+            "masked": "Bonjour,\n\nMerci de résumer la note pour Margaux Vasseur-Lepic avant la réunion de jeudi.\nMargaux est joignable à margaux.vasseur@example.org, au 06 39 98 12 34 ou au +33 6 39 98 12 35.\nLa note porte sur le déménagement des archives.\n",
+            "redacted": {},
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        },
+        {
+          "types": [
+            "SECRET",
+            "GOV_ID",
+            "PAYMENT",
+            "PERSON",
+            "EMAIL",
+            "PHONE"
+          ],
+          "answer": {
+            "v": 1,
+            "id": 19,
+            "ok": true,
+            "masked": "Bonjour,\n\nMerci de résumer la note pour Margaux Vasseur-Lepic avant la réunion de jeudi.\nMargaux est joignable à <EMAIL_1>, au 06 39 98 12 34 ou au <PHONE_1>.\nLa note porte sur le déménagement des archives.\n",
+            "redacted": {
+              "EMAIL": 1,
+              "PHONE": 1
+            },
+            "recheck": {
+              "dropped": 0,
+              "found": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,214 @@
+// expected: CLEAN
+// Personal-data guard (docs/examples/pii-guard.md, S587). An agent sends a document to an external model or by mail.
+// edgepii, a local detector the host runs, says which types of personal data the document holds; the host reads its
+// answer into two facts, sensitive (a secret, a national id, a payment) and personal (a name, an email, a phone number),
+// each Absent only when a rule rules every type of it out. The program sends only after a scan the host could read, and
+// through a verified redaction whenever a fact is not Absent. Eight never statements prove it before any gate.
+module pii
+
+// Documents and addresses are a person's text. Declaring the audience is what makes the runtime keep a taint record for
+// the bodies the host stores (PS17.4, S302); without one, a decision over a body fails closed.
+audience { public < personal }
+
+enum Target { Model, Mail }
+enum Presence { Absent, Found, NotRuledOut }
+enum Scan { Pending, Done, Failed }
+enum Redaction { None, Redacting, Verified, RedactFailed }
+enum Recipient { Unchecked, Known, New }
+enum Phase { Empty, Open, Sending, Sent, Uncertain }
+
+// What the scan answers: the host joins edgepii's eight types into these two (host/providers.mjs, exposureOf).
+type Exposure = { sensitive: Presence, personal: Presence }
+
+machine Outbound {
+  state {
+    phase     : Phase = Empty
+    target    : Target = Model
+    scan      : Scan = Pending
+    // Each fact starts NotRuledOut, so nothing reads as absent before a scan.
+    sensitive : Presence = NotRuledOut
+    personal  : Presence = NotRuledOut
+    redaction : Redaction = None
+    recipient : Recipient = Unchecked
+    // A Send the facts did not allow is written here, so that it is an accepted step (PT4.4) and each never is tested.
+    held      : bool = false
+    // The document to send: the draft, then its verified redaction.
+    doc       : Content = none
+    to        : Content = none
+  }
+
+  terminal phase in { Sent, Uncertain }
+
+  action DraftModel(body: Content)
+  action DraftMail(body: Content, address: Content)
+  action Scanned(sensitiveIs: Presence, personalIs: Presence)
+  action ScanFailed()
+  action Redacted(text: Content)
+  action Unredacted()
+  action Checked(who: Recipient)
+  action CheckFailed()
+  action Send()
+  action Delivered()
+  action NotDelivered()
+  action DeliveryUncertain()
+
+  on DraftModel(body) {
+    require phase == Empty else reject "drafted"
+    phase' = Open
+    target' = Model
+    doc' = body
+    decide scan(doc: body)
+  }
+
+  on DraftMail(body, address) {
+    require phase == Empty else reject "drafted"
+    phase' = Open
+    target' = Mail
+    doc' = body
+    to' = address
+    decide scan(doc: body)
+    decide recipient(to: address)
+  }
+
+  // A sensitive fact, or for a model a personal one, that is not Absent sends the document to the redaction.
+  on Scanned(sensitiveIs, personalIs) {
+    require phase == Open && scan == Pending else reject "not-scanning"
+    scan' = Done
+    sensitive' = sensitiveIs
+    personal' = personalIs
+    if sensitiveIs != Absent || (target == Model && personalIs != Absent) {
+      redaction' = Redacting
+      decide redact(doc: doc, target: target)
+    }
+  }
+
+  on ScanFailed {
+    require phase == Open && scan == Pending else reject "not-scanning"
+    scan' = Failed
+  }
+
+  // The adapter found no type it was asked to mask in the masked text, so the redaction is verified (PG9).
+  on Redacted(text) {
+    require redaction == Redacting else reject "not-redacting"
+    doc' = text
+    redaction' = Verified
+  }
+
+  on Unredacted {
+    require redaction == Redacting else reject "not-redacting"
+    redaction' = RedactFailed
+  }
+
+  on Checked(who) {
+    require target == Mail && recipient == Unchecked else reject "not-checking"
+    if who == Known {
+      recipient' = Known
+    } else {
+      recipient' = New
+    }
+  }
+
+  // An unknown recipient is new (Q6).
+  on CheckFailed {
+    require target == Mail && recipient == Unchecked else reject "not-checking"
+    recipient' = New
+  }
+
+  // Send is accepted from Open whatever the facts, and sends only when they allow it. Its guards are an if, not a
+  // require: a Send from a state that may not send is then an accepted step, which is what makes each never below tested
+  // rather than vacuous (PS5.2a).
+  on Send {
+    require phase == Open else reject "not-open"
+    if target == Model {
+      if scan == Done && (redaction == Verified || (redaction == None && sensitive == Absent && personal == Absent)) {
+        phase' = Sending
+        held' = false
+        emit callModel(text: doc)
+      } else {
+        held' = true
+      }
+    } else {
+      if scan == Done && recipient != Unchecked && (redaction == Verified || (redaction == None && sensitive == Absent)) {
+        phase' = Sending
+        held' = false
+        emit sendMail(text: doc, to: to)
+      } else {
+        held' = true
+      }
+    }
+  }
+
+  on Delivered {
+    require phase == Sending else reject "not-sending"
+    phase' = Sent
+  }
+
+  on NotDelivered {
+    require phase == Sending else reject "not-sending"
+    phase' = Open
+  }
+
+  // The one attempt ended with no answer the program can trust; a person looks.
+  on DeliveryUncertain {
+    require phase == Sending else reject "not-sending"
+    phase' = Uncertain
+  }
+
+  never no-sensitive-model: emit callModel() while sensitive != Absent && redaction != Verified
+  never no-sensitive-mail: emit sendMail() while sensitive != Absent && redaction != Verified
+  never no-unscanned-model: emit callModel() while scan != Done
+  never no-unscanned-mail: emit sendMail() while scan != Done
+  never no-unverified-model: emit callModel() while redaction == RedactFailed
+  never no-unverified-mail: emit sendMail() while redaction == RedactFailed
+  never model-redacted: emit callModel() while personal != Absent && redaction != Verified
+  never mail-recipient-checked: emit sendMail() while recipient == Unchecked
+
+  // The detector is local: the decisions carry no egress label, so polycheck's regions do not reach them (PL7001). The
+  // rules preset is deterministic: the provider answers with probability 1, uncalibrated, and no handler reads r.conf (Q2).
+  decision scan(doc: Content) -> Exposure {
+    provider "edgepii"
+    labels { read:private }
+    timeout 30s
+    ok(r) -> Scanned(sensitiveIs: r.answer.sensitive, personalIs: r.answer.personal)
+    failed -> ScanFailed()
+  }
+
+  decision redact(doc: Content, target: Target) -> Content {
+    provider "edgepii"
+    labels { read:private }
+    timeout 30s
+    ok(r) -> Redacted(text: r.answer)
+    failed -> Unredacted()
+  }
+
+  decision recipient(to: Content) -> Recipient {
+    provider "recipients"
+    labels { read:private }
+    timeout 2s
+    ok(r) -> Checked(who: r.answer)
+    failed -> CheckFailed()
+  }
+
+  // Neither service documents an idempotency key, so each send is attempted once (PS23.5, finding 31).
+  effect callModel(text: Content) {
+    kind "model.call"
+    labels { egress:external, read:private }
+    targets { egress: "https://model.example/v1/complete" }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 30s }
+    ok -> Delivered()
+    failed -> NotDelivered()
+    exhausted -> DeliveryUncertain()
+  }
+
+  effect sendMail(text: Content, to: Content) {
+    kind "mail.send"
+    labels { egress:external, read:private }
+    targets { egress: "https://mail.example/v1/send" }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 30s }
+    ok -> Delivered()
+    failed -> NotDelivered()
+    exhausted -> DeliveryUncertain()
+  }
+}

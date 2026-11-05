@@ -1,0 +1,47 @@
+{
+  "en-model.txt": {
+    "lang": "en",
+    "spans": [
+      { "type": "PERSON", "start": 47, "end": 60 },
+      { "type": "PERSON", "start": 85, "end": 90 },
+      { "type": "EMAIL", "start": 109, "end": 134 },
+      { "type": "PHONE", "start": 141, "end": 156 }
+    ]
+  },
+  "en-mail.txt": {
+    "lang": "en",
+    "spans": [
+      { "type": "SECRET", "start": 72, "end": 86 },
+      { "type": "PAYMENT", "start": 143, "end": 162 }
+    ]
+  },
+  "en-ids.txt": {
+    "lang": "en",
+    "spans": [
+      { "type": "GOV_ID", "start": 58, "end": 69 },
+      { "type": "PAYMENT", "start": 91, "end": 113 },
+      { "type": "PAYMENT", "start": 139, "end": 166 }
+    ]
+  },
+  "fr-model.txt": {
+    "lang": "fr",
+    "spans": [
+      { "type": "PERSON", "start": 40, "end": 61 },
+      { "type": "PERSON", "start": 89, "end": 96 },
+      { "type": "EMAIL", "start": 113, "end": 140 },
+      { "type": "PHONE", "start": 145, "end": 159 },
+      { "type": "PHONE", "start": 166, "end": 183 }
+    ]
+  },
+  "fr-mail.txt": {
+    "lang": "fr",
+    "spans": [
+      { "type": "PAYMENT", "start": 52, "end": 79 },
+      { "type": "GOV_ID", "start": 121, "end": 142 }
+    ]
+  },
+  "clean.txt": {
+    "lang": "en",
+    "spans": []
+  }
+}

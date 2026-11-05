@@ -1,0 +1,11 @@
+{
+  "edgepii": "0.3.1",
+  "wheel": "sha256:620f9b3c47491e337dc51d2265480625e743563de42e7ff9b324827853e2b52f",
+  "source": "sha256:66137817a819d6fd751d5c2f0453a4a1cb648dd1bde29b36145da1cff80d65a9",
+  "taxonomy": "2026.11",
+  "adapter": "sha256:2d655a84ab31a8483cf6609831216fc461730296930a0760b5f858b36681eacd",
+  "presets": {
+    "rules": { "revision": "rules", "detectors": ["rules"] },
+    "multi-open": { "revision": "1cb4166094dc58fa8d836429f060d6c95f62b495", "detectors": ["rules", "gliner2"], "repo": "fastino/gliner2-privacy-filter-PII-multi" }
+  }
+}

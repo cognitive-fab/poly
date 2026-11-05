@@ -1,0 +1,5 @@
+Payroll record for the new hire.
+
+Social security number: 987-65-4320.
+Salary account IBAN GB82WEST12345698765432, written for the bank as GB82 WEST 1234 5698 7654 32.
+Start date is the first of the month.
