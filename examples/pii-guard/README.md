@@ -16,6 +16,7 @@ An agent wants to send a document out, to an external model or by mail. Before a
 - **A redaction checked by a second pass.** The adapter masks with edgepii's placeholders (`<EMAIL_1>`, `<SECRET>`), throws the vault away, and locates again on the masked text; the host accepts the masked text only when that pass finds and drops nothing.
 - **Eight `never` statements**, one per property and effect: no send unscanned, none after a failed redaction, no sensitive or (for a model) personal fact out unredacted, no mail before its recipient is known. Each is tested, not vacuous.
 - **A policy that holds the same at run time.** `outbound` denies a send whose snapshot is not scanned or not redacted, and escalates a mail to a recipient the host's table does not hold, for a person to approve.
+- **Risk tags (S586).** The two redaction rules mitigate `mit:2.1` (a leak of sensitive information) and implement `nist:MEASURE-2.10`; the escalation implements `nist:MAP-3.5`. `poly.json` declares the exposure `mit:2.1` and `mit:2.2`, so a check of the project prints two warnings beside `CLEAN`, kept on purpose: the escalation mitigates no listed risk (`untagged:`), and nothing here mitigates `mit:2.2`, attacks on the AI system (`uncovered:`). The risk report then shows that exposure as open.
 - **A pinned process.** `PIN.json` fixes edgepii's version, the digest of its installed source, the taxonomy, the preset and the adapter's own digest; the client refuses an adapter that differs, before it starts and after `hello`.
 - **A seeded defect.** `pii-guard-defect.poly` sends a mail when the redaction "did not fail", forgetting that it may not have finished. The check finds it (`PL3002` on `no-sensitive-mail`, 4 steps), and at run time the gate denies that mail.
 
@@ -41,6 +42,7 @@ node examples/pii-guard/host/record.mjs
 | The program with its policy | `CLEAN`, 5,206 states, nothing vacuous or not run |
 | The defect with the program's policy | `FINDINGS`: exactly `PL3002` on `no-sensitive-mail`, witness `DraftMail`, `Scanned`, `Checked`, `Send`; 7,006 states |
 | The handlers (`--host`) | `CLEAN`; a wrong payload field is `PL6836` |
+| The risk tags (A4) | the three obligations' tags, the exposure, and exactly the `untagged:` and `uncovered:` warnings |
 | The fact table and the providers | every error code, each recorded fault, the join into two facts |
 | The live adapter | `hello` matches the pin; every live answer equals the recorded one |
 | End to end | a redacted model call, a redacted mail, a held send, the gate's denial of the defect's mail, a failed re-check, a failed scan, a new recipient approved by a person, no value in the journal, replay without divergence |
@@ -87,3 +89,4 @@ The guard changes nothing in poly. A pinned local process answers in types and o
 - **Exposure:** the two facts the program reads, `sensitive` and `personal`.
 - **Redaction contract:** after masking, a second pass with the same types finds nothing and drops nothing.
 - **Pin:** `examples/pii-guard/adapter/PIN.json`, the versions and digests the client checks.
+- **Risk tag:** a `mitigates` or `implements` clause on a policy item, naming a risk of the MIT catalog or a control of NIST or ISO (PT8.6).
