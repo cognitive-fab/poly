@@ -36,9 +36,11 @@ The ruling's fallback applies: the limit is kept and is the first paragraph of t
 
 The same reading found three facts the plan did not have, now in the specification: the phone rule's default regions are `US`, `CN`, `HK` and `GB`, so a French number in national form is not found; the IBAN pattern admits no spaces; and the placeholders are `<EMAIL_1>` and `<SECRET>`, not `[EMAIL_1]`.
 
-## The specification's differences from the plan (2026-11-05, for the owner's review)
+## The specification's differences from the plan (accepted by the owner, 2026-11-05)
 
-`docs/examples/pii-guard.md` lists them in its section "Differences from the plan". In short: the state keeps six facts (not `ip` and `org`); `Redaction` gains `Redacting` and `Recipient` gains `Unchecked`, with a property `mail-recipient-checked`; each property is two `never` statements, one per effect; the redaction is issued by `Scanned`; `hello` reports a digest of edgepii's installed source, since the venv keeps no wheel; the redaction's counts are checked and not journaled; the policy is named `outbound`; and no send at run time is unredacted, since `govId` is never `Absent`. They are not ruled yet.
+`docs/examples/pii-guard.md` lists them in its section "Differences from the plan". In short: the state keeps six facts (not `ip` and `org`); `Redaction` gains `Redacting` and `Recipient` gains `Unchecked`, with a property `mail-recipient-checked`; each property is two `never` statements, one per effect; the redaction is issued by `Scanned`; `hello` reports a digest of edgepii's installed source, since the venv keeps no wheel; the redaction's counts are checked and not journaled; the policy is named `outbound`; and no send at run time is unredacted, since `govId` is never `Absent`.
+
+**Ruling (owner, 2026-11-05).** The specification is accepted as written, with its differences: adjustments from the plan were expected. The example is a demo, and what it must show is edgepii's integration: a pinned local detector whose answers the host reads into facts, and a machine and policy that act on those facts.
 
 ## Conclusion
 
