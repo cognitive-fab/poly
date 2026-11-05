@@ -17,7 +17,7 @@ const EX_DIR = join(ROOT, 'examples', 'pii-guard');
 const HOST = join(EX_DIR, 'host');
 const SAMPLES = join(EX_DIR, 'samples');
 const ANSWERS = join(EX_DIR, 'recorded', 'answers.json');
-const PIN = join(ROOT, 'adapters', 'edgepii', 'PIN.json');
+const PIN = join(ROOT, 'examples', 'pii-guard', 'adapter', 'PIN.json');
 const TMP = mkdtempSync(join(tmpdir(), 'poly-pii-facts-'));
 
 const host = (file) => import(pathToFileURL(join(HOST, file)).href);
@@ -384,7 +384,7 @@ test('PG12: adapterStatus with a missing python gives the exact skip message', a
   const { adapterStatus, loadPin } = await host('edgepii.mjs');
   const python = join(TMP, 'no-venv', 'Scripts', 'python.exe');
   const s = await adapterStatus({ python, pin: loadPin(PIN), preset: 'rules' });
-  assert.deepEqual(s, { ok: false, reason: `not run: edgepii 0.3.1 is not installed at ${python}; run node adapters/edgepii/setup.mjs` });
+  assert.deepEqual(s, { ok: false, reason: `not run: edgepii 0.3.1 is not installed at ${python}; run node examples/pii-guard/adapter/setup.mjs` });
 });
 
 test('loadPin reads PIN.json and throws when a field is missing; defaultPython takes POLY_EDGEPII_PYTHON when set', async () => {

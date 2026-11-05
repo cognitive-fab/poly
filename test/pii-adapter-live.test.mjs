@@ -14,8 +14,8 @@ import { ROOT } from './helpers.mjs';
 const EX_DIR = join(ROOT, 'examples', 'pii-guard');
 const HOST = join(EX_DIR, 'host');
 const SAMPLES = join(EX_DIR, 'samples');
-const ADAPTER = join(ROOT, 'adapters', 'edgepii', 'adapter.py');
-const PIN_FILE = join(ROOT, 'adapters', 'edgepii', 'PIN.json');
+const ADAPTER = join(ROOT, 'examples', 'pii-guard', 'adapter', 'adapter.py');
+const PIN_FILE = join(ROOT, 'examples', 'pii-guard', 'adapter', 'PIN.json');
 
 const { adapterStatus, defaultPython, loadPin, startAdapter } = await import(pathToFileURL(join(HOST, 'edgepii.mjs')).href);
 const { loadRecorded } = await import(pathToFileURL(join(HOST, 'recorded.mjs')).href);
