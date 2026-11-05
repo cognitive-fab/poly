@@ -117,7 +117,14 @@ export async function startAdapter({ python, script = SCRIPT, pin, preset = 'rul
     child.kill();
   };
 
-  const hello = await call({ op: 'hello' });
+  // A hello that is refused or unreadable leaves no process behind: the client was never returned, so no one else can close it.
+  let hello;
+  try {
+    hello = await call({ op: 'hello' });
+  } catch (e) {
+    close();
+    throw e;
+  }
   const field = helloMismatch(hello, pin, preset);
   if (field) {
     close();
