@@ -42,6 +42,10 @@ export const REFERENCE_EDITS = {
     { replace: ['targets { egress: "https://api.stripe.com/v1/refunds" }\n  uses payments { read_write } for merchant', 'targets { egress: "https://api.example.com/v1/sync" }\n  uses calendar { read_write } for merchant'] },
     { replace: ["The example's profile is Stripe Connect's, as its OAuth reference documents it: the scopes", "The example's profile is a provider's, with the scopes"] },
     { replace: ['`class none` on a refund passes.', '`class none` on a write passes.'] },
+    // PT8.6's example and PT34.5's first example (S586) tag the concierge's refund rule; the arm reads the tags on a sync.
+    { replace: ['obligation large-refund-reviewed "A refund above 100 is issued only after a person approves it."', 'obligation large-sync-reviewed "A sync above 100 is made only after a person approves it."'] },
+    { replace: ['effect.kind == "payments.refund" && machine', 'effect.kind == "calendar.sync" && machine'] },
+    { replace: ['**The refunds desk.**', '**The concierge desk.**'] },
     // The running example is a shipping order (the order is dispatched to a carrier, then delivered), not a payment. The order of these
     // matters: the old Ship and Shipped make room for Pay and Paid, and the names of the old Pay are taken last.
     { word: ['\\bShip\\b', 'Deliver', 2] },
