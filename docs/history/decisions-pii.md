@@ -66,6 +66,8 @@ The push plan ran: `main` (ba69a88e) and `pii-guard` are on origin. The owner th
 
 `docs/examples/pii-guard.md` specifies it as A5, with the scripted day, the folder, the test and two stops, and corrects PG14, which counted `new-recipient-approved` under `mit:2.1`. The test is written by a separate writer before the code (rule 7a).
 
+**Ruling (owner, 2026-11-06).** A5 is accepted as written.
+
 ## Conclusion
 
 S587 adds an example and no language: a pinned local detector, a fact table that never reads silence as absence, and a machine and policy that send only after a scan the host could read. Q4 was answered by reading the library rather than assuming it: edgepii 0.3.1 has no national id pattern to enable, so the guard's first stated limit is that it cannot see one. Where the plan met the checker, the runtime and the repository's boundaries, the specification was amended with what was measured, and the owner accepted each amendment.
