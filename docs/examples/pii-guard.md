@@ -1,6 +1,6 @@
 # Example spec: pii-guard
 
-S587, from the plan `docs/proposals/pii-guard.md` and the owner's answers of 2026-11-04 (its section 11a). Written before any test or code (rule 7a). The tests are written by someone who has read only this page, so everything a test needs is on it. The tests and the code started before `risk-tags` was merged, at the owner's word (2026-11-05); the risk tags were added by A4 once it was. The owner accepted A1 to A4 on 2026-11-05.
+S587, from the plan `docs/proposals/pii-guard.md` and the owner's answers of 2026-11-04 (its section 11a). Written before any test or code (rule 7a). The tests are written by someone who has read only this page, so everything a test needs is on it. The tests and the code started before `risk-tags` was merged, at the owner's word (2026-11-05); the risk tags were added by A4 once it was. The owner accepted A1 to A4 on 2026-11-05. A5, the risk report's kept store, was asked for by the owner on 2026-11-06 and is written here before its test and its code.
 
 ## Purpose
 
@@ -58,7 +58,9 @@ Under `examples/pii-guard/adapter/`:
 
 A `.gitattributes` line marks `examples/pii-guard/adapter/adapter.py` `eol=lf`, so its digest is the same in every checkout.
 
-Tests: `test/ex-pii-guard.test.mjs` (light), `test/pii-facts.test.mjs` (light), `test/pii-adapter-live.test.mjs` (the real adapter, skipped when absent) and `test/after/ex-pii-guard-e2e.test.mjs` (admission and runs). The shared helper is `test/ex-kit.mjs`. For decisions, an escalation and its approval, read `test/after/ex-support-drafts-e2e.test.mjs`; for a policy's decision table through poly-ref, `test/ex-concierge-policy.test.mjs`; for a stored `Content`, `test/after/ex-appointment-booker-e2e.test.mjs` (`rt.putContent`).
+The risk report's kept folder (A5) is `docs/examples/risk-report/pii-guard/`, beside the concierge's and the airline desk's, with the same files: `store.db`, `certificate.json` and `certificate-defect.json`, `build/` (the policy documents the two certificates name: `poly report risks` takes one `--build`, and the two policies are the same text), `ledger.pub.pem`, `admission.pub.pem`, `trust.json`, `report.md` and `report.json`. `scripts/risk-report-examples.mjs pii-guard` makes it, and `--reports` writes its two reports again from the kept files.
+
+Tests: `test/ex-pii-guard.test.mjs` (light), `test/pii-facts.test.mjs` (light), `test/pii-adapter-live.test.mjs` (the real adapter, skipped when absent), `test/after/ex-pii-guard-e2e.test.mjs` (admission and runs) and `test/pii-guard-risk-report.test.mjs` (the kept report, light, A5). The shared helper is `test/ex-kit.mjs`. For decisions, an escalation and its approval, read `test/after/ex-support-drafts-e2e.test.mjs`; for a policy's decision table through poly-ref, `test/ex-concierge-policy.test.mjs`; for a stored `Content`, `test/after/ex-appointment-booker-e2e.test.mjs` (`rt.putContent`).
 
 ## The adapter
 
@@ -314,6 +316,17 @@ End-to-end test (`test/after/ex-pii-guard-e2e.test.mjs`, serial), over the recor
 - the journal replays with no divergence (`replayRuntime`, `replaySessions`);
 - **the real adapter:** one model call over `en-model.txt` with `startAdapter`, skipped with `adapterStatus`'s `reason` when absent.
 
+Risk report test (`test/pii-guard-risk-report.test.mjs`, light, A5), over the kept folder `docs/examples/risk-report/pii-guard/`, read in place and never written; each report it makes goes to a temporary folder:
+
+- **same bytes:** `poly report risks` run from the repository's root, with `--db`, `--build`, both certificates and both keys of `trust.json` (the command of `scripts/risk-report-examples.mjs`), gives `report.md` and `report.json` byte for byte, exits 0, and leaves `store.db` unchanged;
+- **every run counted:** `report.json`'s `store.notCounted`, `unidentified` and `ambiguous` are empty, `store.counted` equals the number of runs with a gate record, and each of the two certificates has `counted` of at least 1;
+- **mit:2.1:** under `mit:2.1`, `outbound.sensitive-redacted` has `refused` 1 and every other count 0, and `outbound.model-redacted` has every count 0; the Markdown does not say *no decision in the period* under `mit:2.1`;
+- **the escalations:** `untagged` holds `outbound.new-recipient-approved` with `escalated` 3, `approved` 1, `timedOut` 1, `open` 1 and `refused` 0, and no other item;
+- **the exposure:** `uncovered` is exactly `mit:2.2`, and the Markdown says *Exposed and not covered*;
+- **the scope:** `scopes` holds `pii` with `allowed` at least 3 (the model call, the mail to a known recipient and the defect's mail once redacted; whether the approved mail adds an allow is the gate's, PT34.4), and `runtime` is empty;
+- **nothing private:** the bytes of `store.db` hold none of the values `samples/gold.json` marks in `en-model.txt` and `en-mail.txt`, none of the recipient addresses the script uses, and its `poly_content` table is empty;
+- **the wording:** `report.md`'s first line after the title is PT34.4's *meaning* line, and it never prints *mitigated*, *covered*, *safe* or *compliant*.
+
 Run only these files and the ones a change touches; the full suite only at the owner's word, with nothing else heavy alongside.
 
 ## Acceptance criteria
@@ -331,7 +344,7 @@ Run only these files and the ones a change touches; the full suite only at the o
 - **PG11** No body, span text or vault value is in the journal; the original and the masked text are only in the content store, as `Content`.
 - **PG12** The live adapter's answers equal the recorded ones for every sample, and the live tests skip with their message when it is absent.
 - **PG13** The README's English and French scores are those `score.py` prints on the samples, with the versions, the revision and the date.
-- **PG14** With `risk-tags` merged, `poly report risks` on the example's kept store counts its three rules under `mit:2.1` and lists `mit:2.2` as exposed and not covered.
+- **PG14** `poly report risks` on the example's kept store (A5) counts the defect's refused mail under `mit:2.1`, by `sensitive-redacted`; counts the program's three escalations under `untagged`, by `new-recipient-approved`, one approved, one timed out and one open; lists `mit:2.2` as exposed and not covered; and the kept store holds no sample value and no address.
 - **PG15** The README's limits begin with GOV_ID: edgepii 0.3.1 ships no GOV_ID pattern, so under `rules` a national id is never found and a verified redaction does not mask it; the measured `GOV_ID` recall of 0 is shown beside it. The second limit is names: under `rules` no `PERSON` is found, so a name reaches the model inside the verified, masked text.
 
 ## Differences from the plan
@@ -366,6 +379,23 @@ Measured on the amended program, with `checkExample` as the light test runs it: 
 **A3 (2026-11-05), measured by the boundary check.** The adapter's files were specified under `adapters/edgepii/`. `scripts/check-boundaries.mjs` refused all four code files there: `adapters/` holds the host adapters of S167, and "an adapter holds .json and .md files only, and launches poly mcp or poly lsp". The edgepii adapter is the example's host code (Q1), not a host adapter, so its files live in the example, under `examples/pii-guard/adapter/`, and every path and skip message on this page names that place. The venv's place is unchanged.
 
 **A4 (2026-11-05), when `risk-tags` (S586) was merged.** The risk tags this page deferred are added, as "Policy" now states: three obligations tagged, the example's `poly.json` with its exposure, and a light test of both. Nothing else changes: tags change no verdict, no decision of the gate and no state count (PT34.3, PS8.10).
+
+**A5 (2026-11-06), the risk report's kept store, asked for by the owner.** S587 left the kept store of PG14 out; this amendment specifies it, and corrects PG14, which said the report counts "its three rules under `mit:2.1`": `new-recipient-approved` mitigates no risk (A4), so the report lists it under `untagged`, with its counts.
+
+- **Why two certificates (the owner's choice, 2026-11-06).** The program never proposes a send its policy refuses: the machine already holds what `sensitive-redacted` and `model-redacted` require, which is what `CLEAN` means. A store of the program alone would show both rules under `mit:2.1` with *no decision in the period*. The defect, admitted with the program's policy once its `PL3002` is accepted (as the end-to-end test admits it), proposes its early mail while `Redacting`, and the gate refuses it. The kept store holds the runs of both builds, so the report shows the proof doing the work in the program and the gate doing it in the defect.
+- **The scripted day.** `scripts/risk-report-examples.mjs` gains `piiGuard()`, beside `airlineDesk()` and `concierge()`, and the entry `pii-guard`. It runs as that script runs, with the test suite's helpers: a test person signs the policy, a test key admits, a ledger signer signs the store. Everything runs on the script's fixed clock `T0` (2026-09-21), with the recorded adapter (`recorded/answers.json`, no Python), a recording egress that answers each POST 201, the recipient table of `host/recipients.mjs`, and an escalation timeout of 600 seconds. No wall clock reaches the store, so the kept report never changes with the date. On one store file, one build after the other:
+  1. **The program**, admitted from `pii-guard.poly` and `pii-guard.policy.poly` with the example's `poly.json` (its exposure):
+     - a model call over `en-model.txt`: redacted, allowed, posted;
+     - a mail over `en-mail.txt` to a known recipient: allowed, posted;
+     - a mail over `en-mail.txt` to a new address: escalated, approved by the test person, posted;
+     - a mail to a second new address: escalated, then the clock advanced past the timeout: timed out, nothing posted;
+     - a mail to a third new address: escalated and left open.
+  2. **The defect**, admitted from `pii-guard-defect.poly` and its policy with the same `poly.json`, its `PL3002` accepted: a mail over `en-mail.txt` to a known recipient, the recorded adapter with `hold`, driven as the end-to-end test's "the gate refuses, then allows" drives it: the gate denies `mail.send` by `sensitive-redacted` while the instance is `Redacting`, and after `release()` and `Redacted`, the mail is allowed and posted.
+  3. **Erasure (S205).** Every body and address in the store's erasable store is erased with `rt.erase`, so the kept store holds digests only; the journal keeps an erasure record for each on `runtime:content`, which the report skips as a runtime run.
+  4. Every head is signed and an anchor published, then the store, both certificates, the build's policy documents and the two public keys are kept, and the two reports written, as `keep()` does for the other examples.
+- **Stops.** If the runtime refuses to open the store under the second build, or the two certificates name policy documents that differ, the code stops and this page is amended before anything is kept: the folder's layout above assumes neither.
+- **Docs.** `docs/examples/risk-report/README.md` gains a row for `pii-guard/` and says that its folder keeps two certificates; the example's README says what the report shows, with the command that reads it again; `examples/README.md` is unchanged.
+- **Nothing else changes.** No poly code, no program, no policy and no other kept example.
 
 ## Conclusion
 
