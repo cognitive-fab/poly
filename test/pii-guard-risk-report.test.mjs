@@ -27,8 +27,8 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 // The four recipient addresses used in the scripted day (A5).
 const RECIPIENT_ADDRESSES = ['known.reader@mail.example', 'first.new@mail.example', 'second.new@mail.example', 'third.new@mail.example'];
 
-// The exact meaning line from PT34.4 item 6.
-const MEANING_LINE = 'These counts are evidence that each rule was applied to the decisions recorded in the journal. They are not proof that a risk was removed or reduced.';
+// The exact meaning line from PT34.4 item 6, in italics as the spec quotes it.
+const MEANING_LINE = '*These counts are evidence that each rule was applied to the decisions recorded in the journal. They are not proof that a risk was removed or reduced.*';
 
 // ── Read the kept folder's structure (PT34.5) ──────────────────────────────────────────────────────────
 
