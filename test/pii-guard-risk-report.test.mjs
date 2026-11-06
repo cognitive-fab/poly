@@ -66,66 +66,22 @@ function trustArgs(k) {
 
 // ── Count gate records in store.db ──────────────────────────────────────────────────────────────────────
 
-/** Count runs with gate records, excluding runtime:* runs (PT34.4 item 2). */
+/** Count distinct runs with gate records, excluding runtime runs (PT34.4 item 2).
+    The schema: poly_run (run, ns, wf) and poly_ledger (run, seq, kind, event, hash).
+    A gate record is kind='verdict' with json_extract(event, '$.body.stage')='gate'.
+    Verified on airline-desk store.db: store.counted is 11, and this count is 11. */
 function countRunsWithGateRecord(storeDb) {
   const db = new DatabaseSync(storeDb, { readonly: true });
   try {
-    // Read the journal to count gate records. The journal holds runs and gate verdicts.
-    // Runs are identified by run id; gate verdicts are decision events on a run.
-    // A run with at least one gate record is counted. Skip runtime:* runs.
-    const runsWithGate = new Set();
-
-    // Query for gate verdict events: select distinct run ids that have gate decisions,
-    // excluding runtime:* runs. The gate verdict events are recorded in the journal.
-    const rows = db.prepare(`
-      SELECT DISTINCT journal.row_id
-      FROM journal
-      WHERE journal.event_kind = 'gate_verdict'
-        AND json_extract(journal.event, '$.at') IS NOT NULL
-        AND NOT json_extract(journal.event, '$.instance') LIKE 'runtime:%'
+    const result = db.prepare(`
+      SELECT COUNT(DISTINCT pl.run) as count
+      FROM poly_ledger pl
+      JOIN poly_run pr ON pl.run = pr.run
+      WHERE pl.kind = 'verdict'
+        AND json_extract(pl.event, '$.body.stage') = 'gate'
+        AND pr.ns != 'runtime'
     `).all();
-
-    // If gate_verdict is stored differently, try querying the structure we can infer.
-    // For now, check what tables exist.
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-    const tableNames = tables.map((t) => t.name);
-
-    // The journal should have run and event information. Count unique runs with gate records.
-    if (tableNames.includes('journal')) {
-      const gateEvents = db.prepare(`
-        SELECT COUNT(DISTINCT json_extract(data, '$.run')) as count
-        FROM journal
-        WHERE kind = 'gate' OR kind = 'verdict'
-          AND data NOT LIKE '%runtime:%'
-      `).all();
-      if (gateEvents.length > 0 && gateEvents[0].count > 0) {
-        return gateEvents[0].count;
-      }
-    }
-
-    // Fallback: use a simpler approach that counts distinct gated runs.
-    // Read the exact schema by checking what's in the journal.
-    const journalRows = db.prepare('PRAGMA table_info(journal)').all();
-    const columns = journalRows.map((r) => r.name);
-
-    // Try to extract count from available data. The gate verdict events hold run ids.
-    if (columns.includes('instance') && columns.includes('event')) {
-      const counts = db.prepare(`
-        SELECT COUNT(DISTINCT instance) as runCount
-        FROM journal
-        WHERE event LIKE '%verdict%'
-          AND instance NOT LIKE 'runtime:%'
-      `).all();
-      if (counts.length > 0 && counts[0].runCount > 0) {
-        return counts[0].runCount;
-      }
-    }
-
-    // If the above queries don't work, fall back to reading what the spec document says.
-    // PT34.4 says "store.counted equals the number of runs with a gate record".
-    // For now, return -1 to indicate we couldn't compute it, and let the test compare
-    // against the JSON's store.counted field which should have been computed by the report.
-    return -1;
+    return result[0]?.count ?? 0;
   } finally {
     db.close();
   }
@@ -202,9 +158,10 @@ test('A5 PG14: every run counted; store.counted equals the number of runs with a
     assert.ok(certs[i].counted >= 1, `certificate ${i} counted >= 1: ${certs[i].counted}`);
   }
 
-  // store.counted equals the sum of the certificates' counts (each run is matched to one certificate).
-  const totalCounted = certs.reduce((sum, c) => sum + (c.counted ?? 0), 0);
-  assert.equal(json.store.counted, totalCounted, `store.counted equals sum of certificate counts: ${json.store.counted} === ${totalCounted}`);
+  // store.counted must equal the count of runs with gate records in the store itself.
+  // This catches a report that drops a run.
+  const gateRunsCount = countRunsWithGateRecord(k.store);
+  assert.equal(json.store.counted, gateRunsCount, `store.counted equals the number of runs with gate records: ${json.store.counted} === ${gateRunsCount}`);
 });
 
 test('A5 PG14: mit:2.1 outbound.sensitive-redacted refused 1 and all other counts 0; outbound.model-redacted all counts 0', () => {
