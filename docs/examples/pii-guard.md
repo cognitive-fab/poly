@@ -324,8 +324,8 @@ Risk report test (`test/pii-guard-risk-report.test.mjs`, light, A5), over the ke
 - **the escalations:** `untagged` holds `outbound.new-recipient-approved` with `escalated` 3, `approved` 1, `timedOut` 1, `open` 1 and `refused` 0, and no other item;
 - **the exposure:** `uncovered` is exactly `mit:2.2`, and the Markdown says *Exposed and not covered*;
 - **the scope:** `scopes` holds `pii` with `allowed` at least 3 (the model call, the mail to a known recipient and the defect's mail once redacted; whether the approved mail adds an allow is the gate's, PT34.4), and `runtime` is empty;
-- **nothing private:** the bytes of `store.db` hold none of the values `samples/gold.json` marks in `en-model.txt` and `en-mail.txt`, none of the recipient addresses the script uses, and its `poly_content` table is empty;
-- **the wording:** `report.md`'s first line after the title is PT34.4's *meaning* line, and it never prints *mitigated*, *covered*, *safe* or *compliant*.
+- **nothing private:** the bytes of `store.db` hold none of the values `samples/gold.json` marks in `en-model.txt` and `en-mail.txt`, none of the four addresses of the scripted day (A5), each as written and in lower case, each value and address looked for both raw and JSON-escaped over the whole file, and its `poly_content` table is empty;
+- **the wording:** the first non-empty line after `report.md`'s title is exactly PT34.4's *meaning* line, in italics: `*These counts are evidence that each rule was applied to the decisions recorded in the journal. They are not proof that a risk was removed or reduced.*`; and no table row of `report.md` prints the words *mitigated*, *covered*, *safe* or *compliant* (PT34.4 item 6 forbids them beside a count; the section title *Exposed and not covered* is PT34.4's own).
 
 Run only these files and the ones a change touches; the full suite only at the owner's word, with nothing else heavy alongside.
 
@@ -386,11 +386,11 @@ Measured on the amended program, with `checkExample` as the light test runs it: 
 - **The scripted day.** `scripts/risk-report-examples.mjs` gains `piiGuard()`, beside `airlineDesk()` and `concierge()`, and the entry `pii-guard`. It runs as that script runs, with the test suite's helpers: a test person signs the policy, a test key admits, a ledger signer signs the store. Everything runs on the script's fixed clock `T0` (2026-09-21), with the recorded adapter (`recorded/answers.json`, no Python), a recording egress that answers each POST 201, the recipient table of `host/recipients.mjs`, and an escalation timeout of 600 seconds. No wall clock reaches the store, so the kept report never changes with the date. On one store file, one build after the other:
   1. **The program**, admitted from `pii-guard.poly` and `pii-guard.policy.poly` with the example's `poly.json` (its exposure):
      - a model call over `en-model.txt`: redacted, allowed, posted;
-     - a mail over `en-mail.txt` to a known recipient: allowed, posted;
-     - a mail over `en-mail.txt` to a new address: escalated, approved by the test person, posted;
-     - a mail to a second new address: escalated, then the clock advanced past the timeout: timed out, nothing posted;
-     - a mail to a third new address: escalated and left open.
-  2. **The defect**, admitted from `pii-guard-defect.poly` and its policy with the same `poly.json`, its `PL3002` accepted: a mail over `en-mail.txt` to a known recipient, the recorded adapter with `hold`, driven as the end-to-end test's "the gate refuses, then allows" drives it: the gate denies `mail.send` by `sensitive-redacted` while the instance is `Redacting`, and after `release()` and `Redacted`, the mail is allowed and posted.
+     - a mail over `en-mail.txt` to the known recipient `known.reader@mail.example` (added to the table first): allowed, posted;
+     - a mail over `en-mail.txt` to the new address `first.new@mail.example`: escalated, approved by the test person, posted;
+     - a mail over `en-mail.txt` to `second.new@mail.example`: escalated, then the clock advanced past the timeout: timed out, nothing posted;
+     - a mail over `en-mail.txt` to `third.new@mail.example`: escalated and left open.
+  2. **The defect**, admitted from `pii-guard-defect.poly` and its policy with the same `poly.json`, its `PL3002` accepted: a mail over `en-mail.txt` to `known.reader@mail.example`, the recorded adapter with `hold`, driven as the end-to-end test's "the gate refuses, then allows" drives it: the gate denies `mail.send` by `sensitive-redacted` while the instance is `Redacting`, and after `release()` and `Redacted`, the mail is allowed and posted.
   3. **Erasure (S205).** Every body and address in the store's erasable store is erased with `rt.erase`, so the kept store holds digests only; the journal keeps an erasure record for each on `runtime:content`, which the report skips as a runtime run.
   4. Every head is signed and an anchor published, then the store, both certificates, the build's policy documents and the two public keys are kept, and the two reports written, as `keep()` does for the other examples.
 - **Stops.** If the runtime refuses to open the store under the second build, or the two certificates name policy documents that differ, the code stops and this page is amended before anything is kept: the folder's layout above assumes neither.
