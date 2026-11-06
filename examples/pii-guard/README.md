@@ -16,7 +16,8 @@ An agent wants to send a document out, to an external model or by mail. Before a
 - **A redaction checked by a second pass.** The adapter masks with edgepii's placeholders (`<EMAIL_1>`, `<SECRET>`), throws the vault away, and locates again on the masked text; the host accepts the masked text only when that pass finds and drops nothing.
 - **Eight `never` statements**, one per property and effect: no send unscanned, none after a failed redaction, no sensitive or (for a model) personal fact out unredacted, no mail before its recipient is known. Each is tested, not vacuous.
 - **A policy that holds the same at run time.** `outbound` denies a send whose snapshot is not scanned or not redacted, and escalates a mail to a recipient the host's table does not hold, for a person to approve.
-- **Risk tags (S586).** The two redaction rules mitigate `mit:2.1` (a leak of sensitive information) and implement `nist:MEASURE-2.10`; the escalation implements `nist:MAP-3.5`. `poly.json` declares the exposure `mit:2.1` and `mit:2.2`, so a check of the project prints two warnings beside `CLEAN`, kept on purpose: the escalation mitigates no listed risk (`untagged:`), and nothing here mitigates `mit:2.2`, attacks on the AI system (`uncovered:`). The risk report then shows that exposure as open.
+- **Risk tags (S586).** The two redaction rules mitigate `mit:2.1` (a leak of sensitive information) and implement `nist:MEASURE-2.10`; the escalation implements `nist:MAP-3.5`. `poly.json` declares the exposure `mit:2.1` and `mit:2.2`, so a check of the project prints two warnings beside `CLEAN`, kept on purpose: the escalation mitigates no listed risk (`untagged:`), and nothing here mitigates `mit:2.2`, attacks on the AI system (`uncovered:`).
+- **A risk report from a kept store (A5).** `docs/examples/risk-report/pii-guard/` keeps a scripted day of the program and of its defect on one store, with both certificates. Its report counts one refusal under `mit:2.1`, by `sensitive-redacted`: the defect's early mail. The program never gives that rule anything to refuse, since its machine already holds what the rule requires. The three mails to new recipients are under the rules that name no risk: one approved, one timed out, one left open. And `mit:2.2` is listed as exposed and not covered.
 - **A pinned process.** `PIN.json` fixes edgepii's version, the digest of its installed source, the taxonomy, the preset and the adapter's own digest; the client refuses an adapter that differs, before it starts and after `hello`.
 - **A seeded defect.** `pii-guard-defect.poly` sends a mail when the redaction "did not fail", forgetting that it may not have finished. The check finds it (`PL3002` on `no-sensitive-mail`, 4 steps), and at run time the gate denies that mail.
 
@@ -33,6 +34,12 @@ node --test --test-concurrency=1 test/after/ex-pii-guard-e2e.test.mjs
 node examples/pii-guard/host/record.mjs
 ```
 
+To read the risk report again from its kept store (the key ids are in the folder's `trust.json`):
+
+```sh
+node packages/poly-check/dist/src/cli.js report risks --db docs/examples/risk-report/pii-guard/store.db --build docs/examples/risk-report/pii-guard/build --certificate docs/examples/risk-report/pii-guard/certificate.json --certificate docs/examples/risk-report/pii-guard/certificate-defect.json --trust test-risk-report-pii-guard-ledger=docs/examples/risk-report/pii-guard/ledger.pub.pem --trust test-risk-report-pii-guard=docs/examples/risk-report/pii-guard/admission.pub.pem --format md
+```
+
 `setup.mjs` creates the shared venv outside the repository (`%LOCALAPPDATA%\poly\venvs\edgepii-0.3.1\` on Windows) and installs edgepii 0.3.1 and its two dependencies with every hash required. `record.mjs` rewrites `recorded/answers.json` from the live adapter; the live test compares the two.
 
 ## What is checked
@@ -43,6 +50,7 @@ node examples/pii-guard/host/record.mjs
 | The defect with the program's policy | `FINDINGS`: exactly `PL3002` on `no-sensitive-mail`, witness `DraftMail`, `Scanned`, `Checked`, `Send`; 7,006 states |
 | The handlers (`--host`) | `CLEAN`; a wrong payload field is `PL6836` |
 | The risk tags (A4) | the three obligations' tags, the exposure, and exactly the `untagged:` and `uncovered:` warnings |
+| The risk report (A5) | the kept report made again byte for byte, every gated run counted, the counts above, and no sample value or address in the kept store |
 | The fact table and the providers | every error code, each recorded fault, the join into two facts |
 | The live adapter | `hello` matches the pin; every live answer equals the recorded one |
 | End to end | a redacted model call, a redacted mail, a held send, the gate's denial of the defect's mail, a failed re-check, a failed scan, a new recipient approved by a person, no value in the journal, replay without divergence |

@@ -1,0 +1,334 @@
+{
+  "v": 1,
+  "subject": {
+    "kind": "poly.program",
+    "project": "risk-report-pii-guard-defect",
+    "machines": [
+      {
+        "id": "pii.Outbound",
+        "module": "pii",
+        "machine": "Outbound",
+        "dir": ".poly/build/pii.Outbound"
+      }
+    ]
+  },
+  "artefacts": {
+    ".poly/build/policies/pii.policy.json": "sha256:82f8572267f9533c416c9c497b8b35a86dfcad64ddddcdfbe41b905e4a104596",
+    ".poly/build/flow/pii.json": "sha256:9c7611f95779f8b644eebca49bfce700c13a66b159cfee814027658766621348",
+    ".poly/build/pii.Outbound/contract.json": "sha256:87f25c80b9317827f4f3c49e11f955f85314dae5d629402f54cf29aab607d9fd",
+    ".poly/build/pii.Outbound/next.cjs": "sha256:7d590d82c265a00fd683a2badb17dd8386b9f4338b1dda589cd3ef8bc9a8b277",
+    ".poly/build/pii.Outbound/invariants.mjs": "sha256:ac2a30d4268fa1959d4e778ac45e31ac3b84148f6ddab27413c56c52f54ae10f",
+    ".poly/build/pii.Outbound/effects.cjs": "sha256:2cdf94c7919d9b57bc322b0b5b5bc9e5ef2c52c41488c4a3d64625bb493b2d99",
+    ".poly/build/pii.Outbound/effects.manifest.json": "sha256:bbe4839765637bcdc7d1722dcee3d1d7fa55a2aba09b9ae25978fb5f8a8e003e",
+    ".poly/build/pii.Outbound/types.d.ts": "sha256:5f435a90501fbac86f0747e5fc0150e971c9308047519c56dae537ea321d0d5c"
+  },
+  "guarantees": [
+    "pii.Outbound:deadlock-free"
+  ],
+  "checks": [
+    {
+      "name": "pii.Outbound:parse-type",
+      "ok": true,
+      "engine": "@poly/lang, @poly/core",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:lower",
+      "ok": true,
+      "engine": "@poly/lower",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:validate",
+      "ok": true,
+      "engine": "sam-pattern@2.3.0",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:translation-validation",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:deadlock",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:effects",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    },
+    {
+      "name": "pii.Outbound:decisions",
+      "ok": true,
+      "engine": "poly-ref",
+      "verdict": "CLEAN"
+    }
+  ],
+  "domains": {
+    "pii.Outbound": [
+      "DraftModel.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+      "DraftMail.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+      "DraftMail.address ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+      "Scanned.sensitiveIs ∈ Presence",
+      "Scanned.personalIs ∈ Presence",
+      "Redacted.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+      "Checked.who ∈ Recipient",
+      "4 content representatives and none (PS4.1f)"
+    ]
+  },
+  "boundAccepted": [
+    {
+      "code": "PL3002",
+      "property": "no-sensitive-mail",
+      "subject": "pii.Outbound",
+      "witness": "sha256:5b54f1ab71c6a6e9244476ce503fc2f4325c527b311b07775167b927ead46d38",
+      "by": "key-ops",
+      "record": "sha256:d491b0022ce7cc6b26cb969c4c5f6cfbf2ae46941994a4d0a2f0ef83bb12239c"
+    }
+  ],
+  "toolchain": {
+    "sam-pattern": "2.3.0",
+    "polygraph": "8.4.0",
+    "polygraph sam-pattern (vendored)": "2.3.0",
+    "poly-ref": "0.0.0"
+  },
+  "issuedAt": "2026-11-06T15:06:52.103Z",
+  "buildId": "cert-9df2410a719f",
+  "poly": {
+    "sources": {
+      "src/pii-guard-defect.poly": "sha256:4dd9946c9b520946dfa2ee999f4c6d7083f48aa291e5c903650ec621ae34ff4d",
+      "src/pii-guard.policy.poly": "sha256:f98e3b805438239c19b5907cf90324111324242c841ea20ce728abb834d3975e"
+    },
+    "moduleDigests": {
+      "pii": "sha256:53bfc578ec56a5cb125bd15401b6c1a281de023a4b4ef837245244add30afd15",
+      "pii_policy": "sha256:fb729118fbae2efb4543f75e17d28bfca6b7d074a81d1883b7380e1ae41495d8"
+    },
+    "instances": {
+      "pii.Outbound": {
+        "domains": [
+          "DraftModel.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+          "DraftMail.body ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+          "DraftMail.address ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+          "Scanned.sensitiveIs ∈ Presence",
+          "Scanned.personalIs ∈ Presence",
+          "Redacted.text ∈ {null, \"sha256:0000000000000000000000000000000000000000000000000000000000000001\", \"sha256:0000000000000000000000000000000000000000000000000000000000000002\", \"sha256:0000000000000000000000000000000000000000000000000000000000000003\", \"sha256:0000000000000000000000000000000000000000000000000000000000000004\"}",
+          "Checked.who ∈ Recipient",
+          "4 content representatives and none (PS4.1f)"
+        ],
+        "states": 7006,
+        "transitions": 378324,
+        "bounds": [],
+        "kernelAssumptions": [
+          "K7"
+        ],
+        "engines": {
+          "sam-pattern": "2.3.0",
+          "polygraph": "8.4.0",
+          "polygraph sam-pattern (vendored)": "2.3.0",
+          "poly-ref": "0.0.0"
+        },
+        "refOnly": [],
+        "effectsByRefOnly": true
+      }
+    },
+    "kernelAssumptions": [
+      "K10",
+      "K7"
+    ],
+    "decisions": [
+      {
+        "machine": "pii.Outbound",
+        "kind": "decision.scan",
+        "provider": "edgepii",
+        "result": {
+          "sensitive": [
+            "Absent",
+            "Found",
+            "NotRuledOut"
+          ],
+          "personal": [
+            "Absent",
+            "Found",
+            "NotRuledOut"
+          ]
+        },
+        "labels": [
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "pii.Outbound",
+        "kind": "decision.redact",
+        "provider": "edgepii",
+        "result": "content",
+        "labels": [
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      },
+      {
+        "machine": "pii.Outbound",
+        "kind": "decision.recipient",
+        "provider": "recipients",
+        "result": [
+          "Unchecked",
+          "Known",
+          "New"
+        ],
+        "labels": [
+          "read:private"
+        ],
+        "modelBound": false,
+        "calibration": "runtime configuration"
+      }
+    ],
+    "limits": [
+      "capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)",
+      "the store is SQLite only; Postgres is not built (S135)",
+      "installed packages are hashed, not linted: a package's own I/O is stopped only by the opt-in sandbox (S154)"
+    ],
+    "handlers": {
+      "roots": [
+        "src/handlers.ts"
+      ],
+      "files": {
+        "src/handlers.ts": "sha256:cf2536947de591a29d66f23148f0ae2f68048075d01ef7e040ca7eac77709054"
+      },
+      "lint": {
+        "version": "poly-lint-handlers 2: PT6.5 over the relative-import closure (S72, S142)",
+        "verdict": "CLEAN"
+      },
+      "packages": [],
+      "packageFiles": {},
+      "lockfile": {
+        "path": "../../../package-lock.json",
+        "digest": "sha256:e133809ff8434572b426a25558181e748c31902a1c18ab21e46b75040149702b"
+      }
+    },
+    "keyrings": {
+      "people": [
+        {
+          "name": "ops",
+          "keyId": "key-ops",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA8DJ5J4ztVE4Nd7zmdv5hprgfQphZZHE10HQ5s6t4BT0=\n-----END PUBLIC KEY-----"
+        }
+      ],
+      "agents": [
+        {
+          "name": "ci-agent",
+          "keyId": "key-ci-agent",
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMHb2JhgfRlG27moSb2nt7aDjKrldCNkHCkjZ/T7rM84=\n-----END PUBLIC KEY-----"
+        }
+      ]
+    },
+    "keyringChain": {
+      "anchor": "sha256:df030e6f03ef69f9d880f5b5f750e7945701ecddebfc2f90abda9e40a61e1ad7",
+      "head": "sha256:df030e6f03ef69f9d880f5b5f750e7945701ecddebfc2f90abda9e40a61e1ad7",
+      "source": "test"
+    },
+    "policies": [
+      {
+        "scope": "pii",
+        "policies": [
+          "outbound"
+        ],
+        "path": ".poly/build/policies/pii.policy.json",
+        "reads": [
+          "pii.Outbound"
+        ],
+        "source": "src/pii-guard.policy.poly",
+        "sequence": 1,
+        "signature": {
+          "v": 1,
+          "kind": "policy",
+          "subject": "sha256:68a3894224583dd58bc6146d13e5dffdcc15b2283e47451871873a742f9cde11",
+          "by": "key-ops",
+          "at": "2026-10-06T00:00:00.000Z",
+          "sig": "t4V4Gpmiv71bs63RM+c9r2lh1JeKPj/0yDeEU6Zg91S+sYWdKp2OzNkL9ptKPcdzyj7KR0lcvbFz7g2MQssFBQ=="
+        }
+      }
+    ],
+    "memory": {
+      "sources": [],
+      "flows": [
+        {
+          "module": "pii",
+          "descriptor": ".poly/build/flow/pii.json"
+        }
+      ]
+    },
+    "policyEngine": {
+      "name": "polyaxion",
+      "commit": "c37c60e"
+    },
+    "risk": {
+      "catalogs": [
+        {
+          "catalog": "iso",
+          "version": "ISO/IEC 42001:2023",
+          "digest": "sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f"
+        },
+        {
+          "catalog": "mit",
+          "version": "Version 4 (2025-12-04)",
+          "digest": "sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b"
+        },
+        {
+          "catalog": "nist",
+          "version": "AI RMF 1.0 (NIST AI 100-1, January 2023)",
+          "digest": "sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc"
+        }
+      ],
+      "exposure": [
+        "mit:2.1",
+        "mit:2.2"
+      ],
+      "items": {
+        "outbound.sensitive-redacted": {
+          "scope": "pii",
+          "kind": "rule",
+          "risks": [
+            "mit:2.1"
+          ],
+          "controls": [
+            "nist:MEASURE-2.10"
+          ]
+        },
+        "outbound.model-redacted": {
+          "scope": "pii",
+          "kind": "rule",
+          "risks": [
+            "mit:2.1"
+          ],
+          "controls": [
+            "nist:MEASURE-2.10"
+          ]
+        },
+        "outbound.new-recipient-approved": {
+          "scope": "pii",
+          "kind": "rule",
+          "risks": [],
+          "controls": [
+            "nist:MAP-3.5"
+          ]
+        }
+      }
+    }
+  },
+  "signatures": [
+    {
+      "keyId": "test-risk-report-pii-guard",
+      "alg": "ed25519",
+      "sig": "ohGwCJAKAEcdOdqWaz+5IWv6O9SIHGSgoCxkD/tnbcvJLIXR7RJkE9D4ZWfYDGIbkUJb+qEpQgZMYJNwBIr9CQ=="
+    }
+  ],
+  "digest": "sha256:7a418687308694b495ed1c0e04d92e5f710134262733d09013dc0fc4dd744a6a"
+}
