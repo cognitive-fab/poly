@@ -317,7 +317,9 @@ export async function riskReport(input: RiskReportInput): Promise<Record<string,
     attribution: attributionLine(mit?.version ?? bundled.mit.version),
     period: { asked: period.asked, from: period.from ?? sortedDays[0] ?? null, to: period.to ?? sortedDays.at(-1) ?? null },
     store: { runs, counted: counted.length, notCounted: notCounted.sort(by((x) => x.run)), trusted: Object.keys(trust).sort() },
-    certificates: certs.map((c) => ({ file: c.file, digest: c.digest, buildId: c.buildId, signers: c.signers, verified: c.problem === null, ...(c.problem ? { problem: c.problem } : {}), counted: counted.filter((r) => r.c === c).length })).sort(by((c) => c.digest)),
+    // PT34.4 items 8 and 9, RT25: a certificate is named by its digest and build id, not by the path given, which
+    // depends on the host.
+    certificates: certs.map((c) => ({ digest: c.digest, buildId: c.buildId, signers: c.signers, verified: c.problem === null, ...(c.problem ? { problem: c.problem } : {}), counted: counted.filter((r) => r.c === c).length })).sort(by((c) => c.digest)),
     catalogs,
     risks,
     scopes: [...scopes.values()].map((s) => ({ ...s, unknownOutcomes: [...s.unknownOutcomes].sort(by((u) => `${u.intent}\u0000${u.outcome}`)) })).sort(by((s) => s.scope)),
@@ -358,7 +360,7 @@ export function reportMarkdown(j: any): string {
   out.push(`- Runs: ${j.store.runs} with a gate record; ${j.store.counted} counted, ${j.store.notCounted.length} not verified, ${j.unidentified.length} with no certificate identified, ${j.ambiguous.length} with two`);
   if (!j.store.trusted.length) out.push('- No key was given with --trust, so no run verifies and no run is counted.');
   else out.push(`- Keys trusted: ${j.store.trusted.join(', ')}`);
-  for (const c of j.certificates) out.push(`- Certificate \`${c.file}\`: build ${c.buildId}, ${c.digest}, signed by ${c.signers.join(', ') || 'nobody'}${c.verified ? '' : `; not verified: ${c.problem}`}; ${c.counted} run(s) matched`);
+  for (const c of j.certificates) out.push(`- Certificate of build ${c.buildId}: ${c.digest}, signed by ${c.signers.join(', ') || 'nobody'}${c.verified ? '' : `; not verified: ${c.problem}`}; ${c.counted} run(s) matched`);
   for (const c of j.catalogs) out.push(`- Catalog ${c.catalog}: ${c.version}, ${c.digest}`);
   out.push('');
   for (const r of j.risks) {

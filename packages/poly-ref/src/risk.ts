@@ -46,6 +46,9 @@ export function riskProblems(risk: unknown, program: readonly Module[], exposure
   if (JSON.stringify(got.exposure) !== JSON.stringify(want.exposure)) out.push(`poly.risk names the exposure ${JSON.stringify(got.exposure)}, and poly.json declares ${JSON.stringify(want.exposure)} (PT34.3)`);
   const ids = Array.from(new Set([...Object.keys(got.items ?? {}), ...Object.keys(want.items)])).sort();
   for (const id of ids) {
+    // Admission refuses a check not run or vacuous (PT12.5), so a certified never is proved whatever the sources say.
+    const v = ((got.items ?? {})[id] as { kind?: string; verdict?: string } | undefined);
+    if (v?.kind === 'never' && v.verdict !== 'proved') out.push(`poly.risk records the never ${id} as ${v.verdict ?? 'no verdict'}, and a certified never is proved (PT34.3)`);
     const g = JSON.stringify((got.items ?? {})[id] ?? null);
     const w = JSON.stringify(want.items[id] ?? null);
     if (g !== w) out.push(`poly.risk records ${id} as ${g}, and its source as ${w} (PT34.3)`);

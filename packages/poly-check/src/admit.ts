@@ -58,7 +58,7 @@ export function noRejectingCompletion(machine: A.Machine | undefined): boolean {
 const LIVENESS_ASSUMPTION = "machine-level liveness assumes that no completion of the program's own decisions and effects is rejected: the machine check offers a completion as an ordinary action in any state (PS4.4), and at run time a rejected completion consumes its intent";
 const ROUTING_LIMIT = "a call's cost is its provider's usage report at the certified prices (K15): a call whose provider gave no answer reports no usage and its reservation is released, so what a provider bills for such a call is not counted; a usage report that is not whole token counts fails the call; a reservation covers the token limit at the highest price, which a call over its input tokens may exceed, recorded as an overrun";
 
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify', 'swap-tier-model', 'rename-route', 'drop-risk-item'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify', 'swap-tier-model', 'rename-route', 'drop-risk-item', 'never-not-proved'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -172,12 +172,21 @@ function artefactsOf(root: string, machines: CertifiedMachine[], fault?: Certifi
   return out;
 }
 
-/** PT34.3, RT20: poly.risk as certified, or with its first item left out under the broken certificate drop-risk-item. */
+/**
+ * PT34.3: poly.risk as certified, or broken: its first item left out under drop-risk-item (RT20), or its first never
+ * item's verdict written as vacuous under never-not-proved (RT26).
+ */
 function riskOf(r: ReturnType<typeof riskRecord>, fault: AdmitOptions['fault']): ReturnType<typeof riskRecord> {
-  if (fault !== 'drop-risk-item') return r;
-  const [first] = Object.keys(r.items);
-  const { [first]: _dropped, ...items } = r.items;
-  return { ...r, items };
+  if (fault === 'drop-risk-item') {
+    const [first] = Object.keys(r.items);
+    const { [first]: _dropped, ...items } = r.items;
+    return { ...r, items };
+  }
+  if (fault === 'never-not-proved') {
+    const never = Object.keys(r.items).find((id) => r.items[id].kind === 'never');
+    if (never) return { ...r, items: { ...r.items, [never]: { ...r.items[never], verdict: 'vacuous' } } };
+  }
+  return r;
 }
 
 /** What the runtime reads, re-read from disk: every certified name in every machine directory. */

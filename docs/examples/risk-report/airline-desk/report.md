@@ -7,7 +7,7 @@ Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 
 - Period: 2026-09-21 to 2026-09-22 (the first and last day of the counted events, UTC)
 - Runs: 11 with a gate record; 11 counted, 0 not verified, 0 with no certificate identified, 0 with two
 - Keys trusted: test-risk-report-airline-desk, test-risk-report-airline-desk-ledger
-- Certificate `docs/examples/risk-report/airline-desk/certificate.json`: build cert-de2b54050636, sha256:7ced6299c729e0a87faf6d3cfdbc49db6e5ffc5400bfb1cc130defc7cad3ef3c, signed by test-risk-report-airline-desk; 11 run(s) matched
+- Certificate of build cert-de2b54050636: sha256:7ced6299c729e0a87faf6d3cfdbc49db6e5ffc5400bfb1cc130defc7cad3ef3c, signed by test-risk-report-airline-desk; 11 run(s) matched
 - Catalog iso: ISO/IEC 42001:2023, sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f
 - Catalog mit: Version 4 (2025-12-04), sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b
 - Catalog nist: AI RMF 1.0 (NIST AI 100-1, January 2023), sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc
