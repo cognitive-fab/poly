@@ -1,4 +1,4 @@
-// PT34.5, S586: makes the kept stores of the risk report's two examples, under docs/examples/risk-report/<example>/, and
+// PT34.5, S586: makes the kept stores of the risk report's examples, under docs/examples/risk-report/<example>/, and
 // the report of each. For each example it admits the program with its policy signed by a test person, drives its runtime
 // with a fixed clock over a scripted set of proposals, on a store file with a ledger signer, signs every head and
 // publishes an anchor; then it keeps the store, the certificate, the build it certifies and the public keys that verify
@@ -10,12 +10,13 @@
 //
 // It uses the test suite's helpers (a test person, a test keyring anchor and test keys), so it runs as a test file does:
 //   node --import ./test/fixtures/home-guard.mjs --import ./test/fixtures/accept-test-anchors.mjs \
-//        --env-file=test/fixtures/serial-heap.env scripts/risk-report-examples.mjs [airline-desk] [concierge]
+//        --env-file=test/fixtures/serial-heap.env scripts/risk-report-examples.mjs [airline-desk] [concierge] [pii-guard]
+// pii-guard (S587, A5) keeps two certificates in one store: the program's and the defect's, admitted with its finding accepted.
 // The concierge's admission checks the whole program, which takes minutes and a large heap; run nothing heavy beside it.
 // With --reports it writes report.md and report.json again from the kept files alone, and runs no program.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -24,6 +25,7 @@ import { grantRequestSubject, signRecord } from '@poly/core';
 import { load } from '@poly/runtime';
 import { ACCEPT_TEST_ANCHORS, ROOT } from '../test/helpers.mjs';
 import { PERSON, approvalFor, approveAs, handleWith, makeKey, project, signPolicies } from '../test/runtime-helpers.mjs';
+import { acceptFindings } from '../test/ex-kit.mjs';
 
 const KEPT = join(ROOT, 'docs', 'examples', 'risk-report');
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
@@ -37,8 +39,13 @@ function withExposure(dir, example) {
   writeFileSync(pj, JSON.stringify({ ...JSON.parse(readFileSync(pj, 'utf8')), exposure }, null, 2));
 }
 
-/** Keeps what the report reads, then writes the report in both formats from the kept files. */
-function keep(example, { dir, db, certificate, signer, key }) {
+/**
+ * Keeps what the report reads, then writes the report in both formats from the kept files. `more` names further
+ * certificates of the same store, each kept as its own file (pii-guard's defect, A5); their policy documents go into the
+ * one build folder, since the report takes one --build, and a document that differs from one already kept stops the
+ * script (A5's stop).
+ */
+function keep(example, { dir, db, certificate, signer, key, more = [] }) {
   const out = join(KEPT, example);
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
@@ -48,14 +55,21 @@ function keep(example, { dir, db, certificate, signer, key }) {
   const kept = new DatabaseSync(join(out, 'store.db'));
   kept.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   kept.exec('PRAGMA journal_mode=DELETE');
+  // A deleted row's bytes stay in its page until the page is rewritten: pii-guard's erased bodies (S205) were still in
+  // the file, unreachable by any query (measured, A5). VACUUM rewrites the file from its live rows alone.
+  kept.exec('VACUUM');
   kept.close();
   for (const x of ['-wal', '-shm']) rmSync(join(out, `store.db${x}`), { force: true });
-  copyFileSync(certificate, join(out, 'certificate.json'));
   // Of the build, only what the report reads: the policy documents the certificate names, checked by their digests.
-  for (const p of JSON.parse(readFileSync(certificate, 'utf8')).poly.policies) {
-    const to = join(out, 'build', p.path.replace(/^\.poly\/build\//, ''));
-    mkdirSync(join(to, '..'), { recursive: true });
-    copyFileSync(join(dir, p.path), to);
+  for (const c of [{ dir, certificate, as: 'certificate.json' }, ...more]) {
+    copyFileSync(c.certificate, join(out, c.as));
+    for (const p of JSON.parse(readFileSync(c.certificate, 'utf8')).poly.policies) {
+      const to = join(out, 'build', p.path.replace(/^\.poly\/build\//, ''));
+      mkdirSync(join(to, '..'), { recursive: true });
+      const from = readFileSync(join(c.dir, p.path));
+      if (existsSync(to) && !readFileSync(to).equals(from)) throw new Error(`${c.as} names ${p.path}, which differs from the one kept: stop for a ruling (A5)`);
+      writeFileSync(to, from);
+    }
   }
   writeFileSync(join(out, 'ledger.pub.pem'), signer.publicKey);
   writeFileSync(join(out, 'admission.pub.pem'), key.publicKey);
@@ -69,11 +83,17 @@ function keep(example, { dir, db, certificate, signer, key }) {
 function reports(example) {
   const out = join(KEPT, example);
   const trust = JSON.parse(readFileSync(join(out, 'trust.json'), 'utf8'));
+  // Every certificate the folder keeps: certificate.json alone for the first two examples, and the defect's after it for
+  // pii-guard, in the order A5 names them, so the report is made from the same arguments its test gives.
+  const certificates = readdirSync(out).filter((f) => /^certificate.*\.json$/.test(f)).sort((a, b) => (a === 'certificate.json' ? -1 : b === 'certificate.json' ? 1 : a.localeCompare(b)));
   for (const [format, file] of [['json', 'report.json'], ['md', 'report.md']]) {
-    const args = ['report', 'risks', '--db', slashed(join(out, 'store.db')), '--build', slashed(join(out, 'build')), '--certificate', slashed(join(out, 'certificate.json')),
+    const args = ['report', 'risks', '--db', slashed(join(out, 'store.db')), '--build', slashed(join(out, 'build')), ...certificates.flatMap((c) => ['--certificate', slashed(join(out, c))]),
       ...Object.entries(trust).flatMap(([id, f]) => ['--trust', `${id}=${slashed(join(out, f))}`]), '--format', format, '--out', join(out, file)];
+    // The old report is removed first, so a failed run under --reports cannot leave it in place and pass for a new one.
+    rmSync(join(out, file), { force: true });
     const r = spawnSync(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, ...args], { cwd: ROOT, encoding: 'utf8' });
-    if (!existsSync(join(out, file))) throw new Error(`poly report risks wrote no ${file} (exit ${r.status}): ${r.stdout}${r.stderr}`);
+    // A kept example counts every run (RT27): an exit other than CLEAN is a failure to keep, not a report.
+    if (r.status !== 0 || !existsSync(join(out, file))) throw new Error(`poly report risks exited ${r.status} for ${file}: ${r.stdout}${r.stderr}`);
   }
 }
 
@@ -238,9 +258,142 @@ async function concierge() {
   keep('concierge', { dir, db, certificate: admitted.certificatePath, signer, key });
 }
 
+// ── pii-guard (A5): the program's day, then the defect's early mail on the same store, refused by sensitive-redacted. ──
+
+async function piiGuard() {
+  const EX = join(ROOT, 'examples', 'pii-guard');
+  const hostModule = (f) => import(pathToFileURL(join(EX, 'host', f)).href);
+  const facts = await hostModule('facts.mjs');
+  const { provideGuard } = await hostModule('providers.mjs');
+  const { loadRecorded, recordedAdapter } = await hostModule('recorded.mjs');
+  const { recipientTable } = await hostModule('recipients.mjs');
+  const table = facts.loadTable(join(EX, 'host', 'facts.json'));
+  const fixture = loadRecorded(join(EX, 'recorded', 'answers.json'));
+  const sample = (f) => readFileSync(join(EX, 'samples', f), 'utf8');
+  const name = 'risk-report-pii-guard';
+  const key = makeKey(name);
+  // One project per build, both admitted with the same key and the example's exposure; the defect's PL3002 accepted (PT12.5).
+  const admitBuild = async (tag, program) => {
+    const dir = project(`${name}${tag}`, [], key, 'risk-report-examples');
+    for (const f of [program, 'pii-guard.policy.poly']) copyFileSync(join(EX, f), join(dir, 'src', f));
+    copyFileSync(join(EX, 'host', 'handlers.ts'), join(dir, 'src', 'handlers.ts'));
+    withExposure(dir, 'pii-guard');
+    await signPolicies(dir);
+    if (tag) await acceptFindings(dir);
+    return { dir, certificate: (await admit(dir)).certificatePath };
+  };
+  const program = await admitBuild('', 'pii-guard.poly');
+  const defect = await admitBuild('-defect', 'pii-guard-defect.poly');
+  const signer = ledgerSigner(name);
+  const db = join(program.dir, 'store.db');
+  for (const f of [db, `${db}-wal`, `${db}-shm`]) rmSync(f, { force: true });
+  // One clock for both runtimes, so the store's time only moves forward. No wall clock reaches the store (A5).
+  let t = T0;
+  const clock = { now: () => t, advance: (ms) => { t += ms; } };
+  const TIMEOUT = 600_000;
+  // Synthetic addresses, none of them in a sample; the store keeps none of them (S205 erasure below).
+  const KNOWN = 'known.reader@mail.example';
+  const recipients = recipientTable(randomBytes(32).toString('hex'));
+  recipients.add(KNOWN);
+  const start = async (a, { hold = false } = {}) => {
+    const rt = await load(join(a.dir, '.poly', 'build'), {
+      certificate: a.certificate, trust: { [key.id]: key.publicKey }, now: clock.now,
+      store: { sqlite: db }, ledger: { keyId: signer.id, privateKeyPem: readFileSync(signer.file, 'utf8') },
+      gate: { escalationTimeoutMs: TIMEOUT },
+      transports: { egress: async () => ({ status: 201, headers: {}, body: { ok: true } }) },
+    });
+    const client = recordedAdapter(fixture, { samplesDir: join(EX, 'samples'), hold });
+    provideGuard(rt, { client, table, recipients });
+    const handlers = rt.handlerExports('src/handlers.ts');
+    rt.handle('model.call', handlers.callModel);
+    rt.handle('mail.send', handlers.sendMail);
+    return { rt, client };
+  };
+  const settle = async (rt, n = 20) => { for (let k = 0; k < n; k++) { clock.advance(1_000); await rt.advance(); await rt.worker.tick(); } };
+  const draft = async (rt, id, action, file, address) => {
+    await rt.create('pii.Outbound', { id });
+    const data = { body: await rt.putContent(sample(file)) };
+    if (address !== undefined) data.address = await rt.putContent(address);
+    await rt.dispatch(id, action, data);
+    await settle(rt);
+  };
+  const state = async (rt, id) => (await rt.getState(id)).state;
+  const send = async (rt, id) => { await rt.dispatch(id, 'Send', {}); await settle(rt); };
+  const outboxOf = (rt, id) => rt.store.db.prepare("SELECT intent_id FROM pr_outbox WHERE instance_id = ? AND kind = 'mail.send'").all(id)[0].intent_id;
+  const expect = (what, ok) => { if (!ok) throw new Error(`pii-guard's scripted day: ${what}`); };
+
+  // 1. The program: a model call and a known mail allowed; three new recipients escalated, approved, timed out and open.
+  let run = await start(program);
+  try {
+    const { rt } = run;
+    await draft(rt, 'model-call', 'DraftModel', 'en-model.txt');
+    await send(rt, 'model-call');
+    expect('the model call is Sent', (await state(rt, 'model-call')).phase === 'Sent');
+    await draft(rt, 'mail-known', 'DraftMail', 'en-mail.txt', KNOWN);
+    await send(rt, 'mail-known');
+    expect('the known mail is Sent', (await state(rt, 'mail-known')).phase === 'Sent');
+    await draft(rt, 'mail-new-approved', 'DraftMail', 'en-mail.txt', 'first.new@mail.example');
+    await send(rt, 'mail-new-approved');
+    await approveAs(rt, outboxOf(rt, 'mail-new-approved'));
+    await settle(rt);
+    expect('the approved mail is Sent', (await state(rt, 'mail-new-approved')).phase === 'Sent');
+    await draft(rt, 'mail-new-timed-out', 'DraftMail', 'en-mail.txt', 'second.new@mail.example');
+    await send(rt, 'mail-new-timed-out');
+    clock.advance(TIMEOUT + 60_000);
+    await settle(rt);
+    // The escalation ended at its timeout, not some other way: the gate's record of it names escalation-timeout (PT34.4).
+    const timedOut = (await rt.chain('mail-new-timed-out')).some((e) => e.kind === 'verdict' && JSON.stringify(e.body).includes('escalation-timeout'));
+    expect('the escalated mail times out', timedOut && (await state(rt, 'mail-new-timed-out')).phase !== 'Sent');
+    await draft(rt, 'mail-new-open', 'DraftMail', 'en-mail.txt', 'third.new@mail.example');
+    await send(rt, 'mail-new-open');
+    const escalated = (await rt.chain('mail-new-open')).some((e) => e.kind === 'verdict' && e.body.effectKind === 'mail.send' && e.body.outcome === 'escalated');
+    expect('the third mail is escalated and left open', escalated && (await state(rt, 'mail-new-open')).phase !== 'Sent');
+    await rt.signHeads();
+  } finally { await run.rt.close(); }
+
+  // 2. The defect: its Send while Redacting emits sendMail, and the gate denies it (the end-to-end test's run, A2: the
+  // pass that runs the held redaction is not awaited until release()).
+  run = await start(defect, { hold: true });
+  const passes = [];
+  const pass = () => { const p = (async () => { await run.rt.advance(); await run.rt.worker.tick(); })(); p.catch(() => {}); passes.push(p); };
+  const poll = async (cond) => {
+    pass();
+    for (let k = 1; k <= 400; k++) {
+      if (await cond()) return true;
+      if (k % 20 === 0 && passes.length < 8) pass();
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return cond();
+  };
+  try {
+    const { rt, client } = run;
+    const id = 'defect-mail';
+    await rt.create('pii.Outbound', { id });
+    await rt.dispatch(id, 'DraftMail', { body: await rt.putContent(sample('en-mail.txt')), address: await rt.putContent(KNOWN) });
+    expect('the defect is Redacting with a redaction held', await poll(async () => {
+      const s = await state(rt, id);
+      return s.scan === 'Done' && s.redaction === 'Redacting' && s.recipient !== 'Unchecked' && client.calls.some((c) => c.op === 'redact');
+    }));
+    await rt.dispatch(id, 'Send', {});
+    const denied = async () => (await rt.chain(id)).some((e) => e.kind === 'verdict' && e.body.effectKind === 'mail.send' && e.body.outcome === 'denied');
+    expect('the gate denies the defect\'s early mail', await poll(async () => (await denied()) && (await state(rt, id)).phase === 'Open'));
+    client.release();
+    await Promise.all(passes.splice(0));
+    await settle(rt);
+    expect('the redaction is Verified once released', (await state(rt, id)).redaction === 'Verified');
+    await send(rt, id);
+    expect('the defect\'s mail is Sent once redacted', (await state(rt, id)).phase === 'Sent');
+    // 3. S205: every body and address is erased, so the kept store holds digests only.
+    for (const { digest } of rt.store.db.prepare('SELECT digest FROM poly_erasable ORDER BY digest').all()) await rt.erase(digest);
+    await rt.signHeads();
+    await rt.publishAnchor({ from: 0, to: clock.now() + 1 });
+  } finally { run.client.release(); await Promise.allSettled(passes); await run.rt.close(); }
+  keep('pii-guard', { dir: program.dir, db, certificate: program.certificate, signer, key, more: [{ dir: defect.dir, certificate: defect.certificate, as: 'certificate-defect.json' }] });
+}
+
 const only = process.argv.includes('--reports');
 const which = process.argv.slice(2).filter((a) => a !== '--reports');
-for (const [example, make] of [['airline-desk', airlineDesk], ['concierge', concierge]]) {
+for (const [example, make] of [['airline-desk', airlineDesk], ['concierge', concierge], ['pii-guard', piiGuard]]) {
   if (which.length && !which.includes(example)) continue;
   if (only) { reports(example); console.log(`the reports of ${example} written again from its kept files`); } else await make();
 }
