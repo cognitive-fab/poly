@@ -69,6 +69,7 @@ function trustArgs(k) {
 /** Count distinct runs with gate records, excluding runtime runs (PT34.4 item 2).
     The schema: poly_run (run, ns, wf) and poly_ledger (run, seq, kind, event, hash).
     A gate record is kind='verdict' with json_extract(event, '$.body.stage')='gate'.
+    Uses LEFT JOIN and IS NOT for null-safe comparison.
     Verified on airline-desk store.db: store.counted is 11, and this count is 11. */
 function countRunsWithGateRecord(storeDb) {
   const db = new DatabaseSync(storeDb, { readonly: true });
@@ -76,12 +77,12 @@ function countRunsWithGateRecord(storeDb) {
     const result = db.prepare(`
       SELECT COUNT(DISTINCT pl.run) as count
       FROM poly_ledger pl
-      JOIN poly_run pr ON pl.run = pr.run
+      LEFT JOIN poly_run pr ON pl.run = pr.run
       WHERE pl.kind = 'verdict'
         AND json_extract(pl.event, '$.body.stage') = 'gate'
-        AND pr.ns != 'runtime'
+        AND pr.ns IS NOT 'runtime'
     `).all();
-    return result[0]?.count ?? 0;
+    return result[0].count;
   } finally {
     db.close();
   }
@@ -147,19 +148,25 @@ test('A5 PG14: same bytes; poly report risks exits 0 and leaves store.db unchang
 test('A5 PG14: every run counted; store.counted equals the number of runs with a gate record; two certificates each counted >= 1', () => {
   const k = kept();
   const json = JSON.parse(readFileSync(join(k.dir, 'report.json'), 'utf8'));
-  assert.deepEqual(json.store.notCounted ?? [], [], 'store.notCounted is empty');
-  assert.deepEqual(json.unidentified ?? [], [], 'unidentified is empty');
-  assert.deepEqual(json.ambiguous ?? [], [], 'ambiguous is empty');
+  assert.ok(Array.isArray(json.store.notCounted), 'store.notCounted is an array');
+  assert.deepEqual(json.store.notCounted, [], 'store.notCounted is empty');
+  assert.ok(Array.isArray(json.unidentified), 'unidentified is an array');
+  assert.deepEqual(json.unidentified, [], 'unidentified is empty');
+  assert.ok(Array.isArray(json.ambiguous), 'ambiguous is an array');
+  assert.deepEqual(json.ambiguous, [], 'ambiguous is empty');
 
   // Assert that exactly two certificates are present, each with counted >= 1.
-  const certs = json.certificates ?? [];
+  assert.ok(Array.isArray(json.certificates), 'certificates is an array');
+  const certs = json.certificates;
   assert.equal(certs.length, 2, `exactly two certificates: ${certs.length}`);
   for (let i = 0; i < certs.length; i++) {
+    assert.equal(typeof certs[i].counted, 'number', `certificate ${i} counted is a number`);
     assert.ok(certs[i].counted >= 1, `certificate ${i} counted >= 1: ${certs[i].counted}`);
   }
 
   // store.counted must equal the count of runs with gate records in the store itself.
   // This catches a report that drops a run.
+  assert.equal(typeof json.store.counted, 'number', 'store.counted is a number');
   const gateRunsCount = countRunsWithGateRecord(k.store);
   assert.equal(json.store.counted, gateRunsCount, `store.counted equals the number of runs with gate records: ${json.store.counted} === ${gateRunsCount}`);
 });
@@ -167,9 +174,11 @@ test('A5 PG14: every run counted; store.counted equals the number of runs with a
 test('A5 PG14: mit:2.1 outbound.sensitive-redacted refused 1 and all other counts 0; outbound.model-redacted all counts 0', () => {
   const k = kept();
   const json = JSON.parse(readFileSync(join(k.dir, 'report.json'), 'utf8'));
-  const mit21 = json.risks?.find((r) => r.id === 'mit:2.1');
+  assert.ok(Array.isArray(json.risks), 'risks is an array');
+  const mit21 = json.risks.find((r) => r.id === 'mit:2.1');
   assert.ok(mit21, 'mit:2.1 is listed under risks');
-  const items = mit21.items ?? [];
+  assert.ok(Array.isArray(mit21.items), 'mit:2.1 items is an array');
+  const items = mit21.items;
   assert.ok(items.length > 0, 'mit:2.1 has items');
 
   // Find both items by exact id.
@@ -184,46 +193,69 @@ test('A5 PG14: mit:2.1 outbound.sensitive-redacted refused 1 and all other count
   assert.ok(modelRedacted, 'outbound.model-redacted found in mit:2.1');
 
   // Check sensitive-redacted counts: refused 1, all others 0.
-  const sr_counts = sensitiveRedacted.counts ?? {};
-  assert.equal(sr_counts.refused ?? 0, 1, 'outbound.sensitive-redacted refused === 1');
-  assert.equal(sr_counts.escalated ?? 0, 0, 'outbound.sensitive-redacted escalated === 0');
-  assert.equal(sr_counts.approved ?? 0, 0, 'outbound.sensitive-redacted approved === 0');
-  assert.equal(sr_counts.timedOut ?? 0, 0, 'outbound.sensitive-redacted timedOut === 0');
-  assert.equal(sr_counts.open ?? 0, 0, 'outbound.sensitive-redacted open === 0');
-  assert.equal(sr_counts.onUnknown ?? 0, 0, 'outbound.sensitive-redacted onUnknown === 0');
+  assert.ok(sensitiveRedacted.counts && typeof sensitiveRedacted.counts === 'object', 'sensitive-redacted counts is an object');
+  const sr_counts = sensitiveRedacted.counts;
+  assert.equal(typeof sr_counts.refused, 'number', 'refused is a number');
+  assert.equal(sr_counts.refused, 1, 'outbound.sensitive-redacted refused === 1');
+  assert.equal(typeof sr_counts.escalated, 'number', 'escalated is a number');
+  assert.equal(sr_counts.escalated, 0, 'outbound.sensitive-redacted escalated === 0');
+  assert.equal(typeof sr_counts.approved, 'number', 'approved is a number');
+  assert.equal(sr_counts.approved, 0, 'outbound.sensitive-redacted approved === 0');
+  assert.equal(typeof sr_counts.timedOut, 'number', 'timedOut is a number');
+  assert.equal(sr_counts.timedOut, 0, 'outbound.sensitive-redacted timedOut === 0');
+  assert.equal(typeof sr_counts.open, 'number', 'open is a number');
+  assert.equal(sr_counts.open, 0, 'outbound.sensitive-redacted open === 0');
+  assert.equal(typeof sr_counts.onUnknown, 'number', 'onUnknown is a number');
+  assert.equal(sr_counts.onUnknown, 0, 'outbound.sensitive-redacted onUnknown === 0');
 
   // Check model-redacted counts: all 0.
-  const mr_counts = modelRedacted.counts ?? {};
-  assert.equal(mr_counts.refused ?? 0, 0, 'outbound.model-redacted refused === 0');
-  assert.equal(mr_counts.escalated ?? 0, 0, 'outbound.model-redacted escalated === 0');
-  assert.equal(mr_counts.approved ?? 0, 0, 'outbound.model-redacted approved === 0');
-  assert.equal(mr_counts.timedOut ?? 0, 0, 'outbound.model-redacted timedOut === 0');
-  assert.equal(mr_counts.open ?? 0, 0, 'outbound.model-redacted open === 0');
-  assert.equal(mr_counts.onUnknown ?? 0, 0, 'outbound.model-redacted onUnknown === 0');
+  assert.ok(modelRedacted.counts && typeof modelRedacted.counts === 'object', 'model-redacted counts is an object');
+  const mr_counts = modelRedacted.counts;
+  assert.equal(typeof mr_counts.refused, 'number', 'refused is a number');
+  assert.equal(mr_counts.refused, 0, 'outbound.model-redacted refused === 0');
+  assert.equal(typeof mr_counts.escalated, 'number', 'escalated is a number');
+  assert.equal(mr_counts.escalated, 0, 'outbound.model-redacted escalated === 0');
+  assert.equal(typeof mr_counts.approved, 'number', 'approved is a number');
+  assert.equal(mr_counts.approved, 0, 'outbound.model-redacted approved === 0');
+  assert.equal(typeof mr_counts.timedOut, 'number', 'timedOut is a number');
+  assert.equal(mr_counts.timedOut, 0, 'outbound.model-redacted timedOut === 0');
+  assert.equal(typeof mr_counts.open, 'number', 'open is a number');
+  assert.equal(mr_counts.open, 0, 'outbound.model-redacted open === 0');
+  assert.equal(typeof mr_counts.onUnknown, 'number', 'onUnknown is a number');
+  assert.equal(mr_counts.onUnknown, 0, 'outbound.model-redacted onUnknown === 0');
 });
 
 test('A5 PG14: untagged holds exactly outbound.new-recipient-approved with escalated 3, approved 1, timedOut 1, open 1, refused 0', () => {
   const k = kept();
   const json = JSON.parse(readFileSync(join(k.dir, 'report.json'), 'utf8'));
-  const untagged = json.untagged ?? [];
+  assert.ok(Array.isArray(json.untagged), 'untagged is an array');
+  const untagged = json.untagged;
   assert.equal(untagged.length, 1, `untagged holds exactly one item: ${untagged.map((i) => i.id).join(', ')}`);
 
   const item = untagged[0];
   assert.equal(item.id, 'outbound.new-recipient-approved', `untagged[0] is outbound.new-recipient-approved`);
 
-  const counts = item.counts ?? {};
-  assert.equal(counts.escalated ?? 0, 3, 'escalated === 3');
-  assert.equal(counts.approved ?? 0, 1, 'approved === 1');
-  assert.equal(counts.timedOut ?? 0, 1, 'timedOut === 1');
-  assert.equal(counts.open ?? 0, 1, 'open === 1');
-  assert.equal(counts.refused ?? 0, 0, 'refused === 0');
+  assert.ok(item.counts && typeof item.counts === 'object', 'counts is an object');
+  const counts = item.counts;
+  assert.equal(typeof counts.escalated, 'number', 'escalated is a number');
+  assert.equal(counts.escalated, 3, 'escalated === 3');
+  assert.equal(typeof counts.approved, 'number', 'approved is a number');
+  assert.equal(counts.approved, 1, 'approved === 1');
+  assert.equal(typeof counts.timedOut, 'number', 'timedOut is a number');
+  assert.equal(counts.timedOut, 1, 'timedOut === 1');
+  assert.equal(typeof counts.open, 'number', 'open is a number');
+  assert.equal(counts.open, 1, 'open === 1');
+  assert.equal(typeof counts.refused, 'number', 'refused is a number');
+  assert.equal(counts.refused, 0, 'refused === 0');
 });
 
 test('A5 PG14: uncovered is exactly mit:2.2; the Markdown section title is "Exposed and not covered"', () => {
   const k = kept();
   const json = JSON.parse(readFileSync(join(k.dir, 'report.json'), 'utf8'));
-  const uncovered = json.uncovered ?? [];
+  assert.ok(Array.isArray(json.uncovered), 'uncovered is an array');
+  const uncovered = json.uncovered;
   assert.equal(uncovered.length, 1, `uncovered has exactly one item: ${uncovered.map((r) => r.id).join(', ')}`);
+  assert.equal(typeof uncovered[0].id, 'string', 'uncovered[0].id is a string');
   assert.equal(uncovered[0].id, 'mit:2.2', `uncovered[0].id === 'mit:2.2'`);
 
   const md = readFileSync(join(k.dir, 'report.md'), 'utf8');
@@ -233,11 +265,14 @@ test('A5 PG14: uncovered is exactly mit:2.2; the Markdown section title is "Expo
 test('A5 PG14: scope pii allowed at least 3; runtime is empty', () => {
   const k = kept();
   const json = JSON.parse(readFileSync(join(k.dir, 'report.json'), 'utf8'));
-  const piiScope = json.scopes?.find((s) => s.scope === 'pii');
+  assert.ok(Array.isArray(json.scopes), 'scopes is an array');
+  const piiScope = json.scopes.find((s) => s.scope === 'pii');
   assert.ok(piiScope, 'scope pii is listed');
-  assert.ok((piiScope.allowed ?? 0) >= 3, `scope pii allowed >= 3: ${piiScope.allowed}`);
+  assert.equal(typeof piiScope.allowed, 'number', 'allowed is a number');
+  assert.ok(piiScope.allowed >= 3, `scope pii allowed >= 3: ${piiScope.allowed}`);
 
-  const runtime = json.runtime ?? [];
+  assert.ok(Array.isArray(json.runtime), 'runtime is an array');
+  const runtime = json.runtime;
   assert.deepEqual(runtime, [], 'runtime is empty (no runs at runtime phase, only gated runs)');
 });
 
