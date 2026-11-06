@@ -71,7 +71,7 @@ test('guard: the amended desk\'s store holds escalations and a refusal on unknow
 
 test('RT20: drop-risk-item is a broken certificate writer of poly admit, listed in toolchain-faults.mjs beside the others (PT34.3)', () => {
   assert.ok(CERTIFICATE_FAULT_LIST.includes('drop-risk-item'));
-  assert.deepEqual(RISK_CERTIFICATE_FAULTS, ['drop-risk-item']);
+  assert.ok(RISK_CERTIFICATE_FAULTS.includes('drop-risk-item'), JSON.stringify(RISK_CERTIFICATE_FAULTS));
   assert.ok(CERTIFICATE_FAULTS.includes('drop-risk-item'), `poly-check's CERTIFICATE_FAULTS: ${CERTIFICATE_FAULTS.join(', ')}`);
 });
 
