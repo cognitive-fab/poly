@@ -36,6 +36,17 @@
 
 The two clauses not built are built: a `never` item reported with the verdict the certificate records (`poly.risk` carries it), and the person's resolution on each unknown outcome (PT34.4 item 5 defines it). The writer adds the test of `poly.risk`'s read-back with its broken certificate `drop-risk-item`, failing first (RT20), beside RT21 to RT24. The runtime's read of a non-service machine's snapshot, found while the tests were written (`riskdesk.Clerk`), is finding 35, handled after risk-tags with its own failing test.
 
+**Rulings on the open questions (owner, 2026-11-05).** On review of the code at 3a7cb122, after its serial runs passed:
+
+| Question | Ruling |
+|---|---|
+| A certificate's `file` in the report is the path given with `--certificate`, which depends on the host as `store.path` did | Dropped, from the JSON and the Markdown. A certificate is named by its digest and build id (item 9, RT25). |
+| A refusal on unknown input: counted under `refused` as well as `onUnknown`? | Confirmed. `onUnknown` marks the decisions made by the `on unknown` clause, and each is also counted as what it was (item 4, RT23). |
+| A `never` item's `vacuous` and `runtime-only` verdicts, which admission never lets into a certificate | Stated: a certified `never` is always `proved`, since admission refuses a check not run or vacuous (PT12.5). poly-ref's read-back refuses any other verdict, and the broken certificate `never-not-proved` is in the faults (RT26). |
+| The exits of `poly report risks`, untested | The writer adds the tests: 0 over a kept store fully counted, 2 when a certificate is missing or the ledger key is not trusted (RT27). |
+
+The order is that of rule 7a: this amendment alone, then the writer's tests, failing first, then the code and the kept reports made again.
+
 **The citation.** The literature is cited by its own words: Saeri et al., *Unmitigated? How are the world's largest companies responding to AI risks?*, MIT FutureTech, October 2026, Discussion.
 
 **Numbers used.** S586 is the next free ruling (S584 is on `proposal-extensions`, S585 is the tree guard's retirement). The plan's PT8.7 is PT8.6, since PT8 ended at PT8.5. `PL6506` and `PL6507` are free slots of PL65xx; the plan's `PL6508` was dropped, since a catalog pin is a toolchain fault (`catalog-unpinned`), not a diagnostic.
