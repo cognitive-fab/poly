@@ -11,7 +11,7 @@ It is a minor release, not a bug fix, for two reasons:
 - it adds a command, a `poly.json` field, two diagnostic codes and a certificate field;
 - **a certificate admitted by v1.5.1 or earlier is refused at load** (finding 35, below).
 
-**How it was built.** On `main` from v1.5.1 (`493b183c`), with the work of branches `risk-tags`, `pii-guard`, `finding-35-machine-reads`, `pt34-uncovered-per-build`, `concierge-store-erase`, `finding-36-dry-run-dates` and `finding-37-spaces` merged in. Every change followed rule 7a: the spec first, committed alone; then tests by a separate writer who had read only the spec; then the code. Three departures are named where they occur.
+**How it was built.** On `main` from v1.5.1 (`493b183c`), with the work of branches `risk-tags`, `pii-guard`, `finding-35-machine-reads`, `pt34-uncovered-per-build`, `concierge-store-erase`, `finding-36-dry-run-dates` and `finding-37-spaces` merged in. The features and findings 34 to 36 followed rule 7a: the spec first, committed alone; then tests by a separate writer who had read only the spec; then the code. Five changes did not, and each is marked **Departure** where it occurs: finding 37, DF15.5, finding 14's named script, DB3, and three test cases added to finding 36 after review.
 
 ## Upgrading: admit again
 
@@ -64,11 +64,11 @@ The `denied` event of an `escalate-once` now records `gateDecision: "escalate"` 
 ## Fixes
 
 - **Finding 35: a policy read only a certified service machine's latest snapshot** (PT8.3). The runtime answered `machine("m.M")` with the snapshot of any machine that had one instance in the store. Admission now certifies each scope's `singletons`. The gate host reads a latest snapshot only for those. Every other machine, except the emitter, is unknown for an effect, a send and an approved re-proposal alike.
-- **Finding 36: the inbox's dry run expired** (`examples/inbox/README.md`). Its recorded mail was dated October and checked against today's clock, so since 2026-11-04 every decision escalated `stale-items`. `dry-run/fixtures.json` now names `recordedAt`. The fake Google moves every `internalDate` it serves by the run's clock minus that instant. The runtime's clock stays real. Fixtures with no valid `recordedAt` are refused, and the host exits 64.
+- **Finding 36: the inbox's dry run expired** (`examples/inbox/README.md`). Its recorded mail was dated October and checked against today's clock, so since 2026-11-04 every decision escalated `stale-items`. `dry-run/fixtures.json` now names `recordedAt`. The fake Google moves every `internalDate` it serves by the run's clock minus that instant. The runtime's clock stays real. Fixtures with no valid `recordedAt` are refused, and the host exits 64. **Departure:** three test cases (a day the month lacks, an hour past the day, and `fakeGoogle` given fixtures with no `recordedAt`) were added after review, not by the separate writer (`ff3de9fb`).
 - **Finding 37: seven tests failed under a path with a space.** Each cause was in a test: a shell command line built from an unquoted path, and a README command filled with one. No shipped code builds a command line from a path. The inbox README now says to quote a path with a space. **Departure:** no separate writer; the failing tests were the existing ones.
-- **DF15.5 named `/tmp/log.txt`**, which on Windows is `\tmp` on the current drive, and `--log` refuses a folder that does not exist. The two tests now use the OS temporary folder. A test-only fix, made directly on `main`.
+- **DF15.5 named `/tmp/log.txt`**, which on Windows is `\tmp` on the current drive, and `--log` refuses a folder that does not exist. The two tests now use the OS temporary folder. **Departure:** a test-only fix, made directly on `main`, with no spec change and no separate writer.
 - **Finding 14's confinement names one script** (ruled 2026-11-06). `test/ex-accept-findings.test.mjs` allows `scripts/risk-report-examples.mjs` to use `acceptFindings`, since it runs only with the test anchors. It failed on `main` since pii-guard's A5. **Departure:** the ruling and the test change, no separate writer.
-- **DB3** (`ba69a88e`). The demo baseline's poly reference rewords the refund rule S586 added to the spec.
+- **DB3** (`ba69a88e`). The demo baseline's poly reference rewords the refund lines S586 added to the spec, so the baseline's poly arm is still given no model of its task. **Departure:** a fix to the reference, made on `main` at the owner's word after the full suite found it, with no separate writer.
 
 ## The test runs on v1.6.0
 
