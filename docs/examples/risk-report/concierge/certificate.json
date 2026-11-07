@@ -510,7 +510,7 @@
     "polygraph sam-pattern (vendored)": "2.3.0",
     "poly-ref": "0.0.0"
   },
-  "issuedAt": "2026-11-04T17:07:57.860Z",
+  "issuedAt": "2026-11-07T03:05:32.385Z",
   "buildId": "cert-eb1690537e84",
   "poly": {
     "sources": {
@@ -1427,20 +1427,20 @@
         {
           "name": "ops",
           "keyId": "key-ops",
-          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA24eMFhuYezDBEt5INMrkN+nsqwwTDAuPZbxsVe8BN7Y=\n-----END PUBLIC KEY-----"
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4Sa1vq0jXdCKqPEt8nelX+qoG61CYFXy50h183K/RX8=\n-----END PUBLIC KEY-----"
         }
       ],
       "agents": [
         {
           "name": "ci-agent",
           "keyId": "key-ci-agent",
-          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA1OQrAjzkSRIUskhU9Mn/V3y+mv37bs0s/0mQrIjkWC0=\n-----END PUBLIC KEY-----"
+          "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAsn8p/70PBDTNCLEWaWQ15GzqabDck4710QSBzL6zsoQ=\n-----END PUBLIC KEY-----"
         }
       ]
     },
     "keyringChain": {
-      "anchor": "sha256:d2d09467bbcd7f8e8e8b3a045686fff2c5897bee6a83c3f864cb4c04174f3adb",
-      "head": "sha256:d2d09467bbcd7f8e8e8b3a045686fff2c5897bee6a83c3f864cb4c04174f3adb",
+      "anchor": "sha256:8c90ddd9b3583f457483f1c7437adec5cc403847f886fd5ad3066591cafeddc3",
+      "head": "sha256:8c90ddd9b3583f457483f1c7437adec5cc403847f886fd5ad3066591cafeddc3",
       "source": "test"
     },
     "policies": [
@@ -1461,7 +1461,7 @@
           "subject": "sha256:6e21c33c25f8e23378518b0eab77e66e99c54a80584db8015c02eee7fda44600",
           "by": "key-ops",
           "at": "2026-10-06T00:00:00.000Z",
-          "sig": "qJNIrt5nRELR7UqySCcWPYCTfdMPdg2WsdNoILOJ8pyQ3IGGkjx556uNmv3Dpsxfh0DAOfDvaqlZUjIaJnFjCg=="
+          "sig": "YQr7Vo9vPkfFk456FJIsD4eOdqoucvF/qKP5BrFl8fJfkOOUuK2M3BupbmQOR0qVzOXWXOhvNY0TSYAP5AR0BQ=="
         }
       }
     ],
@@ -1616,8 +1616,8 @@
     {
       "keyId": "test-risk-report-concierge",
       "alg": "ed25519",
-      "sig": "JtyC+Tniv1QMDjaWtOv0lsJIres8OqtkzPZ4YoiOodfrDaX6Ul7Gpw89dKF0ucmvl9iR64moxX9UVIM6EcSEDw=="
+      "sig": "CiZnpGPB41Qk9a2THZ7xiS4/63XxvseDMJMUjsP5Rmqw6r4OUMyewquY7JHqgPFS/rt7BehHcK5LJbfqBdtHDg=="
     }
   ],
-  "digest": "sha256:7c90d52015f7ca0a6847d91beac78343352203ec5dcde594bfe2ba2715d0c354"
+  "digest": "sha256:6abe888dfbd25d8d9e2c19c9cf07fff34da2f73735ad0ff46d0dccb8f9f4226c"
 }
