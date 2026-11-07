@@ -23,7 +23,7 @@ refused at load: scope <scope>: the certificate lists no singletons, the service
 
 Run `poly admit` again for every project before it runs on v1.6.0. The owner ruled the refusal on 2026-11-06. Reading an old certificate the old way, or as reading no service machine, would decide on a value PT8.3 does not give.
 
-The certificates kept under `docs/examples/risk-report/` were admitted before the field existed. `poly report risks` reads them and does not load them, so the kept reports are unchanged.
+None of the four certificates kept under `docs/examples/risk-report/` records `singletons`. Each was admitted by a tree without finding 35's fix, the concierge's too: it was made again on `concierge-store-erase`, a branch cut from `main` before finding 35 was merged. `poly report risks` reads them and does not load them, so the kept reports are unchanged.
 
 ## Risk and control tags, and the risk report (S586, PT8.6, PT34)
 
@@ -66,7 +66,7 @@ The `denied` event of an `escalate-once` now records `gateDecision: "escalate"` 
 - **Finding 35: a policy read only a certified service machine's latest snapshot** (PT8.3). The runtime answered `machine("m.M")` with the snapshot of any machine that had one instance in the store. Admission now certifies each scope's `singletons`. The gate host reads a latest snapshot only for those. Every other machine, except the emitter, is unknown for an effect, a send and an approved re-proposal alike.
 - **Finding 36: the inbox's dry run expired** (`examples/inbox/README.md`). Its recorded mail was dated October and checked against today's clock, so since 2026-11-04 every decision escalated `stale-items`. `dry-run/fixtures.json` now names `recordedAt`. The fake Google moves every `internalDate` it serves by the run's clock minus that instant. The runtime's clock stays real. Fixtures with no valid `recordedAt` are refused, and the host exits 64.
 - **Finding 37: seven tests failed under a path with a space.** Each cause was in a test: a shell command line built from an unquoted path, and a README command filled with one. No shipped code builds a command line from a path. The inbox README now says to quote a path with a space. **Departure:** no separate writer; the failing tests were the existing ones.
-- **DF15.5 named `/tmp/log.txt`**, which is `C:\tmp` on Windows, and `--log` refuses a folder that does not exist. The two tests now use the OS temporary folder. A test-only fix, made directly on `main`.
+- **DF15.5 named `/tmp/log.txt`**, which on Windows is `\tmp` on the current drive, and `--log` refuses a folder that does not exist. The two tests now use the OS temporary folder. A test-only fix, made directly on `main`.
 - **Finding 14's confinement names one script** (ruled 2026-11-06). `test/ex-accept-findings.test.mjs` allows `scripts/risk-report-examples.mjs` to use `acceptFindings`, since it runs only with the test anchors. It failed on `main` since pii-guard's A5. **Departure:** the ruling and the test change, no separate writer.
 - **DB3** (`ba69a88e`). The demo baseline's poly reference rewords the refund rule S586 added to the spec.
 

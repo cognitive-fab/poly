@@ -1686,7 +1686,7 @@ test('DF15.4: stub still recognizes amount task', async () => {
 // ---- DF15.5: --log flag and openRunLog --------
 
 // The log's folder must exist (parseArgs refuses one that does not), so the path is under the
-// OS temporary folder: '/tmp' is C:\tmp on Windows, which a machine may not have (finding 37).
+// OS temporary folder: '/tmp' is \tmp on the current drive on Windows, which a machine may not have (finding 37).
 test('DF15.5: parseArgs accepts --log with a path', () => {
   const logFile = join(tmpdir(), 'log.txt');
   const r = parseArgs(['--stub-model', '--cap-usd', '5', '--log', logFile]);
