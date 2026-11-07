@@ -49,6 +49,10 @@ const show = (vs) => JSON.stringify(vs.map((b) => ({ outcome: b.outcome, reason:
 
 test('finding 35: admission writes singletons in every poly.policies entry, the service machines among its reads, sorted', { skip, timeout: 300_000 }, async () => {
   const a = await desk();
+  // The reads themselves (a guard, checked first), so the expectation below is the service machines among them and
+  // not a coincidence.
+  const reads = Object.fromEntries(a.cert.poly.policies.map((p) => [p.scope, p.reads]));
+  assert.deepEqual(reads, { f35: ['f35.Alpha', 'f35.Clerk', 'f35.Zeta'], f35own: ['f35own.Self'], f35bare: [], sa: ['f35.Alpha', 'f35.Clerk'] });
   // PT8.3: the field is part of the signed certificate, so it is read from the file the build was admitted with.
   const onDisk = JSON.parse(readFileSync(a.certificate, 'utf8'));
   const expected = { f35: ['f35.Alpha', 'f35.Zeta'], f35own: [], f35bare: [], sa: ['f35.Alpha'] };
@@ -61,11 +65,6 @@ test('finding 35: admission writes singletons in every poly.policies entry, the 
       for (const m of p.singletons) assert.ok(p.reads.includes(m), `${m} is among scope ${p.scope}'s reads`);
     }
   }
-  // The reads themselves, so the expectation above is the service machines among them and not a coincidence.
-  const reads = Object.fromEntries(a.cert.poly.policies.map((p) => [p.scope, p.reads]));
-  assert.deepEqual(reads.f35, ['f35.Alpha', 'f35.Clerk', 'f35.Zeta']);
-  assert.deepEqual(reads.f35own, ['f35own.Self']);
-  assert.deepEqual(reads.f35bare, []);
 });
 
 test('finding 35: a mail\'s rule that reads Clerk, not a service machine, is decided on unknown input though one Clerk exists', { skip, timeout: 300_000 }, async () => {
@@ -118,6 +117,8 @@ test('finding 35 (guard): a rule that reads a service machine with no instance i
     const [v] = vs;
     assert.ok(v, `the notice was proposed: ${show(vs)}`);
     assert.equal(v.outcome, 'escalated', `the rule's on unknown escalate decides: ${show(vs)}`);
+    // The escalation of a rule's unknown case names the rule, which the mail test above relies on.
+    assert.match(String(v.reason), /notice-while-alpha-open/, show(vs));
     assert.ok(!Object.hasOwn(v.singletons ?? {}, 'f35.Alpha'), show(vs));
   } finally { await rt.close(); }
 });
