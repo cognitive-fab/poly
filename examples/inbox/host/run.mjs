@@ -28,7 +28,7 @@ import { syncAccount, openTodos } from './inbox.mjs';
 import { guarded, COMPOSE, ReadOnlyRefusal } from './guard.mjs';
 import { readDigest, formatDigest } from './digest.mjs';
 import { anthropicProvider, countFailures } from './providers.mjs';
-import { loadFixtures, fakeGoogle, recordedModel } from './fixtures.mjs';
+import { loadFixtures, fakeGoogle, recordedModel, FixturesError } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..', '..');
@@ -162,7 +162,8 @@ export async function startHost(opts, io) {
   try {
     const host = guarded(rt, { drafts });
     const profile = JSON.parse(readFileSync(join(ROOT, 'std', 'credentials', 'providers', 'google.json'), 'utf8'));
-    const google = fixtures ? fakeGoogle(fixtures, profile) : null;
+    // Finding 36: the fake moves the recorded dates by the runtime's clock, the one the freshness check reads.
+    const google = fixtures ? fakeGoogle(fixtures, profile, { now: () => rt.now() }) : null;
     const http = google ? google.http : httpsTransport;
     const clientId = fixtures ? 'dry-run-client' : env(config.google.clientIdEnv, 'your OAuth client id');
     const clientSecret = fixtures ? 'dry-run-secret' : env(config.google.clientSecretEnv, 'your OAuth client secret');
@@ -388,7 +389,7 @@ export async function main(argv, io = { out: (s) => process.stdout.write(s), err
     }
     return 0;
   } catch (e) {
-    if (e instanceof HostError) { io.err(`inbox: ${e.message}\n`); return 64; }
+    if (e instanceof HostError || e instanceof FixturesError) { io.err(`inbox: ${e.message}\n`); return 64; }
     throw e;
   }
 }

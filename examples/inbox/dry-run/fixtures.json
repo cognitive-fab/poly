@@ -1,5 +1,6 @@
 {
-  "about": "The dry run's world (README.md, Run it yourself, step 9): each account's recorded Gmail exchanges, and the recorded model's answers. Synthetic mail and recorded traffic only; nothing here is a real account, and nothing leaves the machine.",
+  "about": "The dry run's world (README.md, Run it yourself, step 9): each account's recorded Gmail exchanges, and the recorded model's answers. Synthetic mail and recorded traffic only; nothing here is a real account, and nothing leaves the machine. recordedAt is the day the traffic stands for: the fake Google serves each message as old as it was then (finding 36).",
+  "recordedAt": "2026-10-11T12:00:00Z",
   "gmail": {
     "work": "../../../test/fixtures/traffic/gmail/work.json",
     "home": "../../../test/fixtures/traffic/gmail/home.json"
