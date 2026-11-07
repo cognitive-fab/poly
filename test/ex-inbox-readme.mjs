@@ -34,9 +34,14 @@ export function argumentsOf(line) {
   return [...line.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
 }
 
-/** The line with its placeholders filled; a placeholder left unfilled is an error. */
+/**
+ * The line with its placeholders filled; a placeholder left unfilled is an error. Finding 37: the line is split into its
+ * arguments first and each is filled alone, and an argument a filled path gave a space is quoted, so a repository or a
+ * temporary folder under a name with a space stays one argument, as the owner would quote it in a shell.
+ */
 export function fill(line, vars) {
-  const out = Object.entries(vars).reduce((s, [k, v]) => s.split(`<${k}>`).join(v), line);
+  const one = (arg) => Object.entries(vars).reduce((s, [k, v]) => s.split(`<${k}>`).join(v), arg);
+  const out = argumentsOf(line).map((arg) => { const v = one(arg); return /\s/.test(v) ? `"${v}"` : v; }).join(' ');
   const left = out.match(/<[A-Za-z_ ]+>/);
   if (left) throw new Error(`the README step still has the placeholder ${left[0]}: ${line}`);
   return out;
