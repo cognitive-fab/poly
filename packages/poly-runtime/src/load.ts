@@ -271,7 +271,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const kept = anchor?.policies[p.scope];
     if (kept !== undefined && sequence! < kept) throw new LoadError(`refused at load: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: its sequence ${sequence} is lower than the ${kept} the anchor keeps (S210)`);
   }
-  const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
+  // PT8.3, finding 35: a policy entry with no singletons was admitted before the list was certified. It is not read the
+  // old way (any machine with one instance) nor as listing none: either would decide on a value PT8.3 does not give.
+  for (const p of certificate.poly?.policies ?? []) {
+    if (!Array.isArray(p.singletons)) throw new LoadError(`refused at load: scope ${p.scope}: the certificate lists no singletons, the service machines its policies read (PT8.3, finding 35); it was admitted before they were certified: run poly admit again`);
+  }
+  const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, singletons: p.singletons, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
   // S173: a workflow's mapped kinds become work orders, so each must be an effect of its machine, as certified.
   const workflows: VerifiedWorkflow[] = [];
   for (const w of certificate.poly?.workflows ?? []) {

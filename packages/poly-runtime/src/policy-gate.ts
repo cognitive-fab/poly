@@ -101,7 +101,7 @@ export class PolicyGate implements Gate {
   private inflight = new Map<string, Promise<unknown>>();
   private engine: any;
 
-  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions, private readonly attributed: Set<string> = new Set(), private readonly ageRules: Set<string> = new Set()) {
+  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions, private readonly attributed: Set<string> = new Set(), private readonly ageRules: Set<string> = new Set(), private readonly singletons: Set<string> = new Set()) {
     this.engine = engine;
   }
 
@@ -115,7 +115,7 @@ export class PolicyGate implements Gate {
    * Declares each scope's certified document (refusing one Polyaxion does not serve) and opens the modules no policy
    * governs. `modules` are the program's modules; `policies` the certificate's.
    */
-  static async open(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[], view: ProgramView, opts: PolicyGateOptions = {}): Promise<PolicyGate> {
+  static async open(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[]; singletons?: string[] }[], modules: string[], view: ProgramView, opts: PolicyGateOptions = {}): Promise<PolicyGate> {
     const core = pxPackage.core;
     const open = modules.filter((m) => !policies.some((p) => core.scopeMatches(p.scope, m)));
     const stateDir = opts.stateDir ?? mkdtempSync(join(tmpdir(), 'poly-gate-'));
@@ -131,7 +131,10 @@ export class PolicyGate implements Gate {
     const attributed = new Set(modules.filter((m) => policies.some((p) => core.scopeMatches(p.scope, m) && ((p.doc.obligations ?? []) as { source?: { obligation?: string } }[]).some((o) => o.source?.obligation === '$attribution'))));
     // PS8.8: the obligations whose rule reads a claim's age, from each certified document.
     const ageRules = new Set(policies.flatMap((p) => ((p.doc.obligations ?? []) as { id?: string; when?: string; require?: string }[]).filter((o) => /action\.step\.(age|statusAge)\b/.test(`${o.when ?? ''} ${o.require ?? ''}`)).map((o) => o.id!)));
-    return new PolicyGate(pxPackage, engine, view, reads, opts, attributed, ageRules);
+    // PT8.3, finding 35: the service machines the certificate lists are the only machines read by their latest snapshot.
+    // A policy set opened for replay or for the report has none, and reads none (its view answers no singleton).
+    const singletons = new Set(policies.flatMap((p) => p.singletons ?? []));
+    return new PolicyGate(pxPackage, engine, view, reads, opts, attributed, ageRules, singletons);
   }
 
   /** S162: whether a module's trust scope requires attribution. */
@@ -189,6 +192,9 @@ export class PolicyGate implements Gate {
     const singletons: Record<string, unknown> = {};
     for (const m of this.reads.get(moduleOf(proposal.machine)) ?? []) {
       if (m === proposal.machine) { machines[m] = snapshot; continue; }
+      // PT8.3, finding 35: any other machine is unknown unless it is a certified service machine, however many
+      // instances of it the store holds.
+      if (!this.singletons.has(m)) continue;
       const s = this.view.singleton(m);
       if (s) { machines[m] = s.state; reads[s.instance] = s.seq; singletons[m] = s.state; }
     }
@@ -221,6 +227,7 @@ export class PolicyGate implements Gate {
       const singletons: Record<string, unknown> = {};
       for (const r of this.reads.get(moduleOf(m.fromMachine)) ?? []) {
         if (r === m.fromMachine) { machines[r] = m.senderState; continue; }
+        if (!this.singletons.has(r)) continue;
         const s = this.view.singleton(r);
         if (s) { machines[r] = s.state; reads[s.instance] = s.seq; singletons[r] = s.state; }
       }

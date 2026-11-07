@@ -1,0 +1,18 @@
+// Finding 35 (PT8.3, PT9.9): a send from scope sa (conformance/m5/scope-a.poly) to scope sb is proposed in sa's session,
+// and its rules read f35's Clerk (not a service machine) and Alpha (a service machine). The Clerk rule skips on unknown
+// input, so on unknown the send is allowed, and on Clerk's Idle snapshot it is denied.
+module f35_sa_policy
+
+policy f35-sends {
+  scope "sa"
+  obligation send-while-clerk-idle "No message leaves while the clerk is idle." rule {
+    when proposal.kind == "send" && machine("f35.Clerk").phase == Idle
+    require false else deny
+    on unknown skip
+  }
+  obligation send-while-alpha-closed "No message leaves while Alpha is closed." rule {
+    when proposal.kind == "send" && machine("f35.Alpha").shift == Closed
+    require false else deny
+    on unknown skip
+  }
+}

@@ -1,0 +1,146 @@
+// Finding 35 (PT8.3): the desk of test/finding35-machine-reads.test.mjs. Mail, Notice and Refund each emit one effect
+// kind. Clerk is not a service machine: it declares an effect (so a read of it is not PL6502) and the tests only create
+// it, so it stays Idle. Zeta and Alpha are service machines, declared out of name order, so that the certificate's
+// `singletons` is seen to be sorted. The machines copy test/fixtures/s586/riskdesk.poly's shapes.
+module f35
+
+enum Phase { Idle, Working, Done, Failed }
+enum Shift { Closed, Open }
+
+machine Mail {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit post(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect post(n: 0..1) {
+    kind "f35.mail"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Notice {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit pin(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect pin(n: 0..1) {
+    kind "f35.notice"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Refund {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit pay(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect pay(n: 0..1) {
+    kind "f35.refund"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+machine Clerk {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit ping(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect ping(n: 0..1) {
+    kind "f35.ping"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}
+
+service machine Zeta {
+  state { shift : Shift = Closed }
+  action Open()
+  on Open {
+    require shift == Closed else reject "open"
+    shift' = Open
+  }
+}
+
+service machine Alpha {
+  state { shift : Shift = Closed }
+  action Open()
+  on Open {
+    require shift == Closed else reject "open"
+    shift' = Open
+  }
+}
