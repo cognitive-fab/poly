@@ -1,0 +1,10 @@
+// Finding 35 (PT8.3): the rule reads no machine.
+module f35bare_policy
+
+policy f35bare-only {
+  scope "f35bare"
+  obligation no-bare "Bare never acts." rule {
+    when effect.kind == "bare.go"
+    require false else deny
+  }
+}

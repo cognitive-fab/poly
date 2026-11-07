@@ -1,0 +1,32 @@
+// Finding 35 (PT8.3): scope f35 reads Clerk (not a service machine) and Alpha and Zeta (service machines). Each rule
+// that reads Clerk gives a different outcome on Clerk's Idle snapshot than on unknown input, so the test can tell which
+// one the gate decided on.
+module f35_policy
+
+policy f35-desk {
+  scope "f35"
+  obligation mail-while-clerk-idle "No mail goes out while the clerk is idle." rule {
+    when effect.kind == "f35.mail" && machine("f35.Clerk").phase == Idle
+    require false else deny
+    on unknown escalate
+  }
+  obligation notice-while-alpha-open "No notice goes up while Alpha is open." rule {
+    when effect.kind == "f35.notice" && machine("f35.Alpha").shift == Open
+    require false else deny
+    on unknown escalate
+  }
+  obligation refund-reviewed "A person approves every refund." rule {
+    when effect.kind == "f35.refund"
+    require false else escalate
+  }
+  obligation refund-while-clerk-idle "No refund while the clerk is idle." rule {
+    when effect.kind == "f35.refund" && machine("f35.Clerk").phase == Idle
+    require false else deny
+    on unknown skip
+  }
+  obligation ping-while-zeta-open "The clerk pings nobody while Zeta is open." rule {
+    when effect.kind == "f35.ping" && machine("f35.Zeta").shift == Open
+    require false else deny
+    on unknown skip
+  }
+}

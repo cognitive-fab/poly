@@ -1,0 +1,34 @@
+// Finding 35 (PT8.3): a scope whose policy reads no machine at all, so the certificate's `singletons` for it is empty.
+module f35bare
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Bare {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Go()
+  action Worked()
+  action Gave()
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit go(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+  effect go(n: 0..1) {
+    kind "bare.go"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}

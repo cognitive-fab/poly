@@ -1,0 +1,11 @@
+// Finding 35 (PT8.3): the rule reads the emitter only. The emitting step's snapshot is Working, so the rule denies.
+module f35own_policy
+
+policy f35own-self {
+  scope "f35own"
+  obligation go-while-working "Self acts only once it has stopped working." rule {
+    when effect.kind == "own.go" && machine("f35own.Self").phase == Working
+    require false else deny
+    on unknown escalate
+  }
+}
