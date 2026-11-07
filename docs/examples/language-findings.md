@@ -112,6 +112,7 @@ Both policy-dependent findings the batch was asked to show need nothing beyond t
 - **Appeared in.** pr-reviewer (the end-to-end run of the defect, to show the policy denying the merge).
 - **Workaround.** `acceptFindings` in `test/ex-kit.mjs` checks the project and writes one signed acceptance per finding, as an owner who accepted the defect would. Each README says so.
 - **Proposed fix.** None to the rule, which is right. A `poly accept` example in the READMEs, so the step is a command and not test code (v2.0 note, no proposal).
+- **One script named (owner, 2026-11-06).** `test/ex-accept-findings.test.mjs` confines `acceptFindings` to `test/` and the documents. Since S587 A5 (`23d19437`), `scripts/risk-report-examples.mjs` imports it to admit pii-guard's defect with its finding accepted, and the test failed on main. The owner ruled that the script is named as the one exception, since it runs only as a test file does, with `test/fixtures/accept-test-anchors.mjs` and the tests' throwaway person key, and admission refuses that key's acceptance in any other process (S194). No other script, package, example or adapter may name it.
 
 ### 15. A work order spends its order cap, whatever usage it reports
 
