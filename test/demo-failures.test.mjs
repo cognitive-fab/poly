@@ -1685,9 +1685,12 @@ test('DF15.4: stub still recognizes amount task', async () => {
 
 // ---- DF15.5: --log flag and openRunLog --------
 
+// The log's folder must exist (parseArgs refuses one that does not), so the path is under the
+// OS temporary folder: '/tmp' is C:\tmp on Windows, which a machine may not have (finding 37).
 test('DF15.5: parseArgs accepts --log with a path', () => {
-  const r = parseArgs(['--stub-model', '--cap-usd', '5', '--log', '/tmp/log.txt']);
-  assert.equal(r.logFile, '/tmp/log.txt', 'logFile should be set to the path');
+  const logFile = join(tmpdir(), 'log.txt');
+  const r = parseArgs(['--stub-model', '--cap-usd', '5', '--log', logFile]);
+  assert.equal(r.logFile, logFile, 'logFile should be set to the path');
 });
 
 test('DF15.5: parseArgs refuses bare --log without a path', () => {
@@ -1699,7 +1702,7 @@ test('DF15.5: parseArgs refuses --log with another flag following', () => {
 });
 
 test('DF15.5: parseArgs refuses --log with --measure-latency', () => {
-  assert.throws(() => parseArgs(['--live', '--cap-usd', '5', '--log', '/tmp/log.txt', '--measure-latency']), LaunchRefused, '--log with --measure-latency should be refused');
+  assert.throws(() => parseArgs(['--live', '--cap-usd', '5', '--log', join(tmpdir(), 'log.txt'), '--measure-latency']), LaunchRefused, '--log with --measure-latency should be refused');
 });
 
 test('DF15.5: parseArgs without --log has no logFile key', () => {
