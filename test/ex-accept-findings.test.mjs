@@ -31,11 +31,20 @@ function mentions(name) {
   return found.sort();
 }
 
-test('acceptFindings is defined in test/ex-kit.mjs alone, and no package, script, example or adapter mentions it', () => {
+// The one named exception (finding 14, the owner's ruling of 2026-11-06): the risk report script admits pii-guard's defect
+// with its finding accepted (S587 A5). It runs only as a test file does, with the test keyring anchors, which its header says.
+const NAMED = 'scripts/risk-report-examples.mjs';
+
+test('acceptFindings is defined in test/ex-kit.mjs alone, and no package, script, example or adapter but the risk report script mentions it', () => {
   const files = mentions('acceptFindings');
   assert.ok(files.includes('test/ex-kit.mjs'));
-  const outside = files.filter((f) => !f.startsWith('test/') && !f.startsWith('docs/'));
-  assert.deepEqual(outside, [], 'nothing outside test/ and the documents names it');
+  const outside = files.filter((f) => !f.startsWith('test/') && !f.startsWith('docs/') && f !== NAMED);
+  assert.deepEqual(outside, [], 'nothing outside test/, the documents and the named script names it');
+  if (files.includes(NAMED)) {
+    const script = readFileSync(join(ROOT, NAMED), 'utf8');
+    assert.match(script, /--import \.\/test\/fixtures\/accept-test-anchors\.mjs/, 'the named script says it runs with the test anchors');
+    assert.match(script, /^import \{ acceptFindings \} from '\.\.\/test\/ex-kit\.mjs';$/m, 'the named script takes it from the kit');
+  }
   const definitions = files.filter((f) => /^export (async )?function acceptFindings/m.test(readFileSync(join(ROOT, f), 'utf8')));
   assert.deepEqual(definitions, ['test/ex-kit.mjs']);
 });
