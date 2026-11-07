@@ -129,7 +129,10 @@ test('S170: the Claude Code entries poly install prints run the poly tools and A
   const servers = JSON.parse(file.content).mcpServers;
   // The host resolves `poly` on its PATH; here it is the workspace's own bin.
   const env = { ...process.env, PATH: `${polyOnPath(`install-${process.pid}`)}${delimiter}${join(ROOT, 'node_modules', '.bin')}${delimiter}${process.env.PATH}` };
-  const launch = (s) => mcpClient(s.command, s.args, { cwd: project, env: { ...env, ...(s.env ?? {}) }, shell: process.platform === 'win32' });
+  // Finding 37: a host keeps each printed argument whole. Under the shell Windows needs for the `poly` shim, Node joins the
+  // arguments with spaces and quotes none, so an argument with a space (the project under such a folder) is quoted here.
+  const win = process.platform === 'win32';
+  const launch = (s) => mcpClient(s.command, win ? s.args.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : s.args, { cwd: project, env: { ...env, ...(s.env ?? {}) }, shell: win });
   const poly = launch(servers.poly);
   try {
     await poly.initialize();

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const figuresFile = 'docs/demo/act3-figures.json';
 const scriptFile = 'docs/demo/act3-script.md';
@@ -652,8 +652,7 @@ test('Act 3 demo: synthetic test cases', async (t) => {
 test('Act 3 demo: command line interface', async (t) => {
   await t.test('--no-live exits 0 on real files with correct output', () => {
     try {
-      const cmd = `node ${path.join(repo, checkModule)} --no-live`;
-      const result = execSync(cmd, { cwd: repo, encoding: 'utf8' });
+      const result = execFileSync(process.execPath, [path.join(repo, checkModule), '--no-live'], { cwd: repo, encoding: 'utf8' });
 
       assert(result.includes('hold'), 'output must mention figures that hold');
       assert(result.includes('not run'), 'output must mention figures not run');
@@ -666,8 +665,7 @@ test('Act 3 demo: command line interface', async (t) => {
 
   await t.test('--no-live outputs one line per figure', () => {
     try {
-      const cmd = `node ${path.join(repo, checkModule)} --no-live`;
-      const result = execSync(cmd, { cwd: repo, encoding: 'utf8' });
+      const result = execFileSync(process.execPath, [path.join(repo, checkModule), '--no-live'], { cwd: repo, encoding: 'utf8' });
       const lines = result.trim().split('\n').filter(l => l.trim());
 
       assert(lines.length >= 17, `output must have at least 17 lines (one per figure), got ${lines.length}`);
@@ -678,8 +676,7 @@ test('Act 3 demo: command line interface', async (t) => {
 
   await t.test('full command without --no-live on real files exits 0', () => {
     try {
-      const cmd = `node ${path.join(repo, checkModule)}`;
-      const result = execSync(cmd, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+      const result = execFileSync(process.execPath, [path.join(repo, checkModule)], { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
       assert(result, 'command should produce output');
     } catch (e) {
       assert.fail(`command failed: ${e.message}`);
