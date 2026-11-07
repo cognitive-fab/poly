@@ -12,7 +12,17 @@ export class FixturesError extends Error {}
 
 // Finding 36: an ISO 8601 date and time with its zone (Z or an offset). A date alone, or a time with no zone, is read by
 // Date.parse in a zone of its own choosing, so it does not name one instant and is refused.
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:(\d{2})(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** The instant `at` names, or NaN. V8's Date.parse rolls a day past the month's end over (2026-02-30 is 2 March), so the
+ * date and time are checked against the calendar first: a day that does not exist names no instant. */
+function instantOf(at) {
+  const m = typeof at === 'string' ? INSTANT.exec(at) : null;
+  if (!m) return NaN;
+  const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[7] ?? '0'].map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > new Date(Date.UTC(y, mo, 0)).getUTCDate() || h > 23 || mi > 59 || s > 59) return NaN;
+  return Date.parse(at);
+}
 
 /** The fixtures: where each account's recorded Gmail traffic is, the recorded model answers, and the day they stand for. */
 export function loadFixtures(file) {
@@ -21,13 +31,14 @@ export function loadFixtures(file) {
   const doc = JSON.parse(readFileSync(path, 'utf8'));
   // Finding 36: no default stands in for the recorded day, since any default would make the dry run's ages a guess.
   const at = doc.recordedAt;
-  if (typeof at !== 'string' || !INSTANT.test(at) || !Number.isFinite(Date.parse(at))) {
+  const recordedAt = instantOf(at);
+  if (!Number.isFinite(recordedAt)) {
     throw new FixturesError(`${path}: recordedAt must be the instant the recorded traffic stands for, an ISO 8601 date and time with its zone (README.md, The dry run); it is ${JSON.stringify(at)}`);
   }
   const read = (p) => JSON.parse(readFileSync(resolve(dir, p), 'utf8'));
   const tapes = Object.fromEntries(Object.entries(doc.gmail).map(([label, p]) => [label, read(p)]));
   const answers = read(doc.answers);
-  return { tapes, answers, passes: doc.passes ?? ['initial'], recordedAt: Date.parse(at) };
+  return { tapes, answers, passes: doc.passes ?? ['initial'], recordedAt };
 }
 
 /** A served body with every `internalDate` in it moved by `ms`, kept a string as Gmail serves it; the recorded body is not touched. */
@@ -48,6 +59,8 @@ function moved(body, ms) {
  */
 export function fakeGoogle(fixtures, profile, { now } = {}) {
   if (typeof now !== 'function') throw new TypeError('fakeGoogle needs the runtime\'s clock, { now }');
+  // Fixtures not read by loadFixtures could lack the recorded day; moving by NaN would serve "NaN" for every date.
+  if (!Number.isFinite(fixtures.recordedAt)) throw new FixturesError('fakeGoogle needs fixtures with recordedAt, as loadFixtures reads them');
   const shift = now() - fixtures.recordedAt;
   const left = Object.entries(fixtures.tapes).flatMap(([label, t]) => fixtures.passes.flatMap((p) => (t[p] ?? []).map((e) => ({ ...e, label, used: false }))));
   const tokenOf = new Map();

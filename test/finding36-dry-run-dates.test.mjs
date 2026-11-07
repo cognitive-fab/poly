@@ -171,6 +171,9 @@ const REFUSED = [
   ['a string that is not a date', 'yesterday'],
   ['milliseconds since the epoch, not an ISO 8601 string', R],
   ['an empty string', ''],
+  // Added after the polywatch review of the code, not by the writer: V8's Date.parse rolls these over to another day.
+  ['a day the month does not have', '2026-02-30T12:00:00Z'],
+  ['an hour past the day', '2026-10-11T24:30:00Z'],
 ];
 for (const [what, value] of REFUSED) {
   test(`finding 36: fixtures with ${what} are refused when read, naming recordedAt`, () => {
@@ -211,4 +214,12 @@ test('finding 36: the dry run\'s own fixtures, loaded and served, move the initi
   const dated = served.filter((s) => typeof s.recorded?.internalDate === 'string');
   assert.equal(dated.length, 4, 'two messages per account in the initial pass');
   for (const s of dated) assert.equal(s.body.internalDate, String(Number(s.recorded.internalDate) + (N - R)), `${s.label} ${s.url}`);
+});
+
+// Added after the polywatch review of the code, not by the writer: fakeGoogle is exported, and fixtures not read by
+// loadFixtures could lack the recorded day, which would serve every date as "NaN".
+test('finding 36: fakeGoogle refuses fixtures with no recordedAt rather than moving the dates by NaN', () => {
+  const fixtures = loadFixtures(fixturesFile('2026-10-11T12:00:00Z'));
+  delete fixtures.recordedAt;
+  assert.throws(() => fakeGoogle(fixtures, PROFILE, { now: () => Date.parse('2026-11-06T12:00:00Z') }), /recordedAt/);
 });
