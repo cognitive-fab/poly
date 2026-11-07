@@ -252,6 +252,9 @@ async function concierge() {
     await settle();
     await rt.approve(await approvalFor(rt, esc));
     await settle();
+    // PT34, as pii-guard's day does (S205): every body and address is erased, so the kept store holds digests only. The
+    // traffic is synthetic, and a kept store should still never show what a real day's would.
+    for (const { digest } of rt.store.db.prepare('SELECT digest FROM poly_erasable ORDER BY digest').all()) await rt.erase(digest);
     await rt.signHeads();
     await rt.publishAnchor({ from: 0, to: clock.now() + 1 });
   } finally { await rt.close(); }

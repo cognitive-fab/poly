@@ -7,7 +7,7 @@ Risk domains and subdomains: MIT AI Risk Repository, Domain Taxonomy, Version 4 
 - Period: 2026-09-21 to 2026-09-21 (the first and last day of the counted events, UTC)
 - Runs: 9 with a gate record; 9 counted, 0 not verified, 0 with no certificate identified, 0 with two
 - Keys trusted: test-risk-report-concierge, test-risk-report-concierge-ledger
-- Certificate of build cert-eb1690537e84: sha256:7c90d52015f7ca0a6847d91beac78343352203ec5dcde594bfe2ba2715d0c354, signed by test-risk-report-concierge; 9 run(s) matched
+- Certificate of build cert-eb1690537e84: sha256:6abe888dfbd25d8d9e2c19c9cf07fff34da2f73735ad0ff46d0dccb8f9f4226c, signed by test-risk-report-concierge; 9 run(s) matched
 - Catalog iso: ISO/IEC 42001:2023, sha256:21a639a86dac23f5e7e3c347a57166e81cc2556d6374f62d6e75fca00351d47f
 - Catalog mit: Version 4 (2025-12-04), sha256:503c636b68d4ef49c8abe6b1c7af71a4e344d9155adaf7ad396c34b42d4a5c1b
 - Catalog nist: AI RMF 1.0 (NIST AI 100-1, January 2023), sha256:a811732633116a5d4ef0648befe26d5f18d8b66441236d2e80f12cfe039c67dc
