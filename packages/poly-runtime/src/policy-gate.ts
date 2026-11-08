@@ -129,6 +129,8 @@ export class PolicyGate implements Gate {
       }
     } catch (e) {
       try { engine.close?.(); } catch { /* the refusal is the error reported */ }
+      // A folder this call made for itself is removed with the engine; one the caller gave is the caller's.
+      if (!opts.stateDir) rmSync(stateDir, { recursive: true, force: true });
       throw e;
     }
     const reads = new Map<string, string[]>();
