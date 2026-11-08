@@ -80,7 +80,7 @@ Both groups ran through the suite's commands on Node 24.12.0, each whatever the 
   - Both failures are the box's: its worktree has no `experiments/` submodule. `test/after/m3-isolation.test.mjs` cannot import `experiments/m3/lib/task.mjs`, and `test/after/account-independence.test.mjs` fails on the six M3 files that do the same.
   - Run on the laptop at `b3dc18b5`, both pass: `m3-isolation` 5 of 5, `account-independence` 1 of 1, each of its two child runs 31 of 31.
   - The three tests closest to their bounds passed: DF19 item 6 in 169 s and item 9 in 174 s (bound 600 s), and DF27 item 3 by hand in 344 s (bound 1,800 s).
-- **A first after group that is not counted.** On the laptop at `88d36679`, the after group ran overnight while the machine was short of memory. DF27 item 3 reached its 30-minute bound, and DF19 items 6 and 9 their 600 s bound. It was stopped before its end, and run again on the box. Since this release, the full suite runs on the box.
+- **A first after group that is not counted.** On the laptop at `88d36679`, the after group ran overnight while the machine was short of memory. DF27 item 3 reached its 30-minute bound, and DF19 items 6 and 9 their 600 s bound. It was stopped before its end, and run again on the box. From the next release on, both groups of the suite run on the box.
 
 ## Known limits
 
