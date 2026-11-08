@@ -53,6 +53,14 @@ The order is that of rule 7a: this amendment alone, then the writer's tests, fai
 
 **Order of work (rule 7a).** This ruling and the specification, committed alone; then the catalogs and their provenance; then the tests, by a separate writer on the session's model who has read only the specification and the catalogs, failing first; then the code. Only the new test files and the files the change touches are run; the full suite only at the owner's word, with nothing else heavy on the machine.
 
+## A Slack post's provider id in a kept journal (owner, 2026-11-07)
+
+A kept store holds no body and no address (PT34). The concierge's kept journal still holds one trace of an address. Slack builds a post's provider id from the channel's id and a timestamp (`C123ABC456:1790000123.000100`), and the journal records it as the receipt of the effect. It is in clear, while every recipient is a keyed digest. Erasure (S205) cannot reach it, since it is a record of the effect, not a body.
+
+**Ruled: accepted for now.** A Slack channel id names a workspace's internal channel, not a person. In the kept example it is a made-up channel from the recorded traffic (`test/fixtures/traffic/slack/`). The risk report's README names it as the one trace left.
+
+**Reopened if** a bot posts where a channel names a person, such as a direct message. Recording the provider id as a keyed digest would then be a spec change. Before it, the readers of the raw id would be checked, for example a lookup of a post whose outcome is unknown.
+
 ## Conclusion
 
 The tags are metadata that a person signs and the engine ignores, the report counts what each rule did from a verified journal, and what the journal cannot say (which rules let a proposal through, which certificate a run used) is stated rather than inferred. The order of work keeps the specification ahead of the tests and the tests ahead of the code.

@@ -26,7 +26,7 @@ node packages/poly-check/dist/src/cli.js report risks --db docs/examples/risk-re
 
 ## Conclusion
 
-The three folders hold everything the report needs and no private key. No store holds a body or an address: the airline desk's stored none, and the concierge's and the pii-guard store erased their own (S205) and were vacuumed, so not even a deleted page keeps one (PT34). One trace of an address is left in the concierge's journal: the Slack post's provider id, which Slack builds from the staff channel's id and a timestamp, is a record of the effect, not a body, and nothing marks it erasable. The report made from them says, in its first line, that its counts are evidence the rules were applied to the decisions recorded, not proof that a risk was reduced.
+The three folders hold everything the report needs and no private key. No store holds a body or an address: the airline desk's stored none, and the concierge's and the pii-guard store erased their own (S205) and were vacuumed, so not even a deleted page keeps one (PT34). One trace of an address is left in the concierge's journal: the Slack post's provider id, which Slack builds from the staff channel's id and a timestamp, is a record of the effect, not a body, and nothing marks it erasable. The owner accepted it for now on 2026-11-07 (`docs/history/decisions-risk.md`). The report made from them says, in its first line, that its counts are evidence the rules were applied to the decisions recorded, not proof that a risk was reduced.
 
 ## Glossary
 
