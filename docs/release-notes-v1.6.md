@@ -72,7 +72,15 @@ The `denied` event of an `escalate-once` now records `gateDecision: "escalate"` 
 
 ## The test runs on v1.6.0
 
-To be filled in from the release run on the laptop, with nothing else heavy running, on Node 24.12.0: the main group, then the serial after group, each run whatever the other gave.
+Both groups ran through the suite's commands on Node 24.12.0, each whatever the other gave (`npm test` stops after a failed group). Between the two commits run, only these notes and one comment in `test/demo-failures.test.mjs` changed.
+
+- **The main group, on the laptop at `88d36679`:** 4,545 tests, 4,536 pass, 1 fail, 4 skipped, 4 to-do (`M4c` and its siblings, waiting on E1). The failure is `(c2)` of `test/demo-driver-hygiene.test.mjs`, the part of finding 33 left open, as on v1.3.1 to v1.5.1.
+- **The serial after group, on the AMD box at `b3dc18b5`:** 203 tests, 200 pass, 2 fail, 1 skipped, in 4,794 s, with 3 real demo admissions.
+  - The skip is PG12, pii-guard's real adapter: edgepii is not installed on the box.
+  - Both failures are the box's: its worktree has no `experiments/` submodule. `test/after/m3-isolation.test.mjs` cannot import `experiments/m3/lib/task.mjs`, and `test/after/account-independence.test.mjs` fails on the six M3 files that do the same.
+  - Run on the laptop at `b3dc18b5`, both pass: `m3-isolation` 5 of 5, `account-independence` 1 of 1, each of its two child runs 31 of 31.
+  - The three tests closest to their bounds passed: DF19 item 6 in 169 s and item 9 in 174 s (bound 600 s), and DF27 item 3 by hand in 344 s (bound 1,800 s).
+- **A first after group that is not counted.** On the laptop at `88d36679`, the after group ran overnight while the machine was short of memory. DF27 item 3 reached its 30-minute bound, and DF19 items 6 and 9 their 600 s bound. It was stopped before its end, and run again on the box. Since this release, the full suite runs on the box.
 
 ## Known limits
 
@@ -90,7 +98,7 @@ The limits of v1.5.1 hold (`docs/release-notes-v1.5.1.md`). New, or still open:
 
 ## Conclusion
 
-v1.6.0 lets a policy say what it is for, in the terms of three published catalogs. It also gives a reader the counts of what each rule did, read from a journal they can verify, worded so the counts are not taken for more than they are. The same release closes a gap between PT8.3 and the runtime: a policy now reads only the machines the semantics lets it read. The price is that every project is admitted again. The inbox's dry run works again, whatever the date. The remaining open items are listed above, and the tag waits for the release run and the owner.
+v1.6.0 lets a policy say what it is for, in the terms of three published catalogs. It also gives a reader the counts of what each rule did, read from a journal they can verify, worded so the counts are not taken for more than they are. The same release closes a gap between PT8.3 and the runtime: a policy now reads only the machines the semantics lets it read. The price is that every project is admitted again. The inbox's dry run works again, whatever the date. The release run found one failure of the code, finding 33's known `(c2)`; the box's two were of its setup and pass on the laptop. The remaining open items are listed above, and the tag waits for the owner.
 
 ## Glossary
 
