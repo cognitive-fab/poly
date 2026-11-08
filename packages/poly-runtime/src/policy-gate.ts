@@ -14,7 +14,7 @@
 // The engine refusing, hanging, answering `unavailable` or failing to journal is an outage: the host throws, and the
 // worker holds the intent (PT9.5, review C6). Nothing here ever allows on its own.
 import { join } from 'node:path';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { actionOf, decisionOfReject } from './policy-engine.js';
@@ -342,13 +342,28 @@ export class PolicyGate implements Gate {
    * from a fresh engine opened as replay opens one. `poly report risks` matches a run's recorded policySet against it.
    */
   static async policySets(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[]): Promise<Record<string, string>> {
-    const none: ProgramView = { singleton: () => null, decisions: () => ({}), nextSseq: () => 0 };
-    const fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:' });
-    const out: Record<string, string> = {};
-    try {
+    return PolicyGate.withFresh(pxPackage, policies, modules, async (fresh) => {
+      const out: Record<string, string> = {};
       for (const m of modules) out[m] = String((await fresh.engine.begin({ run_id: `poly-report:${m}`, scope: m })).policy_set);
-    } finally { fresh.engine.close?.(); }
-    return out;
+      return out;
+    });
+  }
+
+  /**
+   * Finding 38: a gate opened for one computation (the report's policy sets, a session replay) in a folder of its own,
+   * closed and removed when the computation ends, whatever it ended with. Each left a poly-gate-* folder behind before.
+   */
+  private static async withFresh<T>(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[], fn: (fresh: PolicyGate) => Promise<T>): Promise<T> {
+    const none: ProgramView = { singleton: () => null, decisions: () => ({}), nextSseq: () => 0 };
+    const stateDir = mkdtempSync(join(tmpdir(), 'poly-gate-'));
+    let fresh: PolicyGate | undefined;
+    try {
+      fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:', stateDir });
+      return await fn(fresh);
+    } finally {
+      fresh?.engine.close?.();
+      rmSync(stateDir, { recursive: true, force: true });
+    }
   }
 
   /**
@@ -357,45 +372,45 @@ export class PolicyGate implements Gate {
    * replay, listed as not run, since Σ after it cannot be known.
    */
   static async replaySessions(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[], events: SessionEvent[], counters: Record<string, number> = {}): Promise<SessionReplay[]> {
-    const none: ProgramView = { singleton: () => null, decisions: () => ({}), nextSseq: () => 0 };
-    const fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:' });
-    const sessions = [...new Set([...events.map((e) => e.session), ...Object.keys(counters)])].sort();
-    const out: SessionReplay[] = [];
-    for (const session of sessions) {
-      const r: SessionReplay = { session, proposals: 0, settles: 0, diagnostics: [], notRun: [] };
-      out.push(r);
-      const list = events.filter((e) => e.session === session).sort((x, y) => x.sseq - y.sseq);
-      let expected = 1;
-      let gap = false;
-      for (const e of list) {
-        if (e.sseq !== expected) { gap = true; r.notRun.push(`${session}: sseq ${expected} is missing from the ledger, so the session is not replayed past it (${list.length - r.proposals - r.settles} event(s) not run)`); break; }
-        expected++;
-        const scope = session.slice('scope:'.length);
-        if (e.kind === 'settle') {
-          const before = fresh.sigma(session);
-          await fresh.engine.settle({ run_id: session, scope, action: e.action, observed: e.observed ?? {} });
-          r.settles++;
-          // Review C4: a settle's Σ before and after, when recorded.
-          if (e.stateBefore !== undefined && e.stateBefore !== before) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the settle was ${e.stateBefore}, and the session's replay has ${before}` });
-          if (e.stateAfter !== undefined && e.stateAfter !== fresh.sigma(session)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the settle was ${e.stateAfter}, and the session's replay has ${fresh.sigma(session)}` });
-          continue;
+    return PolicyGate.withFresh(pxPackage, policies, modules, async (fresh) => {
+      const sessions = [...new Set([...events.map((e) => e.session), ...Object.keys(counters)])].sort();
+      const out: SessionReplay[] = [];
+      for (const session of sessions) {
+        const r: SessionReplay = { session, proposals: 0, settles: 0, diagnostics: [], notRun: [] };
+        out.push(r);
+        const list = events.filter((e) => e.session === session).sort((x, y) => x.sseq - y.sseq);
+        let expected = 1;
+        let gap = false;
+        for (const e of list) {
+          if (e.sseq !== expected) { gap = true; r.notRun.push(`${session}: sseq ${expected} is missing from the ledger, so the session is not replayed past it (${list.length - r.proposals - r.settles} event(s) not run)`); break; }
+          expected++;
+          const scope = session.slice('scope:'.length);
+          if (e.kind === 'settle') {
+            const before = fresh.sigma(session);
+            await fresh.engine.settle({ run_id: session, scope, action: e.action, observed: e.observed ?? {} });
+            r.settles++;
+            // Review C4: a settle's Σ before and after, when recorded.
+            if (e.stateBefore !== undefined && e.stateBefore !== before) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the settle was ${e.stateBefore}, and the session's replay has ${before}` });
+            if (e.stateAfter !== undefined && e.stateAfter !== fresh.sigma(session)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the settle was ${e.stateAfter}, and the session's replay has ${fresh.sigma(session)}` });
+            continue;
+          }
+          // An `unavailable` answer moved nothing, so it is not re-applied (PT9.5).
+          if (e.engineClass === 'unavailable') { r.proposals++; continue; }
+          const { v, decision } = await fresh.decideAction(session, scope, e.action, e.intent, e.approvedBy ? { by: e.approvedBy } : undefined);
+          r.proposals++;
+          if (e.gateDecision === 'held' || e.gateDecision === 'late') {
+            if (v.decision !== e.engineDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the engine answered ${e.engineDecision} when the intent was held, and the session's replay answers ${v.decision}` });
+          } else if (decision !== e.gateDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the gate decided ${e.gateDecision}, and the session's replay decides ${decision}` });
+          if ((v.state_before ?? null) !== (e.stateBefore ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the decision was ${e.stateBefore}, and the session's replay has ${v.state_before}` });
+          if (e.stateAfter !== undefined && (v.state_after ?? null) !== (e.stateAfter ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the decision was ${e.stateAfter}, and the session's replay has ${v.state_after}` });
         }
-        // An `unavailable` answer moved nothing, so it is not re-applied (PT9.5).
-        if (e.engineClass === 'unavailable') { r.proposals++; continue; }
-        const { v, decision } = await fresh.decideAction(session, scope, e.action, e.intent, e.approvedBy ? { by: e.approvedBy } : undefined);
-        r.proposals++;
-        if (e.gateDecision === 'held' || e.gateDecision === 'late') {
-          if (v.decision !== e.engineDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the engine answered ${e.engineDecision} when the intent was held, and the session's replay answers ${v.decision}` });
-        } else if (decision !== e.gateDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the gate decided ${e.gateDecision}, and the session's replay decides ${decision}` });
-        if ((v.state_before ?? null) !== (e.stateBefore ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the decision was ${e.stateBefore}, and the session's replay has ${v.state_before}` });
-        if (e.stateAfter !== undefined && (v.state_after ?? null) !== (e.stateAfter ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the decision was ${e.stateAfter}, and the session's replay has ${v.state_after}` });
+        // Review C4: sequence numbers the session assigned past its last recorded event (a decision whose event was never
+        // written) are a gap too, found against the session's counter.
+        const last = expected - 1;
+        if (!gap && (counters[session] ?? 0) > last) r.notRun.push(`${session}: sseq ${last + 1}${counters[session] > last + 1 ? ` to ${counters[session]}` : ''} has no event in the ledger, so the session's Σ after sseq ${last} is not known`);
       }
-      // Review C4: sequence numbers the session assigned past its last recorded event (a decision whose event was never
-      // written) are a gap too, found against the session's counter.
-      const last = expected - 1;
-      if (!gap && (counters[session] ?? 0) > last) r.notRun.push(`${session}: sseq ${last + 1}${counters[session] > last + 1 ? ` to ${counters[session]}` : ''} has no event in the ledger, so the session's Σ after sseq ${last} is not known`);
-    }
-    return out;
+      return out;
+    });
   }
 
   /** AC4: the session's notary receipts, signed by the engine, and their verification. */
