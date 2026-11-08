@@ -121,9 +121,15 @@ export class PolicyGate implements Gate {
     const stateDir = opts.stateDir ?? mkdtempSync(join(tmpdir(), 'poly-gate-'));
     const raw = new pxPackage.Polyaxion({ store: opts.store ?? ':memory:', openScopes: open, stateDir, compiledDir: join(stateDir, 'compiled') });
     const engine = opts.wrap ? opts.wrap(raw) : raw;
-    for (const p of policies) {
-      const d = await engine.declare({ policy: p.doc });
-      if (!d.servable) throw new Error(`the gate engine does not serve the policies of scope ${p.scope}`);
+    // Finding 38: an engine that a refused declaration leaves unused is closed before the refusal is thrown.
+    try {
+      for (const p of policies) {
+        const d = await engine.declare({ policy: p.doc });
+        if (!d.servable) throw new Error(`the gate engine does not serve the policies of scope ${p.scope}`);
+      }
+    } catch (e) {
+      try { engine.close?.(); } catch { /* the refusal is the error reported */ }
+      throw e;
     }
     const reads = new Map<string, string[]>();
     for (const m of modules) reads.set(m, [...new Set(policies.filter((p) => core.scopeMatches(p.scope, m)).flatMap((p) => p.reads))].sort());
@@ -361,8 +367,7 @@ export class PolicyGate implements Gate {
       fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:', stateDir });
       return await fn(fresh);
     } finally {
-      fresh?.engine.close?.();
-      rmSync(stateDir, { recursive: true, force: true });
+      try { fresh?.engine.close?.(); } finally { rmSync(stateDir, { recursive: true, force: true }); }
     }
   }
 
