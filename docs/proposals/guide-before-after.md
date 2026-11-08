@@ -2,7 +2,7 @@
 
 *Cognitive Fab · November 2026 · on branch `guide-before-after`, cut from `main` at `438cacac` (v1.6.0 and the Slack ruling) · from PT14, PT12.5, the Claude Code adapter's skill (`adapters/claude-code/skills/poly/SKILL.md`), the concierge (`examples/concierge`, DF19) and the demo baseline (`demo/baseline`)*
 
-Status: a plan for the owner's review. Nothing is specified in the spec documents, no test is written and no code is changed. The owner chose on 2026-11-08 what the before is (a TypeScript program), which bug it shows (a refund issued twice) and what `poly guide` does (it prints a guide). When the owner approves this plan, sections 2 and 3 become the spec commit of rule 7a, committed alone.
+Status: **approved by the owner on 2026-11-08, with the defaults of section 6** (`examples/refund-twice`; TypeScript run by Node 24 with no build step; `packages/poly-check/GUIDE.md`; nothing else changed on the README's first screen). The spec is PT14's `poly guide` as built and `docs/examples/refund-twice.md`. The owner chose on 2026-11-08 what the before is (a TypeScript program), which bug it shows (a refund issued twice) and what `poly guide` does (it prints a guide). When the owner approves this plan, sections 2 and 3 become the spec commit of rule 7a, committed alone.
 
 ## 1. Why, and what was read
 
@@ -26,7 +26,7 @@ poly has the parts and does not show them that way:
   4. Where the rules live: invariants and `never` statements in the machine, path properties, configurations, and policies in `*.policy.poly`. A policy a person signed is the person's: an agent never edits it to make a check pass.
   5. What never to do, from the skill: accept a finding, approve an escalation or admit on a person's behalf; weaken a property or a domain.
   6. Before committing: `poly check` on the project, and nothing but `CLEAN` is committed as done.
-  7. Where to read more: `docs/04-semantics.md`, `docs/03-technical-spec.md`, the examples, `poly explain <code>`.
+  7. Where to read more: `docs/04-semantics.md`, `docs/03-technical-spec.md` and the examples. (`poly explain` is in PT14's table and not built, so the guide does not name it.)
 - **What the guide names is real.** Every command it names is a command of the registry (`packages/poly-check/src/commands.ts`), and every verdict and diagnostic code it names is one the toolchain defines. A test holds each to that.
 - **The lines an owner pastes.** The README, under a new section *Using poly with a coding agent*, gives the block to put in `AGENTS.md` or `CLAUDE.md`, word for word:
 
@@ -53,7 +53,7 @@ poly has the parts and does not show them that way:
 **The after: `examples/refund-twice/after/`, poly.**
 
 - `refunds.poly`: one module, one machine `Desk` per order, cut down from the concierge's Desk to the refund alone: a request, the refund effect, its completion, and `refund: Refund = None | Unknown | Issued`. It states the rule once: `never no-reissue: emit refund while refund != None`.
-- `refunds-unguarded.poly`: the same mistake as the before, written in poly. The request emits the refund without consulting `refund`. `poly check` reports `FINDINGS` with `PL3002 no-reissue` and a witness: request, refund emitted, completion, a second request, the refund emitted again. The README prints the witness as `poly check` prints it.
+- `refunds-unguarded.poly`: the same mistake as the before, written in poly. The request emits the refund without consulting `refund`. `poly check` reports `FINDINGS` with `PL3002 no-reissue` and a witness: a request that pays, and a second request that pays again. (Drafted on 2026-11-08 before the spec: the shortest witness is two `Ask` steps, the second while the first refund is still pending, and the same step is also `PL4002`.) The README prints the witness as `poly check` prints it.
 - `refunds.poly` guards the emit with `if refund == None`, as the concierge does, and answers the second request without paying. `poly check` reports `CLEAN`, and the property is not vacuous.
 - The module is small enough to check in seconds, and its instance is printed with its verdict (PT12.3a).
 
