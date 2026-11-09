@@ -98,7 +98,7 @@
     },
     "keywords-anywhere": {
       "name": "keyword.other.poly",
-      "match": "(?<![\\w$.'-])(?:about|adjudicate|after|all|allow|and|as|attempts|band|base|budget|by|calibration|cancel|cap|check|class|complete|compose|decide|deny|derived|detached|disclosed|documents|else|emit|envelope|escalate|eventually|exhausted|exists|failed|fair|for|forall|header|idempotent|if|in|inbound|input|instances|internal|invariant|leads|let|limit|match|matches|max|migrate|nature|never|new|observed|on|or|owned|parent|per|pkce|prices|property|provider|recalled|records|reject|remember|require|requires|retrieve|retry|rule|runs|send|signal|skip|spawn|spawned|stale|starts|strict|terminal|timeout|to|tokens|transit|under|unknown|warn|when|where|while|why|window|with)(?![\\w$']|-\\w)(?!\\()"
+      "match": "(?<![\\w$.'-])(?:about|adjudicate|after|all|allow|and|as|attempts|band|base|budget|by|calibration|cancel|cap|check|class|complete|compose|decide|deny|derived|detached|disclosed|documents|else|emit|envelope|escalate|eventually|exhausted|exists|failed|fair|for|forall|header|idempotent|if|implements|in|inbound|input|instances|internal|invariant|leads|let|limit|match|matches|max|migrate|mitigates|nature|never|new|observed|on|or|owned|parent|per|pkce|prices|property|provider|recalled|records|reject|remember|require|requires|retrieve|retry|rule|runs|send|signal|skip|spawn|spawned|stale|starts|strict|terminal|timeout|to|tokens|transit|under|unknown|warn|when|where|while|why|window|with)(?![\\w$']|-\\w)(?!\\()"
     },
     "types": {
       "name": "support.type.poly",
