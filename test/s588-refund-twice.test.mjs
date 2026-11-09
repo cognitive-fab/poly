@@ -26,8 +26,8 @@
 //   Markdown link whose target contains `demo/baseline`. "Written by hand", the instance and the `never` line are
 //   matched anywhere in the README; "dashboard" and "stand-in" within `## What is not checked`. The headings are the
 //   six of *The example's README*, with `## Glossary` last and `## Conclusion` before it; other headings are allowed.
-// - Test 8: the status line naming v1.6.0 and linking docs/release-notes-v1.6.md is checked with "No code yet": the
-//   README holds `v1.6.0` and a Markdown link whose target is docs/release-notes-v1.6.md. The link to the example is a
+// - Test 8: "No code yet" is gone, and (amendment 2, changed in the session for v1.7.0) a status line names a release
+//   `vX.Y.Z` and links release notes in docs/ that exist. The link to the example is a
 //   Markdown link to examples/refund-twice/README.md inside ## Before and after.
 // - Test 10: the new text files are every file under examples/refund-twice (no node_modules, no .poly folder); the
 //   page's eight files must exist.
@@ -299,7 +299,11 @@ test('RB3, test 8: poly\'s README holds the four lines under ## Using poly with 
   assert.ok(before.at < hello.at, '## Before and after comes before ## Hello, world');
   assert.match(before.body, /\]\((?:\.\/)?examples\/refund-twice\/README\.md\)/, 'it links to the example\'s README');
   assert.ok(!readme.includes('No code yet'), 'the README no longer says "No code yet"');
-  assert.ok(lines.some((l) => l.includes('v1.6.0') && /\]\((?:\.\/)?docs\/release-notes-v1\.6\.md\)/.test(l)), 'a status line names v1.6.0 and links docs/release-notes-v1.6.md');
+  // Amendment 2 (v1.7.0): the status line names the current release and links its notes, a file that exists in docs/.
+  const status = lines.find((l) => /\bv\d+\.\d+\.\d+\b/.test(l) && /\]\((?:\.\/)?docs\/release-notes-v[\d.]+\.md\)/.test(l));
+  assert.ok(status, 'a status line names a release and links its release notes');
+  const notes = /\]\((?:\.\/)?(docs\/release-notes-v[\d.]+\.md)\)/.exec(status)[1];
+  assert.ok(existsSync(join(ROOT, notes)), `${notes} exists`);
 });
 
 test('RB3, test 9: examples/README.md lists refund-twice/', () => {

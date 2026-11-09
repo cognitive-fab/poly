@@ -79,7 +79,7 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 
 ## poly's README
 
-- The status line (`> Status: specification, draft v0.6 (after five reviews). No code yet.`) is replaced by one naming the current release, v1.6.0, and pointing to `docs/release-notes-v1.6.md`.
+- The status line (`> Status: specification, draft v0.6 (after five reviews). No code yet.`) is replaced by one naming the current release (v1.6.0 when this page was written) and linking its release notes, `docs/release-notes-v<release>.md`, a file that exists (amendment 2).
 - A section `## Before and after`, before `## Hello, world`, says in a few sentences what the example shows and links to `examples/refund-twice/README.md`.
 - The section `## Using poly with a coding agent` of `poly guide` as built (PT14).
 - The examples index (`examples/README.md`) lists `refund-twice/`.
@@ -93,7 +93,7 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 5. `poly check after/refunds-unguarded.poly` reports `FINDINGS` with exit 1, with `PL3002` naming `no-reissue` and a witness of `Ask` steps in which at least two emit `payments.refund`, and with `PL4002` on `Ask`.
 6. The two `.poly` files are the same text except for their leading comment blocks and their `on Ask` handlers, as *The after* defines them.
 7. The example's README holds the `PL3002` block exactly as `poly check refunds-unguarded.poly` prints it, run from `after/` (compared, so that a change to the check's output fails the test); the `verdict:` line exactly as `poly check refunds.poly` prints it, run from `after/`; the `never` line; the `on Ask` handler of each file as it is in the file; the words "written by hand"; a link to `demo/baseline`; the instance `Ask.amount ∈ 0..500 at {0}`; and the words "dashboard" and "stand-in" under `## What is not checked`. Its headings are those of *The example's README*.
-8. poly's README holds the four lines of `poly guide` as built word for word, under `## Using poly with a coding agent`; has `## Before and after` before `## Hello, world`, linking to the example; no longer holds "No code yet"; and its status line names v1.6.0 and links to `docs/release-notes-v1.6.md`.
+8. poly's README holds the four lines of `poly guide` as built word for word, under `## Using poly with a coding agent`; has `## Before and after` before `## Hello, world`, linking to the example; no longer holds "No code yet"; and its status line names a release `v<major>.<minor>.<patch>` and links its release notes, a file of `docs/` (amendment 2).
 9. `examples/README.md` lists `refund-twice/`.
 10. House style in every new text file: no em dash, and none of the words the house style bans.
 
@@ -106,6 +106,10 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 ## Amendment 1 (2026-11-08, before any code)
 
 From the separate writer's report and the review of this page. The README's headings are those every example README has, which `test/ex-readmes.test.mjs` holds; the coverage sentence names the amount's cut; the files' sameness is defined to the character; `reply` is set back to `Silent` by a request that pays; nothing in the example reaches the network, the after only naming Stripe's address as a declared target; test 7 holds every content the README section asks for, and test 8 the status line. The guide's command needs its published schemas (`schemas/guide.input.json` and `schemas/guide.output.json`, made by `scripts/publish-schemas.mjs`) and a place in PT14's registry paragraph, as every registry command has.
+
+## Amendment 2 (2026-11-08, for v1.7.0)
+
+The status line names the current release, so it changes at every release. Test 8 named v1.6.0 and its notes; it now holds that the status line names a release and links release notes that exist in `docs/`, so the README can move with each release without changing the test. **Departure from rule 7a:** the test was changed in the session, not by the separate writer.
 
 ## Conclusion
 
