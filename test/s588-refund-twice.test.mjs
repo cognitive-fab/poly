@@ -304,8 +304,9 @@ test('RB3, test 8: poly\'s README holds the four lines under ## Using poly with 
   assert.ok(status, 'a status line names a release and links its release notes');
   const notes = /\]\((?:\.\/)?(docs\/release-notes-v[\d.]+\.md)\)/.exec(status)[1];
   assert.ok(existsSync(join(ROOT, notes)), `${notes} exists`);
-  // Polywatch: the release named and the notes linked agree (vX.Y.0's notes are release-notes-vX.Y.md), and they are the
-  // newest notes in docs/, so a line left on an older release fails.
+  // Polywatch: the release named and the notes linked agree (vX.Y.0's notes may be named release-notes-vX.Y.md, as v1.6
+  // and v1.7 are, or release-notes-vX.Y.0.md; the file must exist either way), and they are the newest notes in docs/, so
+  // a line left on an older release fails.
   const named = /\bv(\d+)\.(\d+)\.(\d+)\b/.exec(status).slice(1).map(Number);
   const versionOf = (f) => { const p = /release-notes-v(\d+)\.(\d+)(?:\.(\d+))?\.md$/.exec(f); return p ? [Number(p[1]), Number(p[2]), Number(p[3] ?? 0)] : null; };
   assert.deepEqual(versionOf(notes), named, `${notes} are the notes of the release the line names`);
