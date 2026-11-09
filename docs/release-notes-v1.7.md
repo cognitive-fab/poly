@@ -1,6 +1,6 @@
 # poly v1.7.0 · Release notes (poly guide, poly rules, and a before and after)
 
-Not tagged. This document is the draft for the owner's approval; the tag waits for the release run.
+Tagged v1.7.0 on 2026-11-08, after the release run on the AMD box.
 
 ## What v1.7.0 is
 
@@ -62,7 +62,16 @@ The idea came from Bend's landing page (bend-lang.com), which makes the same cas
 
 ## The test runs on v1.7.0
 
-To be filled in from the release run on the AMD box, at `f0dad748`: the main group, then the serial after group, each run whatever the other gave.
+The release run is the first on the AMD box, as the owner ruled after v1.6.0. Both groups ran through the suite's commands on Node 24.12.0 at `f0dad748`, each whatever the other gave, with `C:\Users\jjdub\poly-box-tools\box-test.sh`. Every failure is the box's setup; each failed file passes where that setup is met.
+
+- **The main group:** 4,616 tests, 4,597 pass, 4 fail, 11 skipped, 4 to-do (`M4c` and its siblings, waiting on E1).
+  - The two tests of `test/m3-freeze-eol.test.mjs` clone the experiments submodule again in a fresh tree. On the box its source is a local folder, and git refuses a file transport by default. The runner now allows it for its own processes. Run again on the box at `899ab885`, the file passes.
+  - S116 of `test/m3-environment.test.mjs` holds that the machine is the one the M3 freeze was taken on, Claude Code 2.1.287. The box has 2.1.19. On the laptop, which has 2.1.287, it passes.
+  - DB10.8 of `test/demo-baseline-toolchain.test.mjs` found a temporary folder of the smoke test still present under the parallel load, as on earlier box runs. Run again on the box, the file passes.
+- **The serial after group:** 207 tests, 204 pass, 2 fail, 1 skipped, in 5,200 s, with 3 real demo admissions.
+  - The skip is PG12, pii-guard's real adapter: edgepii is not installed on the box.
+  - `test/after/account-independence.test.mjs` and `test/after/m3-isolation.test.mjs` run the claude CLI, and fail with the box's 2.1.19 for the reason S116 does. On the laptop, with `m3-environment`, the three files pass, 11 of 11.
+- **After the run.** The commits after `f0dad748` change the README's status line, test 8 of refund-twice and these notes. On the box at `899ab885`, `m3-freeze-eol`, `demo-baseline-toolchain`, `demo-baseline`, refund-twice, the guide and the README files pass, 104 of 104.
 
 ## Known limits
 
@@ -71,6 +80,7 @@ The limits of v1.6.0 hold (`docs/release-notes-v1.6.md`). New:
 - **`poly rules` stops nothing.** It shows a removed rule only where its page is committed and checked. Signed rules are the v2.0 answer.
 - **`poly rules` reads `.poly` sources only.** Embedded `.ts` modules are not read in this version.
 - **`poly rules --check` calls a rule `changed` when only its line moved.** An entry includes its line, so a rule shifted by an edit above it is listed as changed.
+- **The box lacks two things the suite uses.** Claude Code 2.1.287, the version the M3 freeze pins, and edgepii. Three files and PG12 need the laptop for now.
 - **The refund-twice before measures nothing.** It was written by hand; the demo baseline's kept runs are still to be made.
 
 ## Conclusion
