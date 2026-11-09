@@ -2,23 +2,27 @@
 // paragraph "`poly rules` as built", before any code. Light: no model call, no network, short child processes only.
 // The fixtures are written to temporary folders by the tests themselves, so each test shows the source it reads.
 //
+// Brought in line with Amendment 1 of the paragraph (b6f348f2): a listing exits 0; REFUSED is exit 2 with the result
+// `{ v: 1, rules: [], diagnostics }`; text holds no comment and loses only the indentation common to its lines; the
+// signature file is `policies/<policySlug(scope)>.sig.json` under the project or beside a lone file; one rule is
+// `up to date: 1 rule`; a hand edit's line is printed only when no rule differs; `--json` prints the result as JSON.
+//
 // Readings chosen where the paragraph leaves a detail open:
-// - A listing that succeeds exits 0, in both formats. The paragraph gives exit 0 only for `--check` when equal.
-// - REFUSED is exit 2 (PT12.3); "with its diagnostics" is read as the parser's code (PL0001 for the broken source) in
-//   what the command prints, and in the registry's result; "lists nothing" is read as no `# Rules` page on standard output and no rule in the result.
+// - "With its diagnostics" is read as the parser's code (PL0001 for the broken source) in what the command prints and
+//   in the result's `diagnostics`; "lists nothing" is no `# Rules` page on standard output and `rules: []`.
 // - "Runs no check stage after parsing" is shown with a module that parses but would not type check: its rules are
 //   listed, exit 0. "Verifies no signature" is shown with a signature file whose record carries no valid signature.
 // - An entry holds exactly the fields the paragraph lists: a machine or configuration rule has no `mitigates`,
 //   `implements` or `signature` key; a policy item has `signature` always and `mitigates` / `implements` only when
 //   written. `line` is counted from 1, in the source as written.
-// - `mitigates` and `implements` "as written in the source" are lists of the tag strings in source order, which is not
-//   the order `poly fmt` prints (it sorts them, PT8.6); `text` is what `poly fmt` prints, so its tags are sorted.
-// - "Each with its leading indentation removed" is read line by line: every line of `text` has no leading space. A
-//   rule's text is its own lines only; the fixtures put no comment next to a rule (see the report on comments).
+// - `mitigates` and `implements` are lists of the tag strings in source order, which is not the order `poly fmt`
+//   prints (it sorts them, PT8.6); `text` is what `poly fmt` prints, so its tags are sorted.
+// - A rule's `line` is the line of its keyword, not of a comment before it. Its `text` is the lines `poly fmt` prints
+//   for it with any comment before or after it taken off; the fixtures hold one of each.
 // - A configuration property `invariant n: e` has kind `invariant`; a configuration's owner is its name.
 // - A policy item's `module` is the module that declares the policy; its owner's `name` is the policy's name (not the
-//   scope), and `scope` the scope string. The signature file is found under the project's `policies/` folder by the
-//   scope's name; a scope with no file is `signature: null`, shown as `not signed`.
+//   scope), and `scope` the scope string. A scope with no signature file is `signature: null`, shown as `not signed`;
+//   a file named after the scope's raw name, where the slug differs, is not its file.
 // - A lone file's `file` is its base name, whatever the working directory and however the path is given.
 // - "Rendered from the JSON alone" is read as: a project file with no rule has no `## <file>` section.
 // - "Ordered by id" is code-unit order (Array.prototype.sort). The `--check` lines are one list ordered by id, not
@@ -26,10 +30,10 @@
 //   changed) nor the order of their lines in the source.
 // - The signature clause is exactly one of `, signed by <by> (sequence <sequence>)` and `, not signed` for a policy
 //   item, and neither for any other rule (the layout line as clarified in 9dd84d61).
-// - A file that differs only outside the rules is an edit of the generated line. Under `--check` it gives exit 1, the
-//   line `changed: the file is not what poly rules prints`, and no `<added|removed|changed> <id>` line; its JSON result
-//   is `upToDate: false` with three empty lists. The JSON lists' order is not asserted, only their content.
-// - `up to date: <n> rules` is the whole text, after its trailing newline is taken off.
+// - The hand edit of the fixtures is an edit of the generated line; "its one line" is the whole text. The order of the `--check` result's lists is not
+//   asserted, only their content.
+// - `up to date: <n> rules` (or `1 rule`) is the whole text, after its trailing newline is taken off.
+// - `--json` with `--check` is served (only `--format json` with `--check` is a usage error).
 // - Over MCP the input declares `target` and `check` and requires neither; other optional properties are allowed.
 //   The registry is called with absolute paths, so no reading of a relative path is needed.
 // - "Writes nothing" is a snapshot of the project folder and the folder of the checked file, before and after every
@@ -91,6 +95,7 @@ const SHOP = [
   "    status' = Done",
   '  }',
   '',
+  '  // At most three items.',
   '  invariant items-bounded: items <= 3',
   '',
   '  step property paid-after-placed: (action == Pay && post.status == Paid) implies pre.status == Placed',
@@ -101,7 +106,7 @@ const SHOP = [
   '',
   '  compose invariant no-child: parent.status == Draft implies parent.items <= 3',
   '',
-  '  never no-charge-in-draft: emit charge while status == Draft',
+  '  never no-charge-in-draft: emit charge while status == Draft  // a draft pays nothing',
   '',
   '  liveness settles: status == Placed leads to status == Paid',
   '    under fair { Pay }',
@@ -126,7 +131,8 @@ const SHOP = [
 ].join('\n');
 
 // The policy module: each item kind of poly.risk (PT34.3), a var (not an item), and tags written out of sorted order so
-// that "as written" and `poly fmt`'s sorted print differ. Scope "orders" has a signature file; scope "audit" has none.
+// that "as written" and `poly fmt`'s sorted print differ. Scope "orders" has a signature file; scope "audit trail" (slug audit_trail,
+// Amendment 1) has none. Comments sit before and after rules, and no rule's text holds one.
 const POLICY = [
   'module shop_policy',
   '',
@@ -146,12 +152,13 @@ const POLICY = [
   '    end idle, placed',
   '  }',
   '  obligation count-small "The count stays small." invariant { count <= 2 }',
+  '  // Kept for the auditors.',
   '  recalled keep-receipts "Receipts are kept for a year." implements "iso:A.5.33"',
   '  never no-charge-draft "No charge while the order is a draft." mitigates "mit:7.3": allow when effect.kind == "orders.charge" && machine("shop.Order").status == Draft',
   '}',
   '',
   'policy audit {',
-  '  scope "audit"',
+  '  scope "audit trail"',
   '  recalled log-all "Every decision is logged."',
   '}',
   '',
@@ -167,7 +174,7 @@ const MANIFEST = JSON.stringify({ poly: '1', name: 'shop', modules: ['src/shop.p
 const SIGNATURE = JSON.stringify({ v: 2, sequence: 7, record: { by: 'owner-1', subject: 'not a real subject', sig: 'AAAA' } }, null, 2) + '\n';
 
 const SIG_OWNER = { kind: 'policy', name: 'guard', scope: 'orders' };
-const AUDIT_OWNER = { kind: 'policy', name: 'audit', scope: 'audit' };
+const AUDIT_OWNER = { kind: 'policy', name: 'audit', scope: 'audit trail' };
 const ORDER = { kind: 'machine', name: 'Order' };
 const PAIR = { kind: 'configuration', name: 'pair' };
 const SIGNED = { by: 'owner-1', sequence: 7 };
@@ -182,9 +189,9 @@ function lineOf(source, head) {
 // The expected entries, in the JSON's order: by file (shop.policy.poly before src/shop.poly), then line.
 const POLICY_RULES = [
   { id: 'guard.no-irreversible-paid', name: 'no-irreversible-paid', kind: 'policy-rule', owner: SIG_OWNER, head: 'obligation no-irreversible-paid', mitigates: ['mit:7.3', 'mit:2.2'], implements: ['nist:MANAGE-2.4'], signature: SIGNED,
-    text: ['obligation no-irreversible-paid "No irreversible effect once paid." mitigates "mit:2.2", "mit:7.3" implements "nist:MANAGE-2.4" rule {', 'when machine("shop.Order").status == Paid', 'require effect.class != "irreversible" else deny', 'on unknown deny', '}'] },
+    text: ['obligation no-irreversible-paid "No irreversible effect once paid." mitigates "mit:2.2", "mit:7.3" implements "nist:MANAGE-2.4" rule {', '  when machine("shop.Order").status == Paid', '  require effect.class != "irreversible" else deny', '  on unknown deny', '}'] },
   { id: 'guard.charge-after-place', name: 'charge-after-place', kind: 'policy-machine', owner: SIG_OWNER, head: 'obligation charge-after-place', signature: SIGNED,
-    text: ['obligation charge-after-place "A charge comes after a placement." machine {', 'states idle, placed', 'initial idle', 'from idle when effect.kind == "orders.place" -> placed', 'deny in idle when effect.kind == "orders.charge" reason "no-place"', 'end idle, placed', '}'] },
+    text: ['obligation charge-after-place "A charge comes after a placement." machine {', '  states idle, placed', '  initial idle', '  from idle when effect.kind == "orders.place" -> placed', '  deny in idle when effect.kind == "orders.charge" reason "no-place"', '  end idle, placed', '}'] },
   { id: 'guard.count-small', name: 'count-small', kind: 'policy-invariant', owner: SIG_OWNER, head: 'obligation count-small', signature: SIGNED,
     text: ['obligation count-small "The count stays small." invariant { count <= 2 }'] },
   { id: 'guard.keep-receipts', name: 'keep-receipts', kind: 'policy-recalled', owner: SIG_OWNER, head: 'recalled keep-receipts', implements: ['iso:A.5.33'], signature: SIGNED,
@@ -202,7 +209,7 @@ const MACHINE_RULES = [
   { id: 'shop.Order.charge-once', name: 'charge-once', kind: 'path', owner: ORDER, text: ['path property charge-once: count("orders.charge") <= 1'] },
   { id: 'shop.Order.no-child', name: 'no-child', kind: 'compose', owner: ORDER, text: ['compose invariant no-child: parent.status == Draft implies parent.items <= 3'] },
   { id: 'shop.Order.no-charge-in-draft', name: 'no-charge-in-draft', kind: 'never', owner: ORDER, text: ['never no-charge-in-draft: emit charge while status == Draft'] },
-  { id: 'shop.Order.settles', name: 'settles', kind: 'liveness', owner: ORDER, text: ['liveness settles: status == Placed leads to status == Paid', 'under fair { Pay }'] },
+  { id: 'shop.Order.settles', name: 'settles', kind: 'liveness', owner: ORDER, text: ['liveness settles: status == Placed leads to status == Paid', '  under fair { Pay }'] },
   { id: 'shop.pair.not-both-done', name: 'not-both-done', kind: 'invariant', owner: PAIR, text: ['invariant not-both-done: !(a.status == Done && b.status == Done)'] },
   { id: 'shop.pair.a-placed', name: 'a-placed', kind: 'liveness', owner: PAIR, text: ['liveness a-placed: eventually a.status == Placed'] },
 ].map(({ text, ...e }) => ({ ...e, module: 'shop', file: 'src/shop.poly', line: lineOf(SHOP, text[0]), text: text.join('\n') }));
@@ -402,10 +409,20 @@ test('S589, PT14: a file or project that does not parse is REFUSED, exit 2, with
       assert.ok(!r.out.includes('# Rules'), `${what}: no page is printed`);
       assert.ok(!r.out.includes('"rules"') || JSON.parse(r.out).rules?.length === 0, `${what}: no rule is listed`);
     }
+    // Amendment 1: the result is { v: 1, rules: [], diagnostics: [ … ] }, over the registry and with --json.
+    const shape = (result, what) => {
+      assert.deepEqual(Object.keys(result).sort(), ['diagnostics', 'rules', 'v'], `${what}: the result's keys`);
+      assert.equal(result.v, 1, `${what}: v is 1`);
+      assert.deepEqual(result.rules, [], `${what}: rules is empty`);
+      assert.ok(Array.isArray(result.diagnostics) && result.diagnostics.length > 0, `${what}: diagnostics are listed`);
+      assert.match(JSON.stringify(result.diagnostics), /\bPL0001\b/, `${what}: the parser's diagnostic is among them`);
+    };
     const o = await rulesCommand().run({ target: proj });
     assert.equal(o.exit, 2, 'the registry gives exit 2');
-    assert.equal((o.result.rules ?? []).length, 0, 'the result lists no rule');
-    assert.match(JSON.stringify(o.result) + o.text, /\bPL0001\b/, 'the result carries the diagnostics');
+    shape(o.result, 'the registry');
+    const j = poly(['rules', proj, '--json'], tmpdir());
+    assert.equal(j.status, 2, '--json: exit 2');
+    shape(JSON.parse(j.out), '--json');
   } finally { rmSync(dir, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
 
@@ -435,7 +452,7 @@ test('S589, PT14: what is not a rule: guards, requires, terminal clauses, check 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('S589, PT14: each entry\'s text is the lines poly fmt prints for the rule, without their indentation', () => {
+test('S589, PT14: each entry\'s text is the lines poly fmt prints for the rule, less their common indentation and any comment', () => {
   const dir = project();
   try {
     const r = poly(['rules', dir, '--format', 'json'], tmpdir());
@@ -444,15 +461,36 @@ test('S589, PT14: each entry\'s text is the lines poly fmt prints for the rule, 
     for (const f of ['src/shop.poly', 'shop.policy.poly']) {
       const fmt = poly(['fmt', join(dir, ...f.split('/'))], tmpdir());
       assert.equal(fmt.status, 0, `poly fmt ${f}; stderr: ${fmt.err}`);
-      printed[f] = fmt.out.split('\n').map((l) => l.trimStart());
+      // The fixtures hold `//` only in comments, so a line's comment is all from `//` on.
+      printed[f] = fmt.out.split('\n').map((l) => l.replace(/\s*\/\/.*$/, ''));
     }
+    const dedent = (lines) => {
+      const n = Math.min(...lines.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
+      return lines.map((l) => l.slice(n));
+    };
     for (const e of JSON.parse(r.out).rules) {
       const lines = e.text.split('\n');
-      for (const l of lines) assert.equal(l, l.trimStart(), `${e.id}: no line has leading indentation`);
+      assert.ok(!e.text.includes('//'), `${e.id}: the text holds no comment`);
+      assert.equal(lines[0], lines[0].trimStart(), `${e.id}: the first line starts at column 0`);
       const all = printed[e.file];
-      const at = all.findIndex((_, i) => lines.every((l, k) => all[i + k] === l));
-      assert.ok(at >= 0, `${e.id}: its text is a run of lines poly fmt prints for ${e.file}`);
+      const at = all.findIndex((_, i) => i + lines.length <= all.length && dedent(all.slice(i, i + lines.length)).every((l, k) => l === lines[k]));
+      assert.ok(at >= 0, `${e.id}: its text is a run of lines poly fmt prints for ${e.file}, less their common indentation`);
     }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S589, PT14: a multi-line rule keeps its inner indentation, and a rule next to a comment has none in its text', () => {
+  const dir = project();
+  try {
+    const r = poly(['rules', dir, '--format', 'json'], tmpdir());
+    assert.equal(r.status, 0, `exit 0; stderr: ${r.err}`);
+    const byId = Object.fromEntries(JSON.parse(r.out).rules.map((e) => [e.id, e]));
+    assert.equal(byId['shop.Order.settles'].text, 'liveness settles: status == Placed leads to status == Paid\n  under fair { Pay }');
+    assert.equal(byId['guard.charge-after-place'].text.split('\n')[1], '  states idle, placed');
+    assert.equal(byId['shop.Order.items-bounded'].text, 'invariant items-bounded: items <= 3', 'the comment before it is not in its text');
+    assert.equal(byId['shop.Order.items-bounded'].line, lineOf(SHOP, 'invariant items-bounded'), 'its line is the rule\'s, not the comment\'s');
+    assert.equal(byId['shop.Order.no-charge-in-draft'].text, 'never no-charge-in-draft: emit charge while status == Draft', 'the comment after it is not in its text');
+    assert.equal(byId['guard.keep-receipts'].text, 'recalled keep-receipts "Receipts are kept for a year." implements "iso:A.5.33"', 'the comment before it is not in its text');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -470,21 +508,41 @@ test('S589, PT14: a policy item keeps its tags as written in the source, which p
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('S589, PT14: a policy item\'s signature is what policies/<scope>.sig.json states, or null with no such file', () => {
+test('S589, PT14: a policy item\'s signature is what policies/<slug>.sig.json states, or null with no such file', () => {
   const dir = project();
   const unsigned = project({ 'policies/orders.sig.json': undefined });
+  // Amendment 1: the file is named by policySlug, so scope "audit trail" is policies/audit_trail.sig.json, and a file
+  // named after the raw scope is not it.
+  const slugged = project({ 'policies/audit_trail.sig.json': JSON.stringify({ v: 2, sequence: 3, record: { by: 'owner-2', sig: 'BBBB' } }) + '\n' });
+  const raw = project({ 'policies/audit trail.sig.json': JSON.stringify({ v: 2, sequence: 4, record: { by: 'owner-3', sig: 'CCCC' } }) + '\n' });
   try {
     rmSync(join(unsigned, 'policies'), { recursive: true, force: true });
     const r = poly(['rules', dir, '--format', 'json'], tmpdir());
     assert.equal(r.status, 0, `exit 0; stderr: ${r.err}`);
     const byId = Object.fromEntries(JSON.parse(r.out).rules.map((e) => [e.id, e]));
     assert.deepEqual(byId['guard.count-small'].signature, { by: 'owner-1', sequence: 7 }, 'record.by and sequence, the signature not verified');
-    assert.equal(byId['audit.log-all'].signature, null, 'scope audit has no signature file');
+    assert.equal(byId['audit.log-all'].signature, null, 'scope audit trail has no signature file');
     for (const id of IDS.filter((i) => i.startsWith('shop.'))) assert.ok(!('signature' in byId[id]), `${id}: a machine or configuration rule has no signature`);
     const u = poly(['rules', unsigned, '--format', 'json'], tmpdir());
     assert.equal(u.status, 0, `exit 0; stderr: ${u.err}`);
     for (const e of JSON.parse(u.out).rules.filter((x) => x.owner.kind === 'policy')) assert.equal(e.signature, null, `${e.id}: no signature file, null`);
-  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(unsigned, { recursive: true, force: true }); }
+    const s = poly(['rules', slugged, '--format', 'json'], tmpdir());
+    assert.equal(s.status, 0, `exit 0; stderr: ${s.err}`);
+    assert.deepEqual(JSON.parse(s.out).rules.find((e) => e.id === 'audit.log-all').signature, { by: 'owner-2', sequence: 3 }, 'policies/audit_trail.sig.json is the file of scope "audit trail"');
+    const w = poly(['rules', raw, '--format', 'json'], tmpdir());
+    assert.equal(w.status, 0, `exit 0; stderr: ${w.err}`);
+    assert.equal(JSON.parse(w.out).rules.find((e) => e.id === 'audit.log-all').signature, null, 'policies/audit trail.sig.json is not the slug\'s file');
+  } finally { for (const d of [dir, unsigned, slugged, raw]) rmSync(d, { recursive: true, force: true }); }
+});
+
+test('S589, PT14: a lone file\'s signature file is policies/<slug>.sig.json beside it', () => {
+  const dir = tmp('lone-signed');
+  try {
+    write(dir, { 'shop.policy.poly': POLICY, 'policies/orders.sig.json': SIGNATURE });
+    const r = poly(['rules', 'shop.policy.poly', '--format', 'json'], dir);
+    assert.equal(r.status, 0, `exit 0; stderr: ${r.err}`);
+    assert.deepEqual(JSON.parse(r.out), { v: 1, rules: POLICY_RULES });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── The JSON and the Markdown ───────────────────────────────────────────────────────────────────────────────────────
@@ -561,10 +619,15 @@ test('S589, PT14: --check of an out-of-date copy exits 1 and names each rule add
     .replace('  invariant items-bounded: items <= 3', '  invariant items-bounded: items <= 2') });
   const out = tmp('copy');
   try {
-    write(out, { 'RULES.md': page(RULES) });
-    const r = poly(['rules', dir, '--check', join(out, 'RULES.md')], tmpdir());
-    assert.equal(r.status, 1, `exit 1; stderr: ${r.err}`);
-    assert.deepEqual(verdictLines(r.out), ['removed shop.Order.charge-once', 'changed shop.Order.items-bounded', 'added shop.Order.z-new']);
+    // Amendment 1: when rules differ, the rule lines are printed and not the hand-edit line, even where the copy was
+    // also edited by hand.
+    write(out, { 'RULES.md': page(RULES), 'BOTH.md': page(RULES).replace('Do not edit it by hand', 'Edit it by hand') });
+    for (const f of ['RULES.md', 'BOTH.md']) {
+      const r = poly(['rules', dir, '--check', join(out, f)], tmpdir());
+      assert.equal(r.status, 1, `${f}: exit 1; stderr: ${r.err}`);
+      assert.deepEqual(verdictLines(r.out), ['removed shop.Order.charge-once', 'changed shop.Order.items-bounded', 'added shop.Order.z-new'], f);
+      assert.ok(!r.out.split(/\r?\n/).includes(HAND_EDIT), `${f}: the hand-edit line is not printed when rules differ`);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
 });
 
@@ -575,8 +638,37 @@ test('S589, PT14: --check of a copy edited by hand outside any rule exits 1 with
     write(out, { 'RULES.md': page(RULES).replace('Do not edit it by hand', 'Edit it by hand') });
     const r = poly(['rules', dir, '--check', join(out, 'RULES.md')], tmpdir());
     assert.equal(r.status, 1, `exit 1; stderr: ${r.err}`);
-    assert.ok(r.out.split(/\r?\n/).includes(HAND_EDIT), `the text has the line ${HAND_EDIT}; it was: ${r.out}`);
+    // Amendment 1: "its one line" is the whole text.
+    assert.equal(r.out.replace(/\r?\n$/, ''), HAND_EDIT);
     assert.deepEqual(verdictLines(r.out), [], 'no rule is named added, removed or changed');
+  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
+});
+
+test('S589, PT14: --check of an up-to-date copy of one rule says up to date: 1 rule', () => {
+  const dir = tmp('one');
+  try {
+    write(dir, { 'loose.poly': 'module loose\n\nmachine M {\n  state {\n    x : 0..1 = 0\n  }\n\n  invariant names-nothing: nosuch == 3\n}\n' });
+    write(dir, { 'RULES.md': page([{ id: 'loose.M.names-nothing', name: 'names-nothing', kind: 'invariant', module: 'loose', owner: { kind: 'machine', name: 'M' }, file: 'loose.poly', line: 8, text: 'invariant names-nothing: nosuch == 3' }]) });
+    const r = poly(['rules', 'loose.poly', '--check', 'RULES.md'], dir);
+    assert.equal(r.status, 0, `exit 0; stdout: ${r.out} stderr: ${r.err}`);
+    assert.equal(r.out.replace(/\r?\n$/, ''), 'up to date: 1 rule');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('S589, PT14: the command line\'s --json prints the result as JSON, the listing\'s or the --check result', () => {
+  const dir = project();
+  const out = tmp('copy');
+  try {
+    write(out, { 'RULES.md': page(RULES), 'HAND.md': page(RULES).replace('Do not edit it by hand', 'Edit it by hand') });
+    const list = poly(['rules', dir, '--json'], tmpdir());
+    assert.equal(list.status, 0, `exit 0; stderr: ${list.err}`);
+    assert.deepEqual(JSON.parse(list.out), { v: 1, rules: RULES });
+    const equal = poly(['rules', dir, '--check', join(out, 'RULES.md'), '--json'], tmpdir());
+    assert.equal(equal.status, 0, `exit 0; stderr: ${equal.err}`);
+    assert.deepEqual(JSON.parse(equal.out), { upToDate: true, added: [], removed: [], changed: [] });
+    const hand = poly(['rules', dir, '--check', join(out, 'HAND.md'), '--json'], tmpdir());
+    assert.equal(hand.status, 1, `exit 1; stderr: ${hand.err}`);
+    assert.deepEqual(JSON.parse(hand.out), { upToDate: false, added: [], removed: [], changed: [] });
   } finally { rmSync(dir, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
 });
 
