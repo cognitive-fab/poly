@@ -1792,7 +1792,7 @@ No command writes these lines into a file (S588).
 - **What a rule is.** In a machine: each `invariant`, `step`, `reject`, `path` and `compose` property, each `never … emit` statement, and each liveness property (`eventually P`, `P leads to Q`). In a configuration: each of its properties and liveness properties. In a policy: each item, of kind `rule` (an `obligation … rule`), `machine`, `invariant`, `recalled` or `never`, the kinds of `poly.risk` (PT34.3). Guards (`require … else reject`), `terminal` clauses, goals (PS13.10), check domains and effect declarations are not rules here.
 - **Each rule's entry.** `id`: `<module>.<machine or configuration>.<name>`, or `<policy>.<item>` for a policy item. `name`. `kind`: `invariant`, `step`, `reject`, `path`, `compose`, `never`, `liveness`, or for a policy item `policy-rule`, `policy-machine`, `policy-invariant`, `policy-recalled` or `policy-never`. `module`. `owner`: `{ "kind": "machine" | "configuration" | "policy", "name" }`, with `"scope"` for a policy. `file`: the path from the project's directory (or the file's name for a lone file), with `/` as separator. `line`: where the rule starts. `text`: the lines `poly fmt` prints for the rule, each with its leading indentation removed, joined with `\n`. For a policy item, `mitigates` and `implements` as written in the source (PT8.6), when it has them; and `signature`: `{ "by", "sequence" }` as the scope's `policies/<scope>.sig.json` states them (its `record.by` and its `sequence`), or `null` when the project has no such file. The index reports what the signature file says. Admission alone verifies it (PT12.5).
 - **The JSON** (`--format json`, and the MCP result): `{ "v": 1, "rules": [ … ] }`, the rules ordered by `file`, then `line`, then `id`, and nothing in it depends on the clock, the host or the working directory beyond the paths relative to the project. Two runs over the same sources print the same bytes.
-- **The Markdown** (the default, `--format md`) is rendered from the JSON alone. Its layout, where `<…>` is a value of the JSON, `[…]` is present only when the rule has it, and lines are separated by `\n`:
+- **The Markdown** (the default, `--format md`) is rendered from the JSON alone. Its layout, where `<…>` is a value of the JSON, `[…]` is present only when the rule has it, `a | b` is exactly one of the two, and lines are separated by `\n`:
 
   ````
   # Rules
@@ -1803,7 +1803,7 @@ No command writes these lines into a file (S588).
 
   ### <id>
 
-  <kind>, line <line>[, mitigates <tags joined by ", ">][, implements <tags joined by ", ">][, signed by <by> (sequence <sequence>)][, not signed]
+  <kind>, line <line>[, mitigates <tags joined by ", ">][, implements <tags joined by ", ">][, signed by <by> (sequence <sequence>) | , not signed]
 
   ```poly
   <text>
