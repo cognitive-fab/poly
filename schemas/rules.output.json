@@ -1,0 +1,73 @@
+{
+  "type": "object",
+  "properties": {
+    "v": {
+      "type": "integer"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "schema": {
+            "type": "string",
+            "description": "poly.diagnostic/1"
+          },
+          "code": {
+            "type": "string",
+            "description": "PLxxxx"
+          },
+          "name": {
+            "type": "string",
+            "description": "the code's name"
+          },
+          "severity": {
+            "type": "string",
+            "description": "error, finding, warning or note"
+          },
+          "message": {
+            "type": "string",
+            "description": "the diagnostic in words"
+          },
+          "at": {
+            "type": "object",
+            "description": "where: module, machine, node, line, col"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ]
+      }
+    },
+    "upToDate": {
+      "type": "boolean"
+    },
+    "added": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": []
+}

@@ -33,6 +33,8 @@ Only `CLEAN` is done. Never report a task finished on any other verdict.
 - **Configurations** put several machines together and check how they relate over time.
 - **Policies** live in `*.policy.poly` files and govern effects at run time, through the gate. A policy a person signed is the person's: never edit it to make a check pass. If a policy refuses what you need, say so and let the owner decide.
 
+`poly rules` lists every rule of the project on one page. Where the project commits that page as `RULES.md`, `poly rules --check RULES.md` says which rules a change added, removed or changed.
+
 ## What never to do
 
 - Never accept a finding, approve an escalation or admit a program on a person's behalf. Those need a person's key, and the tools do not offer them to you.

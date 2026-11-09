@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "string",
+      "description": "a .poly file or a project directory (default: the working directory)"
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "md",
+        "json"
+      ],
+      "description": "the listing's form (default: md)"
+    },
+    "check": {
+      "type": "string",
+      "description": "a committed copy of the Markdown page to compare"
+    }
+  },
+  "required": []
+}
