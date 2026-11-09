@@ -5,6 +5,8 @@ description: Write, check and fix poly programs (.poly files and embedded TypeSc
 
 # Writing and checking poly
 
+Before anything else, run `poly guide` (over MCP, call the tool `poly_guide`) and read the guide it prints: the loop, the verdicts, where the rules live and what never to do (PT14, S588). This skill repeats the parts a Claude Code session uses most.
+
 poly is a language for the stateful core of a program: machines with finite state, actions, handlers, effects, properties, configurations, workflows and policies. A program is admitted only when `poly check` reports it `CLEAN`.
 
 ## The loop

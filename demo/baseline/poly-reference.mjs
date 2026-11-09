@@ -29,6 +29,8 @@ const HOST_PARAGRAPH = `**What poly does not express.** A poly program is the st
  */
 export const REFERENCE_EDITS = {
   'README.md': [
+    // S588: the README's before and after is a worked refund issued twice, the task's own case; the arm does not get it.
+    { cut: ['## Before and after', '## Using poly with a coding agent'] },
     { cut: ['## A second look: the double charge', '## A third look: machines that talk'] },
     { replace: ['Handlers are pure functions of the pre-state:', `${HOST_PARAGRAPH}Handlers are pure functions of the pre-state:`] },
   ],

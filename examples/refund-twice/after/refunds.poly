@@ -1,0 +1,57 @@
+// expected: CLEAN
+// The after of the refund-twice example (S588, docs/examples/refund-twice.md): the desk in poly, guarded. The rule is
+// written once, `never no-reissue`, and the request pays only when no refund of the order is issued, pending or unknown;
+// otherwise it answers that the refund is already on its way. Cut down from the concierge's Desk (DF19) to the refund.
+module refunds
+
+enum Refund { None, Pending, Issued, Unknown }
+enum Reply { Silent, Already }
+
+// One Desk is one order of one customer.
+machine Desk {
+  state {
+    refund : Refund = None
+    reply  : Reply  = Silent
+  }
+
+  action Ask(amount: 0..500)
+  action Refunded()
+  action RefundFailed()
+  action RefundUnknown()
+
+  on Ask {
+    if refund == None {
+      refund' = Pending
+      reply' = Silent
+      emit refund(amount)
+    } else {
+      reply' = Already
+    }
+  }
+  on Refunded {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = Issued
+  }
+  on RefundFailed {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = None
+  }
+  on RefundUnknown {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = Unknown
+  }
+
+  // The rule: no refund is asked for while one is issued, pending or of unknown outcome.
+  never no-reissue: emit refund while refund != None
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    ok -> Refunded()
+    failed -> RefundFailed()
+    exhausted -> RefundUnknown()
+  }
+}

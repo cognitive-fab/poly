@@ -455,6 +455,17 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    // PT14, S588: the guide for a coding agent, the file shipped beside dist/, byte for byte. It reads no project.
+    name: 'guide', mcp: 'poly_guide', lsp: false,
+    summary: 'Prints the guide for a coding agent (GUIDE.md): what poly is, the loop, the verdicts, where the rules live, what never to do and what to run before committing (PT14, S588). Reads no project and writes nothing.',
+    input: obj({}),
+    output: obj({ text: str('the guide, as GUIDE.md holds it') }, ['text']),
+    async run() {
+      const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'GUIDE.md'), 'utf8');
+      return { exit: EXIT_CODES.CLEAN, result: { text }, text };
+    },
+  },
+  {
     name: 'install', mcp: null, lsp: false,
     summary: 'Prints a host\'s entries for a project from its adapter\'s template (adapters/<host>/install.json): the commands the host launches. It names no host itself (S167).',
     input: obj({ host: str('the adapter\'s directory under adapters/'), project: str('the project directory (default: the working directory)') }, ['host']),

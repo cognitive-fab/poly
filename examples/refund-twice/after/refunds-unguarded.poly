@@ -1,0 +1,52 @@
+// expected: FINDING PL3002 PL4002
+// The same mistake as the before, in poly (S588, docs/examples/refund-twice.md): the request pays every time, without
+// consulting the refund already asked for. poly check finds the second payment as PL3002 on no-reissue, with the path that
+// pays twice, and as PL4002: the second request leaves the state as it was and pays again. Only on Ask differs from refunds.poly.
+module refunds
+
+enum Refund { None, Pending, Issued, Unknown }
+enum Reply { Silent, Already }
+
+// One Desk is one order of one customer.
+machine Desk {
+  state {
+    refund : Refund = None
+    reply  : Reply  = Silent
+  }
+
+  action Ask(amount: 0..500)
+  action Refunded()
+  action RefundFailed()
+  action RefundUnknown()
+
+  on Ask {
+    refund' = Pending
+    emit refund(amount)
+  }
+  on Refunded {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = Issued
+  }
+  on RefundFailed {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = None
+  }
+  on RefundUnknown {
+    require refund == Pending else reject "no-refund-pending"
+    refund' = Unknown
+  }
+
+  // The rule: no refund is asked for while one is issued, pending or of unknown outcome.
+  never no-reissue: emit refund while refund != None
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    ok -> Refunded()
+    failed -> RefundFailed()
+    exhausted -> RefundUnknown()
+  }
+}

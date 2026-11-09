@@ -1,0 +1,9 @@
+{
+  "name": "refund-twice-before",
+  "private": true,
+  "type": "module",
+  "description": "The before of the refund-twice example (S588): a refund desk in TypeScript whose own tests pass and which pays one order twice.",
+  "scripts": {
+    "test": "node --test refunds.test.ts"
+  }
+}

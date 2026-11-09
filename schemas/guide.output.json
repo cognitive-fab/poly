@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "the guide, as GUIDE.md holds it"
+    }
+  },
+  "required": [
+    "text"
+  ]
+}

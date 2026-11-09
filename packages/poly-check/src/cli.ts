@@ -27,6 +27,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
        poly lsp      (the language server over stdio, on both surfaces)
        poly new "<description>" --into <file.poly>   (drafts with the headless provider under your login; never admitted)
+       poly guide    (prints the guide for a coding agent, GUIDE.md)
        poly install --host <adapter> [--project <dir>]   (prints a host's entries from adapters/<adapter>/install.json)
        poly run --mcp [--project <dir>]   (the workflow tools over stdio, on poly-runtime, from poly.json's run field)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
@@ -260,6 +261,8 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     if (!args.includes('--mcp')) throw new UsageError('run needs --mcp: it serves the workflow tools over stdio (S174)');
     return { name: 'run', input: { mcp: true, project: option(args, '--project') ?? undefined } };
   }
+  // PT14, S588: poly guide takes no argument and no option; anything after it is a usage error.
+  if (cmd === 'guide') return args.length === 1 ? { name: 'guide', input: {} } : null;
   if (cmd === 'install' && positional.length === 1) {
     const host = option(args, '--host');
     if (!host) throw new UsageError('install needs --host <adapter>');
