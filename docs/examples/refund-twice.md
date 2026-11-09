@@ -10,7 +10,7 @@ The before is that program in TypeScript. Its own tests pass, so it would merge.
 
 The before was written by hand to show the mistake. It is not taken from an agent's run, and the example measures nothing: the demo baseline (`demo/baseline`) is where poly and TypeScript are compared on one prompt.
 
-No file of the example reaches the network. Stripe is a stand-in in memory.
+Nothing in the example reaches the network. The before's Stripe is a stand-in in memory. The after names Stripe's address as its effect's declared target, and `poly check` runs nothing: it reads the program and explores it.
 
 ## Files
 
@@ -58,23 +58,23 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 - **Actions.** `Ask(amount: 0..500)`, the customer's request; `Refunded()`, `RefundFailed()` and `RefundUnknown()`, the refund's completions.
 - **The rule, written once.** `never no-reissue: emit refund while refund != None`.
 - **The effect.** `effect refund(amount: 0..500)` of kind `payments.refund`, `labels { egress:external }`, the target `https://api.stripe.com/v1/refunds`, `class irreversible`, `idempotent header "Idempotency-Key" window 24h`, with `ok -> Refunded()`, `failed -> RefundFailed()` and `exhausted -> RefundUnknown()`.
-- **`refunds.poly`, guarded.** `on Ask`: if `refund == None`, then `refund' = Pending` and `emit refund(amount)`; otherwise `reply' = Already`, and nothing is paid. `on Refunded`: `refund' = Issued`; `on RefundFailed`: `refund' = None`; `on RefundUnknown`: `refund' = Unknown`; each requires `refund == Pending` and rejects otherwise. `poly check` reports `CLEAN`, exit 0, and prints its checked instance (PT12.3a).
+- **`refunds.poly`, guarded.** `on Ask`: if `refund == None`, then `refund' = Pending`, `reply' = Silent` and `emit refund(amount)`; otherwise `reply' = Already`, and nothing is paid. (`reply` is the answer to the latest request, so a request that pays sets it back to `Silent`.) `on Refunded`: `refund' = Issued`; `on RefundFailed`: `refund' = None`; `on RefundUnknown`: `refund' = Unknown`; each requires `refund == Pending` and rejects otherwise. `poly check` reports `CLEAN`, exit 0, and prints its checked instance (PT12.3a).
 - **`refunds-unguarded.poly`, the same mistake as the before.** The same module, except that `on Ask` has no guard: it sets `refund' = Pending` and emits the refund every time, without consulting `refund`. `poly check` reports `FINDINGS`, exit 1, with:
   - `PL3002` on `no-reissue`, whose witness is a path of `Ask` steps of which at least two emit `payments.refund`: the second request pays again;
   - `PL4002` on `Ask`: the second request leaves the state unchanged and emits, so it can pay without limit (S33).
 
-  Each file differs from the other only in `on Ask` and in the comment at its top.
+  The two files are the same text except for their leading comment block (every line before the first line that is neither blank nor a `//` comment) and the `on Ask` handler (from its `on Ask` line to the brace that closes it). No other comment differs, including one just above `on Ask`.
 
 ## The example's README
 
-`examples/refund-twice/README.md`, in the house style, ending with a glossary.
+`examples/refund-twice/README.md`, in the house style. Its second-level headings include, as every example README's (`test/ex-readmes.test.mjs`), `## What it shows`, `## Run it`, `## What is checked`, `## What is not checked`, `## Conclusion` and `## Glossary`, with `## Glossary` last and `## Conclusion` before it. The contents below go under them: the scene, the before, the bug and the after under *What it shows*; how to run both under *Run it*; what the check covers under *What is checked*; what it does not, and the note that the before was written by hand, under *What is not checked*.
 
 - It starts with the scene of the *Purpose* above.
 - **The before.** The lines of `handleRefund` that call Stripe and then write the ledger, and the output of `npm test` passing.
 - **The bug.** What `twice.test.ts` shows: two calls, two keys, one order.
 - **The after.** The `never` line; `on Ask` of both files side by side; the `PL3002` diagnostic and its witness exactly as `poly check refunds-unguarded.poly` prints them today, in a fenced block that starts with the line naming `PL3002`; the `verdict:` line of `poly check refunds.poly`.
 - It says the before was written by hand, and points to `demo/baseline` for the measured comparison.
-- It says what the check covers: `no-reissue` holds for every order of requests and completions, over the domains declared, and the instance is printed. It says what it does not cover: a refund made outside the program (in Stripe's dashboard) is not seen, and Stripe's behaviour is the stand-in's.
+- It says what the check covers: `no-reissue` holds for every order of requests and completions, with the amount explored at its cut (the instance `poly check` prints names it, `Ask.amount ∈ 0..500 at {0}`, S458), and the instance is printed. It says what it does not cover: a refund made outside the program (in Stripe's dashboard) is not seen, and Stripe's behaviour is the stand-in's.
 - It says how to run both: `npm test` and `node --test twice.test.ts` in `before/`; `poly check` on each file of `after/`.
 
 ## poly's README
@@ -91,9 +91,9 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 3. No file of `before/` imports a module that reaches the network (`node:http`, `node:https`, `node:net`, `node:dgram`, `node:tls`) or calls `fetch`.
 4. `poly check after/refunds.poly` reports `CLEAN` with exit 0 and prints its instance.
 5. `poly check after/refunds-unguarded.poly` reports `FINDINGS` with exit 1, with `PL3002` naming `no-reissue` and a witness of `Ask` steps in which at least two emit `payments.refund`, and with `PL4002` on `Ask`.
-6. The two `.poly` files differ only in `on Ask` and in their leading comments.
-7. The example's README holds the `PL3002` block exactly as `poly check refunds-unguarded.poly` prints it, run from `after/` (compared, so that a change to the check's output fails the test), holds the `never` line, and says the before was written by hand.
-8. poly's README holds the four lines of `poly guide` as built word for word, under `## Using poly with a coding agent`; has `## Before and after` before `## Hello, world`, linking to the example; and no longer holds "No code yet".
+6. The two `.poly` files are the same text except for their leading comment blocks and their `on Ask` handlers, as *The after* defines them.
+7. The example's README holds the `PL3002` block exactly as `poly check refunds-unguarded.poly` prints it, run from `after/` (compared, so that a change to the check's output fails the test); the `verdict:` line exactly as `poly check refunds.poly` prints it, run from `after/`; the `never` line; the `on Ask` handler of each file as it is in the file; the words "written by hand"; a link to `demo/baseline`; the instance `Ask.amount ∈ 0..500 at {0}`; and the words "dashboard" and "stand-in" under `## What is not checked`. Its headings are those of *The example's README*.
+8. poly's README holds the four lines of `poly guide` as built word for word, under `## Using poly with a coding agent`; has `## Before and after` before `## Hello, world`, linking to the example; no longer holds "No code yet"; and its status line names v1.6.0 and links to `docs/release-notes-v1.6.md`.
 9. `examples/README.md` lists `refund-twice/`.
 10. House style in every new text file: no em dash, and none of the words the house style bans.
 
@@ -102,6 +102,10 @@ Module `refunds`, one machine `Desk`, the concierge's Desk (`examples/concierge`
 - **RB1** The before's own tests pass and its twice test shows the double payment (tests 1 to 3).
 - **RB2** The after's guarded desk is `CLEAN` and its unguarded desk is `FINDINGS` with `PL3002` on `no-reissue` (tests 4 to 6).
 - **RB3** The READMEs show the two and say what is and is not claimed (tests 7 to 10).
+
+## Amendment 1 (2026-11-08, before any code)
+
+From the separate writer's report and the review of this page. The README's headings are those every example README has, which `test/ex-readmes.test.mjs` holds; the coverage sentence names the amount's cut; the files' sameness is defined to the character; `reply` is set back to `Silent` by a request that pays; nothing in the example reaches the network, the after only naming Stripe's address as a declared target; test 7 holds every content the README section asks for, and test 8 the status line. The guide's command needs its published schemas (`schemas/guide.input.json` and `schemas/guide.output.json`, made by `scripts/publish-schemas.mjs`) and a place in PT14's registry paragraph, as every registry command has.
 
 ## Conclusion
 
