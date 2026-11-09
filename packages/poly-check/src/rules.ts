@@ -131,7 +131,12 @@ function entriesOf(page: string): Map<string, string> {
   let file = '';
   let id: string | null = null;
   let body: string[] = [];
-  const close = () => { if (id !== null) out.set(id, `${file}\n${body.join('\n').trimEnd()}`); id = null; body = []; };
+  // Polywatch: poly rules runs no check, so two policies of one name in two files give one id; their entries are kept
+  // together, in page order, so a change to either is still a change of that id.
+  const close = () => {
+    if (id !== null) { const e = `${file}\n${body.join('\n').trimEnd()}`; out.set(id, out.has(id) ? `${out.get(id)}\n\n${e}` : e); }
+    id = null; body = [];
+  };
   for (const line of page.split('\n')) {
     if (line.startsWith('## ')) { close(); file = line.slice(3); continue; }
     if (line.startsWith('### ')) { close(); id = line.slice(4); continue; }
