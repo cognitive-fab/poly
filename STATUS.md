@@ -2,26 +2,21 @@
 
 The one record of work in flight (W7, `docs/history/decisions-process.md`). Read it first when resuming. Each open branch has its state and next action; each open item has a destination. Updated last in any multi-step operation (W10).
 
-*Updated 2026-11-09, after the v1.7.0 release.*
+*Updated 2026-11-09, after the old branches were settled.*
 
 ## Released
 
-- **`main` = `origin/main`**, with **v1.7.0** tagged and published on GitHub (2026-11-09): `poly guide`, `poly rules`, the refund-twice example, finding 38. Notes: `docs/release-notes-v1.7.md`.
-- The release run was the first on the AMD box (W4). Three M3 files and pii-guard's PG12 need the laptop until the box has Claude Code 2.1.287 and edgepii (see *Open items*).
+- **v1.7.0** is tagged and published on GitHub (2026-11-09): `poly guide`, `poly rules`, the refund-twice example, finding 38. Notes: `docs/release-notes-v1.7.md`.
+- **`main` is ahead of `origin/main`, not pushed:** S590 (the working practice, `CLAUDE.md` W1 to W11, this file), the old branches' plan, the merges of `proposal-extensions` and `v1.4`, the licence files, and the VS Code grammar's two S586 keywords. The affected files pass on the AMD box (156 tests, 153 pass, 3 skipped: the vendored engines' source checkouts are not on the box). Waiting for the owner's word to push.
+- The v1.7.0 release run was the first on the AMD box (W4). Three M3 files and pii-guard's PG12 need the laptop until the box has Claude Code 2.1.287 and edgepii (see *Open items*).
 
 ## Branches not merged into `main`
 
-Each is kept, none is in progress in this checkout, and each next step is the owner's.
-
 | Branch | Last commit | What it holds | Next |
 |---|---|---|---|
-| `agentlab` | `7219ba50`, 2026-11-04 | The Agent Lab demo: P1 and P3 done, P2 step 1 (the gateway adapter's design note). Not deployed. | The owner's call on pushing it and on P2, P4 and P5. |
-| `proposal-extensions` | `4633e41b`, 2026-10-31 | Proposal 28 for v2.0, its questions decided (S584). | Waits for v2.0. |
-| `v1.4` | `1989ef7f`, 2026-11-05 | The VS Code adapter (PT14) and `docs/proposals/v2.0-ideas.md`, never merged. | The owner's call: merge `v2.0-ideas.md` into `main` so v2.0 ideas live there, or keep the branch. |
-| `public-ready` | `4edc6e72`, 2026-10-21 | LICENSE and the v1.3.1 skill trimmed for publication. | Superseded in part by later work; the owner's call to merge what remains or drop the branch. |
-| `archlens` | `f5327687`, 2026-10-27 | An older line from before v1.4. | The owner's call to drop it; nothing on it is known to be needed. |
-| `aside-measure-verdicts` | `f388efc0`, 2026-10-10 | A measurement of verdicts on the examples. | The owner's call to drop it. |
-| `cleanup` | `9a9c539b`, 2026-10-24 | A test path fix (S115). | Check whether `main` has the same fix, then drop. |
+| `agentlab` | `7219ba50`, 2026-11-04 | The Agent Lab demo: P1 and P3 done, P2 step 1 (the gateway adapter's design note). Not deployed. Pushed to GitHub on 2026-11-09 for safekeeping. | Waiting for the owner: P2, P4 and P5. |
+
+The other old branches were settled on 2026-11-09 (`docs/history/decisions-process.md`). Each tip is kept as a tag `archive/<branch>`, pushed to GitHub. `aside-measure-verdicts`, `cleanup`, `archlens` and `public-ready` were deleted; `proposal-extensions` and `v1.4` are merged into `main`, and their branches can be deleted with `git branch -d`.
 
 ## Open items
 
@@ -38,4 +33,4 @@ Each is kept, none is in progress in this checkout, and each next step is the ow
 
 ## Conclusion
 
-Everything shipped is on `main` and in v1.7.0. Nothing is in progress in this checkout. Seven older branches wait for the owner's call, and every open item above has a destination or names the owner's decision it waits for.
+Everything shipped is in v1.7.0, and `main` holds the working practice, the merged branches and the licence, waiting to be pushed. Only `agentlab` remains unmerged, and every open item above has a destination or names what it waits for from the owner.
