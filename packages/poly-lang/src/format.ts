@@ -31,6 +31,19 @@ export function format(module: A.Module, trivia?: Trivia): string {
   return new Printer(trivia).module(module);
 }
 
+/** A rule of a machine, a configuration or a policy (S589, PT14). */
+export type RuleNode = A.Property | A.Liveness | A.NeverEmit | A.PolicyItem;
+
+/**
+ * S589, PT14: the lines poly fmt prints for one rule, with no comment (the printer is given no trivia) and with the
+ * indentation common to its lines removed, joined with a newline.
+ */
+export function ruleText(rule: RuleNode): string {
+  const lines = new Printer().rule(rule).map((l) => l.replace(/[ \t]+$/, ''));
+  const common = Math.min(...lines.filter((l) => l.trim()).map((l) => /^ */.exec(l)![0].length));
+  return lines.map((l) => l.slice(Math.min(common, /^ */.exec(l)![0].length))).join('\n');
+}
+
 class Printer {
   private out: string[] = [];
   constructor(private readonly trivia?: Trivia) {}
@@ -181,51 +194,65 @@ class Printer {
     }
   }
 
+  /** S589: the lines of one rule, a machine's or a configuration's item or a policy's, as the module prints them. */
+  rule(it: RuleNode): string[] {
+    if (it.kind === 'Property' || it.kind === 'Liveness' || it.kind === 'NeverEmit') return this.item(it);
+    const out = this.out;
+    this.out = [];
+    this.policyItem(it);
+    const lines = this.out;
+    this.out = out;
+    return lines;
+  }
+
   /** PT8.1: one canonical text per policy. */
   private policy(p: A.Policy): void {
+    const q = (s: string) => JSON.stringify(s);
+    this.emit(p, '', [`policy ${p.name} {`]);
+    this.out.push(`${INDENT}scope ${q(p.scope)}${p.requiresAttribution ? ' requires attribution' : ''}`);
+    for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
+    for (const it of p.items) this.policyItem(it);
+    this.out.push('}');
+  }
+
+  private policyItem(it: A.PolicyItem): void {
     const q = (s: string) => JSON.stringify(s);
     // PT8.6, S586: each list sorted by the string, repeats removed, mitigates before implements, on the item's first line.
     // An item with no tags gets no text, so its line is the one v1.5.1 wrote (RT15).
     const list = (ts: A.Tag[] | undefined) => [...new Set((ts ?? []).map((t) => t.tag))].sort().map(q).join(', ');
     const tags = (it: A.Tags) => `${it.mitigates?.length ? ` mitigates ${list(it.mitigates)}` : ''}${it.implements?.length ? ` implements ${list(it.implements)}` : ''}`;
-    this.emit(p, '', [`policy ${p.name} {`]);
-    this.out.push(`${INDENT}scope ${q(p.scope)}${p.requiresAttribution ? ' requires attribution' : ''}`);
-    for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
-    for (const it of p.items) {
-      switch (it.kind) {
-        // B13: each line of a body carries the comments of the expression on it, before it and at its end.
-        case 'RuleObligation': {
-          this.lead(it, INDENT);
-          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} rule {`);
-          if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
-          this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
-          if (it.onUnknown) this.emit(lineOf(it, 'onUnknown'), INDENT + INDENT, [`on unknown ${it.onUnknown}`]);
-          this.out.push(`${INDENT}}${this.trail(it)}`);
-          break;
-        }
-        case 'MachineObligation': {
-          this.lead(it, INDENT);
-          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} machine {`);
-          this.emit(lineOf(it, 'states'), INDENT + INDENT, [`states ${it.states.join(', ')}`]);
-          this.emit(lineOf(it, 'initial'), INDENT + INDENT, [`initial ${it.initial}`]);
-          for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
-          for (const g of it.guards) this.emit(g.when, INDENT + INDENT, [`deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`]);
-          this.emit(lineOf(it, 'end'), INDENT + INDENT, [`end ${it.end.join(', ')}`]);
-          this.out.push(`${INDENT}}${this.trail(it)}`);
-          break;
-        }
-        case 'InvariantObligation':
-          this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)}${tags(it)} invariant { ${this.expr(it.expr, 0)} }`]);
-          break;
-        case 'Recalled':
-          this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}${tags(it)}`]);
-          break;
-        case 'Never':
-          this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}${tags(it)}: allow when ${this.expr(it.when, 0)}`]);
-          break;
+    switch (it.kind) {
+      // B13: each line of a body carries the comments of the expression on it, before it and at its end.
+      case 'RuleObligation': {
+        this.lead(it, INDENT);
+        this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} rule {`);
+        if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
+        this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
+        if (it.onUnknown) this.emit(lineOf(it, 'onUnknown'), INDENT + INDENT, [`on unknown ${it.onUnknown}`]);
+        this.out.push(`${INDENT}}${this.trail(it)}`);
+        break;
       }
+      case 'MachineObligation': {
+        this.lead(it, INDENT);
+        this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)}${tags(it)} machine {`);
+        this.emit(lineOf(it, 'states'), INDENT + INDENT, [`states ${it.states.join(', ')}`]);
+        this.emit(lineOf(it, 'initial'), INDENT + INDENT, [`initial ${it.initial}`]);
+        for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
+        for (const g of it.guards) this.emit(g.when, INDENT + INDENT, [`deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`]);
+        this.emit(lineOf(it, 'end'), INDENT + INDENT, [`end ${it.end.join(', ')}`]);
+        this.out.push(`${INDENT}}${this.trail(it)}`);
+        break;
+      }
+      case 'InvariantObligation':
+        this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)}${tags(it)} invariant { ${this.expr(it.expr, 0)} }`]);
+        break;
+      case 'Recalled':
+        this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}${tags(it)}`]);
+        break;
+      case 'Never':
+        this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}${tags(it)}: allow when ${this.expr(it.when, 0)}`]);
+        break;
     }
-    this.out.push('}');
   }
 
   private ctor(c: A.Ctor): string {

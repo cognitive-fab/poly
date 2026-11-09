@@ -28,6 +28,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly lsp      (the language server over stdio, on both surfaces)
        poly new "<description>" --into <file.poly>   (drafts with the headless provider under your login; never admitted)
        poly guide    (prints the guide for a coding agent, GUIDE.md)
+       poly rules [<file.poly> | <project dir>] [--format md | json] [--check <file>]   (every rule of a program, from its sources)
        poly install --host <adapter> [--project <dir>]   (prints a host's entries from adapters/<adapter>/install.json)
        poly run --mcp [--project <dir>]   (the workflow tools over stdio, on poly-runtime, from poly.json's run field)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
@@ -263,6 +264,13 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   }
   // PT14, S588: poly guide takes no argument and no option; anything after it is a usage error.
   if (cmd === 'guide') return args.length === 1 ? { name: 'guide', input: {} } : null;
+  // PT14, S589: poly rules [target] [--format md|json] [--check <file>].
+  if (cmd === 'rules' && positional.length <= 2) {
+    for (const k of ['--format', '--check']) if (option(args, k) === null) throw new UsageError(`${k} needs a value`);
+    const format = option(args, '--format') ?? undefined;
+    const check = option(args, '--check') ?? undefined;
+    return { name: 'rules', input: { ...(a ? { target: a } : {}), ...(format ? { format } : {}), ...(check ? { check } : {}) } };
+  }
   if (cmd === 'install' && positional.length === 1) {
     const host = option(args, '--host');
     if (!host) throw new UsageError('install needs --host <adapter>');
@@ -276,7 +284,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1, args.indexOf('--config') + 1, args.indexOf('--goals') + 1, args.indexOf('--defects') + 1, args.indexOf('--only') + 1, args.indexOf('--cache') + 1].filter((i) => i > 0));
   // PT29.1: options that repeat or are new with export traces, whose values are no positional argument.
-  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output', '--polyness', '--polyness-pin', '--step', '--transcripts', '--runs', '--refine', '--reason', '--event', '--correct', '--decision', '--model', '--verdicts', '--previous', '--format'].includes(x)) valued.add(i + 1); });
+  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output', '--polyness', '--polyness-pin', '--step', '--transcripts', '--runs', '--refine', '--reason', '--event', '--correct', '--decision', '--model', '--verdicts', '--previous', '--format', '--check'].includes(x)) valued.add(i + 1); });
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

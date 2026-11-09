@@ -19,6 +19,7 @@ import { CheckUsageError, readGoals } from './goals.js';
 import { checkDefects, readDefects } from './defects.js';
 import { exportWitness, lookupWitness } from './witness.js';
 import { applyFixById } from './fix.js';
+import { rulesCheck, rulesIndex, rulesJson, rulesMarkdown } from './rules.js';
 import { admit, admitWitness, personKey, witnessKey } from './admit.js';
 import { setProduction, signKeyrings, writeAnchor } from './keyrings.js';
 import { signPolicy } from './policy-sign.js';
@@ -463,6 +464,26 @@ export const COMMANDS: Command[] = [
     async run() {
       const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'GUIDE.md'), 'utf8');
       return { exit: EXIT_CODES.CLEAN, result: { text }, text };
+    },
+  },
+  {
+    // PT14, S589: every rule of a program, from its sources alone; with check, a committed copy compared.
+    name: 'rules', mcp: 'poly_rules', lsp: false,
+    summary: 'Lists every rule of a file or project from its sources (properties, never statements, liveness, policy items), as Markdown or JSON; with check, says whether a committed copy is out of date and which rules were added, removed or changed (PT14, S589). Writes nothing.',
+    input: obj({ target: str('a .poly file or a project directory (default: the working directory)'), format: { type: 'string', enum: ['md', 'json'], description: 'the listing\'s form (default: md)' }, check: str('a committed copy of the Markdown page to compare') }),
+    output: obj({ v: { type: 'integer' }, rules: { type: 'array', items: { type: 'object' } }, diagnostics: { type: 'array', items: DIAGNOSTIC }, upToDate: { type: 'boolean' }, added: { type: 'array', items: { type: 'string' } }, removed: { type: 'array', items: { type: 'string' } }, changed: { type: 'array', items: { type: 'string' } } }),
+    async run(input) {
+      const format = opt(input, 'format') ?? 'md';
+      if (format !== 'md' && format !== 'json') throw new CommandUsageError(`rules --format is md or json, not ${format}`);
+      const check = opt(input, 'check');
+      if (check !== undefined && opt(input, 'format') === 'json') throw new CommandUsageError('rules --check compares the Markdown page, so it takes no --format json');
+      const { index, refused } = rulesIndex(opt(input, 'target') ?? process.cwd());
+      if (refused) return { exit: EXIT_CODES.REFUSED, result: index as unknown as Record<string, unknown>, text: (index.diagnostics ?? []).map((d) => `${String(d.code)} ${String(d.message)}\n`).join('') };
+      if (check !== undefined) {
+        const c = rulesCheck(index, check);
+        return { exit: c.result.upToDate ? EXIT_CODES.CLEAN : EXIT_CODES.FINDINGS, result: c.result as unknown as Record<string, unknown>, text: c.text };
+      }
+      return { exit: EXIT_CODES.CLEAN, result: index as unknown as Record<string, unknown>, text: format === 'json' ? rulesJson(index) : rulesMarkdown(index) };
     },
   },
   {
