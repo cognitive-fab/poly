@@ -103,7 +103,9 @@ function readCertificate(file: string, build: string, trust: Record<string, stri
  */
 function itemOf(reason: string | null | undefined, c: ReadCertificate): { item: string; unknown: boolean } | null {
   if (!reason) return null;
-  const tail = reason.slice(reason.lastIndexOf('::') + (reason.includes('::') ? 2 : 0));
+  // Finding 38: a reason with no `::` is read whole (it was cut to its last character).
+  const at = reason.lastIndexOf('::');
+  const tail = at < 0 ? reason : reason.slice(at + 2);
   let best: string | null = null;
   for (const id of c.obligations) if ((tail === id || tail.startsWith(`${id}:`)) && (!best || id.length > best.length)) best = id;
   if (!best) return null;
