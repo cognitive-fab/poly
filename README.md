@@ -14,7 +14,22 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: specification, draft v0.6 (after five reviews). No code yet.
+> Status: v1.6.0, released on 2026-11-07. What changed is in [the release notes](docs/release-notes-v1.6.md).
+
+## Before and after
+
+A customer asks for a refund, it is paid, and the customer writes again. A desk that keeps a ledger and does not read it before paying pays the order twice. [Refund twice](examples/refund-twice/README.md) shows that one mistake in TypeScript, where the desk's own tests pass, and in poly, where the rule `never no-reissue: emit refund while refund != None` is written once and `poly check` refuses the same mistake with the two steps that pay twice. The TypeScript was written by hand to show the mistake; it measures nothing.
+
+## Using poly with a coding agent
+
+`poly guide` prints a guide written for a coding agent: the loop, the verdicts, where the rules live and what never to do. Put these lines in a project's `AGENTS.md` or `CLAUDE.md`:
+
+- Run `poly guide` to learn poly before writing any.
+- Keep the rules that must always hold in poly: invariants, `never` statements and signed policies.
+- Run `poly check` before committing; only `CLEAN` is done.
+- Never edit a signed policy or accept a finding: those are the owner's.
+
+No command writes them for you. Over MCP the guide is the tool `poly_guide`.
 
 ## Hello, world
 
