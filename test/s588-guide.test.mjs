@@ -150,6 +150,12 @@ test('S588, PT14: the registry serves guide as the MCP tool poly_guide, which ta
   assert.deepEqual(o.result, { text: readFileSync(GUIDE, 'utf8') });
 });
 
+// Amendment 1 of docs/examples/refund-twice.md: the guide's command has its published schemas, as every registry
+// command has (PF9.2). Their content is test/agent-registry.test.mjs's to compare; here only that both exist.
+test('S588, PF9.2: schemas/guide.input.json and schemas/guide.output.json are published', () => {
+  for (const f of ['guide.input.json', 'guide.output.json']) assert.ok(existsSync(join(ROOT, 'schemas', f)), `schemas/${f} exists (node scripts/publish-schemas.mjs)`);
+});
+
 test('S588, PT14: the guide holds the eight second-level headings, in order, each written exactly', () => {
   const found = sections(guideText()).map((s) => s.heading);
   let from = 0;

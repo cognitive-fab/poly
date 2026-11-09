@@ -15,17 +15,24 @@
 // - Test 5: the PL3002 block is the line naming PL3002 and the indented lines after it. Its witness steps are the lines
 //   indented under `witness (N steps):`; every step is `Ask`, and at least two carry `emits payments.refund`. PL4002 is
 //   on `Ask` when its line names `Ask`. Other codes are not ruled out: the page says "with", not "exactly".
-// - Test 6: the leading comment is every line before the first line that is neither blank nor a `//` comment. `on Ask`
-//   is its line through the brace that closes it. With both taken out the two files are equal, character for character
-//   (CRLF read as LF), and the two `on Ask` blocks differ. A comment just above `on Ask` is outside it, so it must be
-//   the same in both files.
-// - Test 7: `poly check refunds-unguarded.poly` is run from after/ as written. A fenced block of the README whose first
-//   line names PL3002 begins with the printed PL3002 block, line for line (CRLF read as LF). "Written by hand" is
-//   matched as those words.
-// - Test 8: the status line naming v1.6.0 and pointing to docs/release-notes-v1.6.md is checked with "No code yet".
-//   The link to the example is a Markdown link to examples/refund-twice/README.md inside ## Before and after.
+// - Test 6 (as Amendment 1 defines it): the leading comment block is every line before the first line that is neither
+//   blank nor a `//` comment; `on Ask` is its line through the brace that closes it. With both taken out the two files
+//   are equal, character for character (CRLF read as LF), and the two `on Ask` handlers differ. A comment just above
+//   `on Ask` is outside the handler, so it must be the same in both files.
+// - Test 7 (as Amendment 1 lists it): both checks are run from after/ as written. A fenced block of the README whose
+//   first line names PL3002 begins with the printed PL3002 block, line for line (CRLF read as LF). The `verdict:` line
+//   of `poly check refunds.poly` is held as one exact line of text. Each file's `on Ask` handler is held verbatim, every
+//   line with its indentation as in the file, the lines in order and consecutive. The link to `demo/baseline` is a
+//   Markdown link whose target contains `demo/baseline`. "Written by hand", the instance and the `never` line are
+//   matched anywhere in the README; "dashboard" and "stand-in" within `## What is not checked`. The headings are the
+//   six of *The example's README*, with `## Glossary` last and `## Conclusion` before it; other headings are allowed.
+// - Test 8: the status line naming v1.6.0 and linking docs/release-notes-v1.6.md is checked with "No code yet": the
+//   README holds `v1.6.0` and a Markdown link whose target is docs/release-notes-v1.6.md. The link to the example is a
+//   Markdown link to examples/refund-twice/README.md inside ## Before and after.
 // - Test 10: the new text files are every file under examples/refund-twice (no node_modules, no .poly folder); the
-//   page's eight files must exist. The README must also end with ## Glossary, as the page asks.
+//   page's eight files must exist.
+// - Amendment 1's `reply' = Silent` on a request that pays changes no assertion here: no test reads `reply`, and the
+//   guarded `on Ask` still differs from the unguarded one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -220,7 +227,7 @@ test('RB2, test 5: poly check after/refunds-unguarded.poly reports FINDINGS, exi
   assert.match(pl4002[0], /\bAsk\b/, 'PL4002 is on Ask');
 });
 
-test('RB2, test 6: the two .poly files differ only in on Ask and in their leading comments', () => {
+test('RB2, test 6: the two .poly files are the same text except for their leading comment blocks and their on Ask handlers', () => {
   const guarded = withoutAskAndLeadingComment(read(join(AFTER, 'refunds.poly')));
   const unguarded = withoutAskAndLeadingComment(read(join(AFTER, 'refunds-unguarded.poly')));
   assert.equal(unguarded.rest, guarded.rest, 'everything but on Ask and the leading comment is the same');
@@ -228,16 +235,48 @@ test('RB2, test 6: the two .poly files differ only in on Ask and in their leadin
   assert.ok(guarded.rest.includes(NEVER_LINE), 'the rule is written once, outside on Ask');
 });
 
-test('RB3, test 7: the example\'s README holds the PL3002 block as poly check prints it, the never line, and says the before was written by hand', () => {
+test('RB3, test 7: the example\'s README holds the PL3002 block and the verdict line as poly check prints them, the never line, both on Ask handlers, the claims, and the headings of every example README', () => {
   const readme = read(join(EX, 'README.md'));
+  const fenceRe = /^```[^\n]*\n([\s\S]*?)^```[^\n]*$/gm;
+
+  // The PL3002 diagnostic and its witness, as printed today from after/ (compared, so a change to the output fails here).
   const printed = blockOf(polyCheck('refunds-unguarded.poly').stdout, 'PL3002');
   assert.ok(printed, 'poly check refunds-unguarded.poly prints a PL3002 diagnostic');
-  const fences = [...readme.matchAll(/^```[^\n]*\n([\s\S]*?)^```[^\n]*$/gm)].map((m) => m[1].replace(/\n$/, '').split('\n'));
+  const fences = [...readme.matchAll(fenceRe)].map((m) => m[1].replace(/\n$/, '').split('\n'));
   const block = fences.find((f) => /\bPL3002\b/.test(f[0]));
   assert.ok(block, 'a fenced block of the README starts with the line naming PL3002');
   assert.deepEqual(block.slice(0, printed.length), printed, 'the README\'s block is the PL3002 block as printed today, from after/');
+
+  // The verdict line of the guarded desk, as printed today from after/.
+  const verdict = lf(polyCheck('refunds.poly').stdout).split('\n').find((l) => l.startsWith('verdict: '));
+  assert.ok(verdict, 'poly check refunds.poly prints a verdict line');
+  assert.ok(readme.split('\n').includes(verdict), `the README holds the verdict line exactly as printed: ${verdict}`);
+
+  // The never line, and each file's on Ask handler as it is in the file.
   assert.ok(readme.includes(NEVER_LINE), 'the README holds the never line');
+  for (const f of AFTER_FILES) {
+    const { ask } = withoutAskAndLeadingComment(read(join(AFTER, f)));
+    assert.ok(readme.includes(ask), `the README holds on Ask of ${f} as it is in the file`);
+  }
+
+  // What is and is not claimed (S458 for the amount's cut).
   assert.match(readme, /written by hand/i, 'the README says the before was written by hand');
+  assert.match(readme, /\]\([^)\s]*demo\/baseline[^)\s]*\)/, 'the README links to demo/baseline');
+  assert.ok(readme.includes('Ask.amount ∈ 0..500 at {0}'), 'the README names the instance with the amount\'s cut');
+  const lines = readme.split('\n');
+  const notChecked = lines.indexOf('## What is not checked');
+  assert.ok(notChecked >= 0, 'the README has ## What is not checked');
+  let end = notChecked + 1;
+  while (end < lines.length && !/^## /.test(lines[end])) end++;
+  const body = lines.slice(notChecked + 1, end).join('\n');
+  assert.match(body, /dashboard/, 'What is not checked names the dashboard');
+  assert.match(body, /stand-in/, 'What is not checked names the stand-in');
+
+  // The headings every example README has (test/ex-readmes.test.mjs), outside fenced code.
+  const headings = [...readme.replace(fenceRe, '').matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+  for (const h of ['What it shows', 'Run it', 'What is checked', 'What is not checked', 'Conclusion', 'Glossary']) assert.ok(headings.includes(h), `## ${h} in ${headings.join(', ')}`);
+  assert.equal(headings.at(-1), 'Glossary', '## Glossary is last');
+  assert.ok(headings.indexOf('Conclusion') < headings.indexOf('Glossary'), '## Conclusion comes before ## Glossary');
 });
 
 test('RB3, test 8: poly\'s README holds the four lines under ## Using poly with a coding agent, ## Before and after before ## Hello, world linking to the example, and no "No code yet"', () => {
@@ -260,8 +299,7 @@ test('RB3, test 8: poly\'s README holds the four lines under ## Using poly with 
   assert.ok(before.at < hello.at, '## Before and after comes before ## Hello, world');
   assert.match(before.body, /\]\((?:\.\/)?examples\/refund-twice\/README\.md\)/, 'it links to the example\'s README');
   assert.ok(!readme.includes('No code yet'), 'the README no longer says "No code yet"');
-  assert.ok(readme.includes('v1.6.0'), 'the status line names v1.6.0');
-  assert.ok(readme.includes('docs/release-notes-v1.6.md'), 'the status line points to the release notes');
+  assert.ok(lines.some((l) => l.includes('v1.6.0') && /\]\((?:\.\/)?docs\/release-notes-v1\.6\.md\)/.test(l)), 'a status line names v1.6.0 and links docs/release-notes-v1.6.md');
 });
 
 test('RB3, test 9: examples/README.md lists refund-twice/', () => {
@@ -278,6 +316,4 @@ test('RB3, test 10: house style in every new text file of the example: no em das
     assert.ok(!text.includes(EM_DASH), `${name}: no em dash`);
     assert.ok(!/\bhonest/i.test(text), `${name}: none of the banned words`);
   }
-  const headings = [...read(join(EX, 'README.md')).matchAll(/^## (.+)$/gm)].map((m) => m[1]);
-  assert.equal(headings.at(-1), 'Glossary', 'the README ends with a glossary');
 });
