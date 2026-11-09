@@ -121,15 +121,23 @@ export function rulesMarkdown(index: RulesIndex): string {
   return out.join('\n');
 }
 
-/** The rules of a page, by id, read back from its `### <id>` entries: the whole entry is what is compared. */
+/**
+ * The rules of a page, by id, read back from its `### <id>` entries. What is compared is the whole entry with the file
+ * whose `## <file>` section holds it, since a rule's `file` is part of its entry (polywatch: a rule moved to a renamed
+ * file was read as unchanged).
+ */
 function entriesOf(page: string): Map<string, string> {
   const out = new Map<string, string>();
-  const parts = page.split(/^### /m).slice(1);
-  for (const p of parts) {
-    const id = p.slice(0, p.indexOf('\n'));
-    // An entry ends where the next section starts; the file's own heading is not part of the rule.
-    out.set(id, p.split(/^## /m)[0].trimEnd());
+  let file = '';
+  let id: string | null = null;
+  let body: string[] = [];
+  const close = () => { if (id !== null) out.set(id, `${file}\n${body.join('\n').trimEnd()}`); id = null; body = []; };
+  for (const line of page.split('\n')) {
+    if (line.startsWith('## ')) { close(); file = line.slice(3); continue; }
+    if (line.startsWith('### ')) { close(); id = line.slice(4); continue; }
+    if (id !== null) body.push(line);
   }
+  close();
   return out;
 }
 
