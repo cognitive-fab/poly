@@ -31,10 +31,10 @@ Each is kept, none is in progress in this checkout, and each next step is the ow
 | Finding 33, the part left open: the hygiene file's waits are wall-clock, and `(c1)` to `(c3)` can fail under load. | `docs/examples/language-findings.md` | Left open by the owner on 2026-11-01; a margin on `quietMs` and `maxMs` would close it if the owner rules so. |
 | Finding 34: a budget-triggered `escalate-once` has no test, for lack of a fixture. | finding 34 | The owner's call: a fixture and a test in a later release, or discarded as covered by the rule's text. |
 | Finding 35, not built: a poisoned instance of a service machine; PT9.7's comparison of a non-service machine after an allow; a send verdict's `reads`. Questions: is a service machine that is also the emitter listed under `singletons`; may two instances of a service machine exist. | finding 35 | The owner's call: a ruling on the two questions first, then the tests under rule 7a. |
-| The Slack provider id in the concierge's kept journal. | `docs/history/decisions-risk.md` | Accepted for now (2026-11-07); reopened if a bot posts where a channel names a person. |
+| The Slack provider id in the concierge's kept journal. | `docs/history/decisions-risk.md` | Ruling: accepted for now (owner, 2026-11-07, `decisions-risk.md`); reopened if a bot posts where a channel names a person. |
 | `poly rules` reads `.poly` sources only; embedded `.ts` modules are not listed. `--check` calls a rule changed when only its line moved. | PT14, `poly rules` as built | A later release, if the owner asks. |
-| The AMD box lacks Claude Code 2.1.287 (it has 2.1.19) and edgepii. | `C:\Users\jjdub\poly-box-tools\README.md` | The owner installs them (`claude install 2.1.287`; edgepii's setup); until then the M3 files and PG12 run on the laptop. |
-| The demo baseline's kept runs (TypeScript and poly arms on one prompt) are not made. | `demo/baseline/README.md` | The owner runs them in the owner's own terminal. |
+| The AMD box lacks Claude Code 2.1.287 (it has 2.1.19) and edgepii. | `C:\Users\jjdub\poly-box-tools\README.md` | Waiting for the owner, an action: installing Claude Code 2.1.287 (`claude install 2.1.287`) and edgepii on the box. Until then the M3 files and PG12 run on the laptop. |
+| The demo baseline's kept runs (TypeScript and poly arms on one prompt) are not made. | `demo/baseline/README.md` | Waiting for the owner, an action: the kept runs, in the owner's own terminal (the README says how). |
 
 ## Conclusion
 

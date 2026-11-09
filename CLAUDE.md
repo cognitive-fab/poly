@@ -60,7 +60,7 @@ On Windows, a heredoc under Git Bash corrupts backslashes and backticks. Use the
 Each rule cites its ruling in `docs/history/decisions-process.md`. A rule the owner gives in conversation is written there and here before it is relied on.
 
 - **Rule 7a.** A change starts from its specification, committed alone; then tests by a separate writer who has read only the specification, failing first; then the code; then the owner's review. A departure is marked where it occurs.
-- **W1** The separate writer runs on the session's model: pass `model` explicitly, never leave it to the default, which is Haiku.
+- **W1** The separate writer runs on the session's model, never Haiku: pass `model` explicitly, never leave it to the default, which is Haiku.
 - **W2** The full suite runs only at the owner's word. Targeted test files need no ask.
 - **W3** Nothing heavy runs beside a test group: no build, no other test file, no fan-out of agents.
 - **W4** Full-suite and serial-group runs go on the AMD box, with `C:\Users\jjdub\poly-box-tools\box-test.sh` (its README says how).
@@ -68,6 +68,6 @@ Each rule cites its ruling in `docs/history/decisions-process.md`. A rule the ow
 - **W6** Processes on the AMD box are stopped by the owner, not by an agent.
 - **W7** `STATUS.md` is the one record of work in flight: open branches, their state and next action, and every open item with its destination. Read it first when resuming; keep it current.
 - **W8** Every rule of working practice is here, with its ruling in `docs/history/decisions-process.md`.
-- **W9** A finding or ruling that closes ends with a **Convergence** part: each requirement id met (with evidence) or a deviation (with who accepted it), and each open item given a destination: resolved, a ruling, a finding, a release, or discarded with a reason.
+- **W9** A finding or ruling that closes ends with a **Convergence** part: each requirement id met (with evidence) or a deviation (with who accepted it), and each open item given a destination: resolved, a ruling, a finding, a release, discarded with a reason, or waiting for the owner, naming the decision or the action.
 - **W10** Before a second agent works in this checkout, write in its request who owns which paths and what each must not do until when (by default: the writer owns its test files; the author writes no code and runs no build until the writer's commit lands). In a multi-step operation (merge, test, tag, push), record the decision first, keep what is replaced, and write `STATUS.md` last; after an interruption, compare what was written with what was decided.
 - **W11** Read every change to an existing test diff by diff before committing it. Name in the commit message, with its reason, any removed or loosened assertion, widened pattern, new skip or to-do, raised timeout or changed expected value. A change by the code's author to the separate writer's tests is a departure, and is marked.
