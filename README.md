@@ -14,7 +14,7 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: v1.6.0, released on 2026-11-07. What changed is in [the release notes](docs/release-notes-v1.6.md).
+> Status: v1.7.0, released on 2026-11-08. What changed is in [the release notes](docs/release-notes-v1.7.md).
 
 ## Before and after
 
