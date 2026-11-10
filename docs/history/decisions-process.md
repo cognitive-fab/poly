@@ -37,7 +37,7 @@ The owner asked what poly's working practice could learn from S.A.W. 3.2 ("SDD A
 Seven branches were not merged into `main`. Each was read against `main`, and the owner approved this plan:
 
 - **Archived first.** Each branch tip below is tagged `archive/<branch>` and the tags are pushed, so every commit stays reachable once its branch is gone.
-- **Dropped:** `aside-measure-verdicts` (all its changes are in `main`), `cleanup` (its one change is `a4d0200d`), and `archlens` (10 of its 12 distinct changes are in `main` as cherry-picks; the other two, the v1.1.0 architecture analysis and the S570 update, are superseded by `main`'s later architecture documents).
+- **Dropped:** `aside-measure-verdicts` (all its changes are in `main`), `cleanup` (its one distinct change, moving the plans and rulings to `docs/history`, is already in `main` as `a4d0200d`), and `archlens` (10 of its 12 distinct changes are in `main` as cherry-picks; the other two, the v1.1.0 architecture analysis and the S570 update, are superseded by `main`'s later architecture documents).
 - **Merged:** `proposal-extensions` (proposal 28 and S584, for v2.0) and `v1.4` (the VS Code adapter, its PT14 text and test, and `docs/proposals/v2.0-ideas.md`).
 - **Taken in part from `public-ready`:** LICENSE (Apache-2.0, as every `package.json` declares), NOTICE, SECURITY and CONTRIBUTING, the last brought up to date. Left out: its v1.3 README status, the v1.3.1 skill and its reference files (`poly guide` now does that work), and its frozen README for the demo baseline (`main` edits the baseline's reference instead, since ba69a88e). Then dropped.
 - **Kept and pushed:** `agentlab`, the Agent Lab demo, pushed to GitHub as a branch for safekeeping; it stays the owner's work in progress.
