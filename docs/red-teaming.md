@@ -41,7 +41,7 @@ The names are those of the OWASP Top 10 for Agentic Applications 2026. *Strong* 
 | ASI06 Memory & Context Poisoning | partial | A memory item keeps its source, and only a person's record verifies it. Taint and audience rules follow content to recipients (PL6831, PL6832). A source can be forgotten and erased. | poly does not judge whether stored content is true. The model's context window is outside. |
 | ASI07 Insecure Inter-Agent Communication | partial | A send between machines in different trust scopes is proposed to the gate. A channel's sender claims come only from a certified adapter, which verifies the webhook. A replayed provider token is refused. | Agent-to-agent protocols that do not pass through poly's sends or channels are not covered. |
 | ASI08 Cascading Failures | partial | Configurations check how machines relate over time: deadlock (PL3201), liveness (PL3301), `never` statements across machines. Retries are bounded, budgets cap cost, and an approved re-proposal is never escalated twice. | The check holds within its declared bounds; reaching a bound is INCONCLUSIVE (PL3901). An outside system is modelled only by the completions it is declared to return. |
-| ASI09 Human-Agent Trust Exploitation | partial | An approval is a person's signed record for one escalation; the agent cannot approve, accept a finding or admit for a person. The re-proposal an approval triggers is decided again on the state at approval (S401). | poly does not see what the person was shown or told. A person who approves a misleading request signs it. |
+| ASI09 Human-Agent Trust Exploitation | partial | An approval is a person's signed record for one escalation; the agent cannot approve, accept a finding or admit for a person. The re-proposal an approval triggers is decided again on the state at approval (S401): it is allowed or denied, and one that would escalate again is denied (PT9.7 rule 2). | poly does not see what the person was shown or told. A person who approves a misleading request signs it. |
 | ASI10 Rogue Agents | partial | The agent proposes and the gate decides: an effect never runs outside it. The journal is signed and replays. `poly report risks` shows what each rule refused and escalated. | poly does not detect behaviour that drifts while staying inside the policy. An agent that does only allowed things is not flagged. |
 
 ## What poly does not cover
@@ -49,7 +49,7 @@ The names are those of the OWASP Top 10 for Agentic Applications 2026. *Strong* 
 - **Attacks on the model itself.** Jailbreaks, harmful or biased content, data leakage in the model's text, and multimodal attacks are outside poly. A red team tests them with the manual's model and application techniques.
 - **Prompt injection, as detection.** poly does not detect or stop injection. It limits what an injected agent can make happen.
 - **Anything outside the declared domains.** The check explores the program within the domains it declares, at the values its instance prints. A value, a machine or an effect that is not declared is not checked.
-- **Code and effects outside the program.** A tool the agent calls directly, not declared as a poly effect, does not pass the gate.
+- **Code and effects outside the program.** A tool the agent calls directly, not declared as a poly effect, never reaches the gate: it bypasses poly entirely.
 - **Simulated attack worlds.** Running attacks against a program in a simulated environment is planned for v2, with polytrion.
 
 ## How to red team a poly program
