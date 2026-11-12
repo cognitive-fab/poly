@@ -204,6 +204,7 @@ Give each process its own `--root`. Two processes that meet the same new key bot
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Layers, the lowering map, the check pipeline, the certificate, the runtime and the gate, one ledger, the agent interface and architectural decisions (`PA`, `AD`) |
 | [`docs/04-semantics.md`](docs/04-semantics.md) | What a poly program means: states, steps, rejected steps, behaviours, the five kinds of property, fairness and liveness, composition, three-valued policies, lowering correctness, kernel assumptions and operator precedence (`PS`). The other documents defer to it. |
 | [`docs/03-technical-spec.md`](docs/03-technical-spec.md) | Grammar, types and domains, step semantics, invariants, effects, policies, the gate integration, diagnostics, commands, host API, ledger, layout, implementation plan and the first experiment (`PT`) |
+| [`docs/red-teaming.md`](docs/red-teaming.md) | poly and GenAI red teaming: where a red team looks in a poly program, the OWASP manual's eight phases and the OWASP Top 10 for Agentic Applications mapped to poly, what poly does not cover, and the steps with real commands |
 | [`docs/research/primitive-inventory.md`](docs/research/primitive-inventory.md) | The design-time and runtime primitives of every engine, read from source |
 | [`docs/reviews/review-2026-09-29-blunt.md`](docs/reviews/review-2026-09-29-blunt.md) | The v0.1 peer review |
 | [`docs/reviews/response-2026-09-29.md`](docs/reviews/response-2026-09-29.md) | The response to the review, item by item, and what changed in v0.2 |
